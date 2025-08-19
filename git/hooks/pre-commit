@@ -12,7 +12,7 @@ MARKDOWNLINT_OPTS="--disable=MD013"
 # Auto-fix behavior (set to true/false)
 AUTO_FIX_SHELL=true
 AUTO_FIX_MARKDOWN=true
-AUTO_FIX_SHELLCHECK=false  # More conservative due to potential complexity
+AUTO_FIX_SHELLCHECK=true  # More conservative due to potential complexity
 
 # Color output
 RED='\033[0;31m'
@@ -85,51 +85,82 @@ run_shellcheck() {
     local files=("$@")
     local exit_code=0
     local issues_found=false
+    local failed_files=()
+    local passed_files=()
+    local current_file_count=0
 
     log_info "Running shellcheck on ${#files[@]} shell script(s)..."
 
     for file in "${files[@]}"; do
-        echo -e "\n${BLUE}=== Checking $file ===${NC}"
+        ((current_file_count++))
+        echo -e "\n${BLUE}=== [$current_file_count/${#files[@]}] Checking $file ===${NC}"
 
         if [ "$AUTO_FIX_SHELLCHECK" = true ]; then
             # When auto-fix is enabled, run quietly first to check for issues
             if ! shellcheck "$file" >/dev/null 2>&1; then
                 issues_found=true
                 log_warning "Attempting to auto-fix shellcheck issues in $file..."
-                if shellcheck --format=diff "$file" | git apply; then
+                
+                # Try to auto-fix
+                local diff_output
+                diff_output=$(shellcheck --format=diff "$file" 2>/dev/null)
+                
+                if [[ -n "$diff_output" ]] && echo "$diff_output" | git apply 2>/dev/null; then
                     log_success "Auto-fixed shellcheck issues in $file"
                     # Re-stage the fixed file
                     git add "$file"
+                    passed_files+=("$file (auto-fixed)")
                 else
                     log_error "Could not auto-fix shellcheck issues in $file"
-                    # Show detailed output for manual review
-                    shellcheck "$file"
+                    failed_files+=("$file")
+                    
+                    # Store detailed output for later display
+                    echo -e "${RED}Issues in $file:${NC}"
+                    shellcheck "$file" | head -20  # Limit output to prevent overwhelming
+                    if [[ $(shellcheck "$file" | wc -l) -gt 20 ]]; then
+                        echo -e "${YELLOW}... (output truncated, run 'shellcheck $file' for full details)${NC}"
+                    fi
                     exit_code=1
                 fi
             else
                 log_success "$file passed shellcheck"
+                passed_files+=("$file")
             fi
         else
-            # When auto-fix is disabled, show full verbose output
-            if ! shellcheck "$file"; then
+            # When auto-fix is disabled, collect issues but don't show immediately
+            local shellcheck_output
+            if ! shellcheck_output=$(shellcheck "$file" 2>&1); then
                 issues_found=true
+                failed_files+=("$file")
                 exit_code=1
-                echo ""
-                log_warning "To auto-fix shellcheck issues in $file, run:"
-                echo -e "${GREEN}shellcheck --format=diff '$file' | git apply && git add '$file'${NC}"
+                
+                # Store output for summary
+                echo -e "${RED}Issues in $file:${NC}"
+                echo "$shellcheck_output" | head -15
+                if [[ $(echo "$shellcheck_output" | wc -l) -gt 15 ]]; then
+                    echo -e "${YELLOW}... (output truncated, run 'shellcheck $file' for full details)${NC}"
+                fi
                 echo ""
             else
                 log_success "$file passed shellcheck"
+                passed_files+=("$file")
             fi
         fi
     done
 
-    if [ "$issues_found" = true ] && [ "$AUTO_FIX_SHELLCHECK" = false ]; then
-        echo ""
-        log_error "Shellcheck found issues in one or more files."
-        log_info "Fix issues manually, or run the suggested commands above."
-        log_info "Alternatively, enable AUTO_FIX_SHELLCHECK=true in the pre-commit hook."
-        echo ""
+    # Show summary
+    echo -e "\n${BLUE}=== SHELLCHECK SUMMARY ===${NC}"
+    if [[ ${#passed_files[@]} -gt 0 ]]; then
+        log_success "${#passed_files[@]} files passed"
+    fi
+    if [[ ${#failed_files[@]} -gt 0 ]]; then
+        log_error "${#failed_files[@]} files failed: ${failed_files[*]}"
+        
+        if [ "$AUTO_FIX_SHELLCHECK" = false ]; then
+            echo ""
+            log_info "To auto-fix shellcheck issues, set AUTO_FIX_SHELLCHECK=true in the pre-commit hook."
+            echo ""
+        fi
     fi
 
     return $exit_code
@@ -142,30 +173,60 @@ run_shfmt() {
     local files=("$@")
     local exit_code=0
     local issues_found=false
+    local failed_files=()
+    local passed_files=()
+    local current_file_count=0
 
     log_info "Running shfmt on ${#files[@]} shell script(s)..."
 
     for file in "${files[@]}"; do
+        ((current_file_count++))
+        echo -e "${BLUE}=== [$current_file_count/${#files[@]}] Formatting $file ===${NC}"
+        
         # Check formatting without writing
-        if ! shfmt $SHFMT_OPTS "$file" >/dev/null; then
+        if ! shfmt $SHFMT_OPTS "$file" >/dev/null 2>&1; then
             issues_found=true
-            exit_code=1
 
             if [ "$AUTO_FIX_SHELL" = true ]; then
                 log_warning "Auto-fixing formatting in $file..."
-                if shfmt $SHFMT_WRITE_OPTS "$file"; then
+                if shfmt $SHFMT_WRITE_OPTS "$file" 2>/dev/null; then
                     log_success "Auto-fixed formatting in $file"
                     # Re-stage the formatted file
                     git add "$file"
+                    passed_files+=("$file (auto-fixed)")
                 else
                     log_error "Could not auto-fix formatting in $file"
+                    failed_files+=("$file")
+                    exit_code=1
                 fi
             else
                 log_error "Formatting issues found in $file"
-                log_info "Run: shfmt $SHFMT_WRITE_OPTS $file"
+                failed_files+=("$file")
+                exit_code=1
             fi
+        else
+            log_success "$file formatting OK"
+            passed_files+=("$file")
         fi
     done
+
+    # Show summary
+    echo -e "\n${BLUE}=== SHFMT SUMMARY ===${NC}"
+    if [[ ${#passed_files[@]} -gt 0 ]]; then
+        log_success "${#passed_files[@]} files passed formatting"
+    fi
+    if [[ ${#failed_files[@]} -gt 0 ]]; then
+        log_error "${#failed_files[@]} files failed formatting: ${failed_files[*]}"
+        
+        if [ "$AUTO_FIX_SHELL" = false ]; then
+            echo ""
+            log_info "To auto-fix formatting, set AUTO_FIX_SHELL=true or run:"
+            for file in "${failed_files[@]}"; do
+                echo -e "  ${GREEN}shfmt $SHFMT_WRITE_OPTS '$file'${NC}"
+            done
+            echo ""
+        fi
+    fi
 
     return $exit_code
 }
@@ -274,15 +335,32 @@ main() {
     run_terraform_fmt
 
     # Final status
+    echo -e "\n${BLUE}========================================${NC}"
+    echo -e "${BLUE}           FINAL SUMMARY               ${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    
     if [ $overall_exit_code -eq 0 ]; then
-        log_success "All pre-commit checks passed!"
+        log_success "✅ All pre-commit checks passed!"
+        echo -e "${GREEN}Ready to commit!${NC}"
     else
-        log_error "Pre-commit checks failed. Please fix issues before committing."
+        log_error "❌ Pre-commit checks failed"
+        echo -e "${RED}Please fix the issues listed above before committing.${NC}"
 
-        if [ "$AUTO_FIX_SHELL" = true ] || [ "$AUTO_FIX_MARKDOWN" = true ]; then
-            log_info "Some issues may have been auto-fixed. Review changes and commit again."
+        if [ "$AUTO_FIX_SHELL" = true ] || [ "$AUTO_FIX_MARKDOWN" = true ] || [ "$AUTO_FIX_SHELLCHECK" = true ]; then
+            echo ""
+            log_info "💡 Some issues may have been auto-fixed. Review changes and commit again."
         fi
+        
+        echo ""
+        echo -e "${YELLOW}Quick commands to fix common issues:${NC}"
+        echo -e "  ${GREEN}# Review what changed:${NC}"
+        echo -e "  git diff"
+        echo -e "  ${GREEN}# Check specific file:${NC}"  
+        echo -e "  shellcheck <filename>"
+        echo -e "  ${GREEN}# Add auto-fixed files:${NC}"
+        echo -e "  git add -u"
     fi
+    echo ""
 
     exit $overall_exit_code
 }
