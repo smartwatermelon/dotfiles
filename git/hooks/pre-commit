@@ -289,6 +289,7 @@ main() {
     fi
 
     local overall_exit_code=0
+    local all_failed_files=()
 
     # Get staged files by type
     local shell_files
@@ -314,11 +315,26 @@ main() {
         # Run shellcheck
         if ! run_shellcheck "${shell_files[@]}"; then
             overall_exit_code=1
+            # Collect failed files from shellcheck
+            for file in "${shell_files[@]}"; do
+                if ! shellcheck "$file" >/dev/null 2>&1; then
+                    all_failed_files+=("$file")
+                fi
+            done
         fi
 
         # Run shfmt
         if ! run_shfmt "${shell_files[@]}"; then
             overall_exit_code=1
+            # Collect failed files from shfmt (only add if not already in list)
+            for file in "${shell_files[@]}"; do
+                if ! shfmt $SHFMT_OPTS "$file" >/dev/null 2>&1; then
+                    # Check if file is already in failed list
+                    if [[ ! " ${all_failed_files[*]} " =~ " ${file} " ]]; then
+                        all_failed_files+=("$file")
+                    fi
+                fi
+            done
         fi
     fi
 
@@ -328,6 +344,12 @@ main() {
 
         if ! run_markdownlint "${markdown_files[@]}"; then
             overall_exit_code=1
+            # Collect failed files from markdownlint
+            for file in "${markdown_files[@]}"; do
+                if ! markdownlint $MARKDOWNLINT_OPTS "$file" >/dev/null 2>&1; then
+                    all_failed_files+=("$file")
+                fi
+            done
         fi
     fi
 
@@ -345,6 +367,13 @@ main() {
     else
         log_error "❌ Pre-commit checks failed"
         echo -e "${RED}Please fix the issues listed above before committing.${NC}"
+
+        # Show list of files that need to be fixed
+        if [ ${#all_failed_files[@]} -gt 0 ]; then
+            echo ""
+            echo -e "${YELLOW}Files that need to be changed:${NC}"
+            printf "${RED}  %s${NC}\n" "${all_failed_files[@]}"
+        fi
 
         if [ "$AUTO_FIX_SHELL" = true ] || [ "$AUTO_FIX_MARKDOWN" = true ] || [ "$AUTO_FIX_SHELLCHECK" = true ]; then
             echo ""
