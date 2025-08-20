@@ -85,25 +85,58 @@ validate_tools() {
 }
 
 # =========================================================
-# SHELLCHECK CONFIG HARDLINK
+# CONFIG HARDLINKS
 # =========================================================
-ensure_shellcheck_config() {
-    local global_config="$HOME/.config/shellcheck/.shellcheckrc"
+# =========================================================
+# CONFIGURATION HARDLINKS
+# =========================================================
+ensure_config_hardlinks() {
     local repo_root
     repo_root=$(git rev-parse --show-toplevel)
-    local repo_config="$repo_root/.shellcheckrc"
 
-    if [[ -f "$global_config" ]]; then
-        # Remove existing repo config (file or broken link)
-        rm -f "$repo_config"
-        # Create hardlink to global config
-        ln "$global_config" "$repo_config"
-        # Stage it if it's new to git
-        git add "$repo_config" 2>/dev/null || true
-    elif [[ ! -f "$repo_config" ]]; then
-        log_error "No shellcheck config found (neither global nor repo)"
-        return 1
+    # Define config mappings: global_path:repo_filename
+    local configs=(
+        "$HOME/.config/shellcheck/.shellcheckrc:.shellcheckrc"
+        "$HOME/.config/yamllint/config:.yamllint"
+    )
+
+    local any_missing=false
+
+    for config_mapping in "${configs[@]}"; do
+        local global_config="${config_mapping%:*}"
+        local repo_filename="${config_mapping#*:}"
+        local repo_config="$repo_root/$repo_filename"
+
+        if [[ -f "$global_config" ]]; then
+            # Remove existing repo config (file or broken link)
+            rm -f "$repo_config"
+            # Create hardlink to global config
+            if ln "$global_config" "$repo_config" 2>/dev/null; then
+                # Stage it if it's new to git
+                git add "$repo_config" 2>/dev/null || true
+                log "✅ Linked $repo_filename from global config"
+            else
+                log "⚠️  Could not create hardlink for $repo_filename (may be cross-filesystem)"
+                # Fallback to copy
+                cp "$global_config" "$repo_config"
+                git add "$repo_config" 2>/dev/null || true
+                log "📋 Copied $repo_filename from global config"
+            fi
+        elif [[ ! -f "$repo_config" ]]; then
+            log "⚠️  No $repo_filename config found (neither global nor repo)"
+            any_missing=true
+        else
+            log "ℹ️  Using existing repo config: $repo_filename"
+        fi
+    done
+
+    if [[ "$any_missing" == true ]]; then
+        log "⚠️  Some config files are missing - tools may use defaults"
+        # Don't fail, just warn
+        return 0
     fi
+
+    return 0
 }
 
 # =========================================================
@@ -351,9 +384,9 @@ main() {
         exit 1
     fi
 
-    # Ensure shellcheck config exists before running
-    if ! ensure_shellcheck_config; then
-        log_error "Failed to ensure shellcheck config - cannot proceed"
+    # Ensure config hardlinks exist before running
+    if ! ensure_config_hardlinks; then
+        log_error "Failed to ensure config hardlinks exist - cannot proceed"
         return 1
     fi
 
