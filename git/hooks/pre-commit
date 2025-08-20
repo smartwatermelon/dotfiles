@@ -117,12 +117,6 @@ run_shellcheck() {
     local passed_files=()
     local current_file_count=0
 
-    # Ensure shellcheck config exists before running
-    if ! ensure_shellcheck_config; then
-        log_error "Failed to ensure shellcheck config - cannot proceed"
-        return 1
-    fi
-
     log_info "Running shellcheck on ${#files[@]} shell script(s)..."
 
     for file in "${files[@]}"; do
@@ -355,6 +349,12 @@ main() {
     # Validate required tools
     if ! validate_tools; then
         exit 1
+    fi
+
+    # Ensure shellcheck config exists before running
+    if ! ensure_shellcheck_config; then
+        log_error "Failed to ensure shellcheck config - cannot proceed"
+        return 1
     fi
 
     local overall_exit_code=0
