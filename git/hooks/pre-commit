@@ -114,24 +114,24 @@ ensure_config_hardlinks() {
             if ln "$global_config" "$repo_config" 2>/dev/null; then
                 # Stage it if it's new to git
                 git add "$repo_config" 2>/dev/null || true
-                log "✅ Linked $repo_filename from global config"
+                echo "✅ Linked $repo_filename from global config"
             else
-                log "⚠️  Could not create hardlink for $repo_filename (may be cross-filesystem)"
+                echo "⚠️  Could not create hardlink for $repo_filename (may be cross-filesystem)"
                 # Fallback to copy
                 cp "$global_config" "$repo_config"
                 git add "$repo_config" 2>/dev/null || true
-                log "📋 Copied $repo_filename from global config"
+                echo "📋 Copied $repo_filename from global config"
             fi
         elif [[ ! -f "$repo_config" ]]; then
-            log "⚠️  No $repo_filename config found (neither global nor repo)"
+            echo "⚠️  No $repo_filename config found (neither global nor repo)"
             any_missing=true
         else
-            log "ℹ️  Using existing repo config: $repo_filename"
+            echo "ℹ️  Using existing repo config: $repo_filename"
         fi
     done
 
     if [[ "$any_missing" == true ]]; then
-        log "⚠️  Some config files are missing - tools may use defaults"
+        echo "⚠️  Some config files are missing - tools may use defaults"
         # Don't fail, just warn
         return 0
     fi
