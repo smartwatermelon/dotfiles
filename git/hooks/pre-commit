@@ -79,6 +79,28 @@ validate_tools() {
 }
 
 # =========================================================
+# SHELLCHECK CONFIG HARDLINK
+# =========================================================
+ensure_shellcheck_config() {
+    local global_config="$HOME/.config/shellcheck/.shellcheckrc"
+    local repo_root
+    repo_root=$(git rev-parse --show-toplevel)
+    local repo_config="$repo_root/.shellcheckrc"
+
+    if [[ -f "$global_config" ]]; then
+        # Remove existing repo config (file or broken link)
+        rm -f "$repo_config"
+        # Create hardlink to global config
+        ln "$global_config" "$repo_config"
+        # Stage it if it's new to git
+        git add "$repo_config" 2>/dev/null || true
+    elif [[ ! -f "$repo_config" ]]; then
+        log_error "No shellcheck config found (neither global nor repo)"
+        return 1
+    fi
+}
+
+# =========================================================
 # SHELLCHECK PROCESSING
 # =========================================================
 run_shellcheck() {
@@ -100,11 +122,11 @@ run_shellcheck() {
             if ! shellcheck "$file" >/dev/null 2>&1; then
                 issues_found=true
                 log_warning "Attempting to auto-fix shellcheck issues in $file..."
-                
+
                 # Try to auto-fix
                 local diff_output
                 diff_output=$(shellcheck --format=diff "$file" 2>/dev/null)
-                
+
                 if [[ -n "$diff_output" ]] && echo "$diff_output" | git apply 2>/dev/null; then
                     log_success "Auto-fixed shellcheck issues in $file"
                     # Re-stage the fixed file
@@ -113,7 +135,7 @@ run_shellcheck() {
                 else
                     log_error "Could not auto-fix shellcheck issues in $file"
                     failed_files+=("$file")
-                    
+
                     # Store detailed output for later display
                     echo -e "${RED}Issues in $file:${NC}"
                     shellcheck "$file" | head -20  # Limit output to prevent overwhelming
@@ -133,7 +155,7 @@ run_shellcheck() {
                 issues_found=true
                 failed_files+=("$file")
                 exit_code=1
-                
+
                 # Store output for summary
                 echo -e "${RED}Issues in $file:${NC}"
                 echo "$shellcheck_output" | head -15
@@ -155,7 +177,7 @@ run_shellcheck() {
     fi
     if [[ ${#failed_files[@]} -gt 0 ]]; then
         log_error "${#failed_files[@]} files failed: ${failed_files[*]}"
-        
+
         if [ "$AUTO_FIX_SHELLCHECK" = false ]; then
             echo ""
             log_info "To auto-fix shellcheck issues, set AUTO_FIX_SHELLCHECK=true in the pre-commit hook."
@@ -182,7 +204,7 @@ run_shfmt() {
     for file in "${files[@]}"; do
         ((current_file_count++))
         echo -e "${BLUE}=== [$current_file_count/${#files[@]}] Formatting $file ===${NC}"
-        
+
         # Check formatting without writing
         if ! shfmt $SHFMT_OPTS "$file" >/dev/null 2>&1; then
             issues_found=true
@@ -217,7 +239,7 @@ run_shfmt() {
     fi
     if [[ ${#failed_files[@]} -gt 0 ]]; then
         log_error "${#failed_files[@]} files failed formatting: ${failed_files[*]}"
-        
+
         if [ "$AUTO_FIX_SHELL" = false ]; then
             echo ""
             log_info "To auto-fix formatting, set AUTO_FIX_SHELL=true or run:"
@@ -360,7 +382,7 @@ main() {
     echo -e "\n${BLUE}========================================${NC}"
     echo -e "${BLUE}           FINAL SUMMARY               ${NC}"
     echo -e "${BLUE}========================================${NC}"
-    
+
     if [ $overall_exit_code -eq 0 ]; then
         log_success "✅ All pre-commit checks passed!"
         echo -e "${GREEN}Ready to commit!${NC}"
@@ -379,12 +401,12 @@ main() {
             echo ""
             log_info "💡 Some issues may have been auto-fixed. Review changes and commit again."
         fi
-        
+
         echo ""
         echo -e "${YELLOW}Quick commands to fix common issues:${NC}"
         echo -e "  ${GREEN}# Review what changed:${NC}"
         echo -e "  git diff"
-        echo -e "  ${GREEN}# Check specific file:${NC}"  
+        echo -e "  ${GREEN}# Check specific file:${NC}"
         echo -e "  shellcheck <filename>"
         echo -e "  ${GREEN}# Add auto-fixed files:${NC}"
         echo -e "  git add -u"
