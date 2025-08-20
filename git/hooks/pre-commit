@@ -8,11 +8,13 @@ set -euo pipefail
 SHFMT_OPTS="-d -i 2 -ci -bn"
 SHFMT_WRITE_OPTS="-i 2 -ci -bn -w"
 MARKDOWNLINT_OPTS="--disable=MD013"
+YAMLLINT_OPTS="-d relaxed"  # or customize as needed
 
 # Auto-fix behavior (set to true/false)
 AUTO_FIX_SHELL=true
 AUTO_FIX_MARKDOWN=true
-AUTO_FIX_SHELLCHECK=true  # More conservative due to potential complexity
+AUTO_FIX_SHELLCHECK=true
+AUTO_FIX_YAML=false  # yamllint doesn't have auto-fix, but keeping consistent
 
 # Color output
 RED='\033[0;31m'
@@ -67,6 +69,10 @@ validate_tools() {
 
     if ! command_exists markdownlint; then
         missing_tools+=("markdownlint")
+    fi
+
+    if ! command_exists yamllint; then
+        missing_tools+=("yamllint")
     fi
 
     if [ ${#missing_tools[@]} -gt 0 ]; then
@@ -300,6 +306,41 @@ run_terraform_fmt() {
 }
 
 # =========================================================
+# YAMLLINT PROCESSING
+# =========================================================
+run_yamllint() {
+    local files=("$@")
+    local exit_code=0
+    local failed_files=()
+    local passed_files=()
+
+    log_info "Running yamllint on ${#files[@]} YAML file(s)..."
+
+    for file in "${files[@]}"; do
+        if ! yamllint $YAMLLINT_OPTS "$file"; then
+            failed_files+=("$file")
+            exit_code=1
+        else
+            log_success "$file passed yamllint"
+            passed_files+=("$file")
+        fi
+    done
+
+    # Show summary
+    echo -e "\\n${BLUE}=== YAMLLINT SUMMARY ===${NC}"
+    if [[ ${#passed_files[@]} -gt 0 ]]; then
+        log_success "${#passed_files[@]} files passed"
+    fi
+    if [[ ${#failed_files[@]} -gt 0 ]]; then
+        log_error "${#failed_files[@]} files failed: ${failed_files[*]}"
+        echo ""
+        log_info "Fix YAML issues manually (yamllint has no auto-fix)"
+    fi
+
+    return $exit_code
+}
+
+# =========================================================
 # MAIN EXECUTION
 # =========================================================
 main() {
@@ -316,6 +357,7 @@ main() {
     # Get staged files by type
     local shell_files
     local markdown_files
+    local yaml_files
 
     # Shell scripts (multiple extensions and shebangs)
     shell_files=($(get_staged_files '\.(sh|bash)$'))
@@ -329,6 +371,9 @@ main() {
 
     # Markdown files
     markdown_files=($(get_staged_files '\.(md|markdown)$'))
+
+    # YAML files
+    yaml_files=($(get_staged_files '\\.(yml|yaml)$'))
 
     # Process shell files
     if [ ${#shell_files[@]} -gt 0 ]; then
@@ -369,6 +414,20 @@ main() {
             # Collect failed files from markdownlint
             for file in "${markdown_files[@]}"; do
                 if ! markdownlint $MARKDOWNLINT_OPTS "$file" >/dev/null 2>&1; then
+                    all_failed_files+=("$file")
+                fi
+            done
+        fi
+    fi
+
+    # Process YAML files
+    if [ ${#yaml_files[@]} -gt 0 ]; then
+        log_info "Found ${#yaml_files[@]} YAML file(s) to check"
+
+        if ! run_yamllint "${yaml_files[@]}"; then
+            overall_exit_code=1
+            for file in "${yaml_files[@]}"; do
+                if ! yamllint $YAMLLINT_OPTS "$file" >/dev/null 2>&1; then
                     all_failed_files+=("$file")
                 fi
             done
