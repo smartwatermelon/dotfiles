@@ -448,7 +448,10 @@ main() {
         local first_line
         first_line=$(head -n1 "${file}" 2>/dev/null)
         if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]]; then
-          shell_files+=("${file}")
+          # Only add if not already in array
+          if [[ ! " ${shell_files[*]} " =~ \ ${file}\  ]]; then
+            shell_files+=("${file}")
+          fi
         fi
       fi
     done
