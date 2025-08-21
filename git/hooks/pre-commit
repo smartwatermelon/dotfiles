@@ -46,10 +46,23 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# Get list of staged files matching pattern
-get_staged_files() {
+# Get list of files matching pattern (staged or specified)
+get_target_files() {
   local pattern="$1"
-  git diff --cached --name-only --diff-filter=ACM | grep -E "${pattern}" || true
+  local mode="$2"
+  shift 2
+  local specified_files=("$@")
+
+  if [[ "${mode}" == "staged" ]]; then
+    git diff --cached --name-only --diff-filter=ACM | grep -E "${pattern}" || true
+  else
+    # Filter specified files by pattern and verify they exist
+    for file in "${specified_files[@]}"; do
+      if [[ -f "${file}" ]] && [[ "${file}" =~ ${pattern} ]]; then
+        echo "${file}"
+      fi
+    done
+  fi
 }
 
 # =========================================================
@@ -166,7 +179,9 @@ run_shellcheck() {
         if [[ -n "${diff_output}" ]] && echo "${diff_output}" | git apply 2>/dev/null; then
           log_success "Auto-fixed shellcheck issues in ${file}"
           # Re-stage the fixed file
-          git add "${file}"
+          if [[ "${LINT_MODE:-staged}" == "staged" ]]; then
+            git add "${file}"
+          fi
           passed_files+=("${file} (auto-fixed)")
         else
           log_error "Could not auto-fix shellcheck issues in ${file}"
@@ -251,7 +266,9 @@ run_shfmt() {
         if shfmt "${SHFMT_WRITE_OPTS}" "${file}" 2>/dev/null; then
           log_success "Auto-fixed formatting in ${file}"
           # Re-stage the formatted file
-          git add "${file}"
+          if [[ "${LINT_MODE:-staged}" == "staged" ]]; then
+            git add "${file}"
+          fi
           passed_files+=("${file} (auto-fixed)")
         else
           log_error "Could not auto-fix formatting in ${file}"
@@ -308,7 +325,9 @@ run_markdownlint() {
         if markdownlint "${MARKDOWNLINT_OPTS}" --fix "${file}"; then
           log_success "Auto-fixed markdown issues in ${file}"
           # Re-stage the fixed file
-          git add "${file}"
+          if [[ "${LINT_MODE:-staged}" == "staged" ]]; then
+            git add "${file}"
+          fi
         else
           log_error "Could not auto-fix markdown issues in ${file}"
         fi
@@ -375,7 +394,17 @@ run_yamllint() {
 # MAIN EXECUTION
 # =========================================================
 main() {
-  log_info "Starting pre-commit checks..."
+  local mode="staged"
+  local target_files=()
+
+  # If arguments provided, switch to file mode
+  if [[ $# -gt 0 ]]; then
+    mode="files"
+    target_files=("$@")
+    log_info "Running checks on specified files: ${target_files[*]}"
+  else
+    log_info "Starting pre-commit checks on staged files..."
+  fi
 
   # Validate required tools
   if ! validate_tools; then
@@ -391,35 +420,51 @@ main() {
   local overall_exit_code=0
   local all_failed_files=()
 
-  # Get staged files by type
+  # Make mode available to processing functions
+  export LINT_MODE="${mode}"
+
+  # Get files by type
   # Shell scripts (multiple extensions and shebangs)
   local shell_files=()
   while IFS= read -r -d '' file; do
     shell_files+=("${file}")
-  done < <(get_staged_files '\.(sh|bash)$' | tr '\n' '\0' || true)
+  done < <(get_target_files '\.(sh|bash)$' "${mode}" "${target_files[@]}" | tr '\n' '\0' || true)
 
   # Also check for files with shell shebangs (but no extension)
-  while IFS= read -r -d '' file; do
-    if [[ -f "${file}" ]]; then
-      local first_line
-      first_line=$(head -n1 "${file}" 2>/dev/null)
-      if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]]; then
-        shell_files+=("${file}")
+  if [[ "${mode}" == "staged" ]]; then
+    while IFS= read -r -d '' file; do
+      if [[ -f "${file}" ]]; then
+        local first_line
+        first_line=$(head -n1 "${file}" 2>/dev/null)
+        if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]]; then
+          shell_files+=("${file}")
+        fi
       fi
-    fi
-  done < <(git diff --cached --name-only --diff-filter=ACM -z || true)
+    done < <(git diff --cached --name-only --diff-filter=ACM -z || true)
+  else
+    # Check specified files for shell shebangs
+    for file in "${target_files[@]}"; do
+      if [[ -f "${file}" ]]; then
+        local first_line
+        first_line=$(head -n1 "${file}" 2>/dev/null)
+        if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]]; then
+          shell_files+=("${file}")
+        fi
+      fi
+    done
+  fi
 
   # Markdown files (exclude LICENSE.md)
   local markdown_files=()
   while IFS= read -r -d '' file; do
     markdown_files+=("${file}")
-  done < <(get_staged_files '\.(md|markdown)$' | grep -v 'LICENSE\.md$' | tr '\n' '\0' || true)
+  done < <(get_target_files '\.(md|markdown)$' "${mode}" "${target_files[@]}" | grep -v 'LICENSE\.md$' | tr '\n' '\0' || true)
 
   # YAML files
   local yaml_files=()
   while IFS= read -r -d '' file; do
     yaml_files+=("${file}")
-  done < <(get_staged_files '\\.(yml|yaml)$' | tr '\n' '\0' || true)
+  done < <(get_target_files '\\.(yml|yaml)$' "${mode}" "${target_files[@]}" | tr '\n' '\0' || true)
 
   # Process shell files
   if [[ ${#shell_files[@]} -gt 0 ]]; then
