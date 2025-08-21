@@ -8,13 +8,12 @@ set -euo pipefail
 SHFMT_OPTS="-d -i 2 -ci -bn"
 SHFMT_WRITE_OPTS="-i 2 -ci -bn -w"
 MARKDOWNLINT_OPTS="--disable=MD013"
-YAMLLINT_OPTS="-d relaxed"  # or customize as needed
+YAMLLINT_OPTS="-d relaxed" # or customize as needed
 
 # Auto-fix behavior (set to true/false)
 AUTO_FIX_SHELL=true
 AUTO_FIX_MARKDOWN=true
 AUTO_FIX_SHELLCHECK=true
-AUTO_FIX_YAML=false  # yamllint doesn't have auto-fix, but keeping consistent
 
 # Color output
 RED='\033[0;31m'
@@ -27,61 +26,61 @@ NC='\033[0m' # No Color
 # UTILITY FUNCTIONS
 # =========================================================
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $*"
+  echo -e "${BLUE}[INFO]${NC} $*"
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $*"
+  echo -e "${GREEN}[SUCCESS]${NC} $*"
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $*"
+  echo -e "${YELLOW}[WARNING]${NC} $*"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $*"
+  echo -e "${RED}[ERROR]${NC} $*"
 }
 
 # Check if a command exists
 command_exists() {
-    command -v "$1" >/dev/null 2>&1
+  command -v "$1" >/dev/null 2>&1
 }
 
 # Get list of staged files matching pattern
 get_staged_files() {
-    local pattern="$1"
-    git diff --cached --name-only --diff-filter=ACM | grep -E "$pattern" || true
+  local pattern="$1"
+  git diff --cached --name-only --diff-filter=ACM | grep -E "${pattern}" || true
 }
 
 # =========================================================
 # TOOL VALIDATION
 # =========================================================
 validate_tools() {
-    local missing_tools=()
+  local missing_tools=()
 
-    if ! command_exists shellcheck; then
-        missing_tools+=("shellcheck")
-    fi
+  if ! command_exists shellcheck; then
+    missing_tools+=("shellcheck")
+  fi
 
-    if ! command_exists shfmt; then
-        missing_tools+=("shfmt")
-    fi
+  if ! command_exists shfmt; then
+    missing_tools+=("shfmt")
+  fi
 
-    if ! command_exists markdownlint; then
-        missing_tools+=("markdownlint")
-    fi
+  if ! command_exists markdownlint; then
+    missing_tools+=("markdownlint")
+  fi
 
-    if ! command_exists yamllint; then
-        missing_tools+=("yamllint")
-    fi
+  if ! command_exists yamllint; then
+    missing_tools+=("yamllint")
+  fi
 
-    if [ ${#missing_tools[@]} -gt 0 ]; then
-        log_error "Missing required tools: ${missing_tools[*]}"
-        log_info "Install with: brew install ${missing_tools[*]}"
-        return 1
-    fi
+  if [[ ${#missing_tools[@]} -gt 0 ]]; then
+    log_error "Missing required tools: ${missing_tools[*]}"
+    log_info "Install with: brew install ${missing_tools[*]}"
+    return 1
+  fi
 
-    return 0
+  return 0
 }
 
 # =========================================================
@@ -91,427 +90,435 @@ validate_tools() {
 # CONFIGURATION HARDLINKS
 # =========================================================
 ensure_config_hardlinks() {
-    local repo_root
-    repo_root=$(git rev-parse --show-toplevel)
+  local repo_root
+  repo_root=$(git rev-parse --show-toplevel)
 
-    # Define config mappings: global_path:repo_filename
-    local configs=(
-        "$HOME/.config/shellcheck/.shellcheckrc:.shellcheckrc"
-        "$HOME/.config/yamllint/config:.yamllint"
-    )
+  # Define config mappings: global_path:repo_filename
+  local configs=(
+    "${HOME}/.config/shellcheck/.shellcheckrc:.shellcheckrc"
+    "${HOME}/.config/yamllint/config:.yamllint"
+  )
 
-    local any_missing=false
+  local any_missing=false
 
-    for config_mapping in "${configs[@]}"; do
-        local global_config="${config_mapping%:*}"
-        local repo_filename="${config_mapping#*:}"
-        local repo_config="$repo_root/$repo_filename"
+  for config_mapping in "${configs[@]}"; do
+    local global_config="${config_mapping%:*}"
+    local repo_filename="${config_mapping#*:}"
+    local repo_config="${repo_root}/${repo_filename}"
 
-        if [[ -f "$global_config" ]]; then
-            # Remove existing repo config (file or broken link)
-            rm -f "$repo_config"
-            # Create hardlink to global config
-            if ln "$global_config" "$repo_config" 2>/dev/null; then
-                # Stage it if it's new to git
-                git add "$repo_config" 2>/dev/null || true
-                echo "✅ Linked $repo_filename from global config"
-            else
-                echo "⚠️  Could not create hardlink for $repo_filename (may be cross-filesystem)"
-                # Fallback to copy
-                cp "$global_config" "$repo_config"
-                git add "$repo_config" 2>/dev/null || true
-                echo "📋 Copied $repo_filename from global config"
-            fi
-        elif [[ ! -f "$repo_config" ]]; then
-            echo "⚠️  No $repo_filename config found (neither global nor repo)"
-            any_missing=true
-        else
-            echo "ℹ️  Using existing repo config: $repo_filename"
-        fi
-    done
-
-    if [[ "$any_missing" == true ]]; then
-        echo "⚠️  Some config files are missing - tools may use defaults"
-        # Don't fail, just warn
-        return 0
+    if [[ -f "${global_config}" ]]; then
+      # Remove existing repo config (file or broken link)
+      rm -f "${repo_config}"
+      # Create hardlink to global config
+      if ln "${global_config}" "${repo_config}" 2>/dev/null; then
+        # Stage it if it's new to git
+        git add "${repo_config}" 2>/dev/null || true
+        echo "✅ Linked ${repo_filename} from global config"
+      else
+        echo "⚠️  Could not create hardlink for ${repo_filename} (may be cross-filesystem)"
+        # Fallback to copy
+        cp "${global_config}" "${repo_config}"
+        git add "${repo_config}" 2>/dev/null || true
+        echo "📋 Copied ${repo_filename} from global config"
+      fi
+    elif [[ ! -f "${repo_config}" ]]; then
+      echo "⚠️  No ${repo_filename} config found (neither global nor repo)"
+      any_missing=true
+    else
+      echo "ℹ️  Using existing repo config: ${repo_filename}"
     fi
+  done
 
+  if [[ "${any_missing}" == true ]]; then
+    echo "⚠️  Some config files are missing - tools may use defaults"
+    # Don't fail, just warn
     return 0
+  fi
+
+  return 0
 }
 
 # =========================================================
 # SHELLCHECK PROCESSING
 # =========================================================
 run_shellcheck() {
-    local files=("$@")
-    local exit_code=0
-    local issues_found=false
-    local failed_files=()
-    local passed_files=()
-    local current_file_count=0
+  local files=("$@")
+  local exit_code=0
+  local failed_files=()
+  local passed_files=()
+  local current_file_count=0
 
-    log_info "Running shellcheck on ${#files[@]} shell script(s)..."
+  log_info "Running shellcheck on ${#files[@]} shell script(s)..."
 
-    for file in "${files[@]}"; do
-        ((current_file_count++))
-        echo -e "\n${BLUE}=== [$current_file_count/${#files[@]}] Checking $file ===${NC}"
+  for file in "${files[@]}"; do
+    ((current_file_count++))
+    echo -e "\n${BLUE}=== [${current_file_count}/${#files[@]}] Checking ${file} ===${NC}"
 
-        if [ "$AUTO_FIX_SHELLCHECK" = true ]; then
-            # When auto-fix is enabled, run quietly first to check for issues
-            if ! shellcheck "$file" >/dev/null 2>&1; then
-                issues_found=true
-                log_warning "Attempting to auto-fix shellcheck issues in $file..."
+    if [[ "${AUTO_FIX_SHELLCHECK}" = true ]]; then
+      # When auto-fix is enabled, run quietly first to check for issues
+      if ! shellcheck "${file}" >/dev/null 2>&1; then
+        log_warning "Attempting to auto-fix shellcheck issues in ${file}..."
 
-                # Try to auto-fix
-                local diff_output
-                diff_output=$(shellcheck --format=diff "$file" 2>/dev/null)
+        # Try to auto-fix
+        local diff_output
+        diff_output=$(shellcheck --format=diff "${file}" 2>/dev/null)
 
-                if [[ -n "$diff_output" ]] && echo "$diff_output" | git apply 2>/dev/null; then
-                    log_success "Auto-fixed shellcheck issues in $file"
-                    # Re-stage the fixed file
-                    git add "$file"
-                    passed_files+=("$file (auto-fixed)")
-                else
-                    log_error "Could not auto-fix shellcheck issues in $file"
-                    failed_files+=("$file")
-
-                    # Store detailed output for later display
-                    echo -e "${RED}Issues in $file:${NC}"
-                    shellcheck "$file" | head -20  # Limit output to prevent overwhelming
-                    if [[ $(shellcheck "$file" | wc -l) -gt 20 ]]; then
-                        echo -e "${YELLOW}... (output truncated, run 'shellcheck $file' for full details)${NC}"
-                    fi
-                    exit_code=1
-                fi
-            else
-                log_success "$file passed shellcheck"
-                passed_files+=("$file")
-            fi
+        if [[ -n "${diff_output}" ]] && echo "${diff_output}" | git apply 2>/dev/null; then
+          log_success "Auto-fixed shellcheck issues in ${file}"
+          # Re-stage the fixed file
+          git add "${file}"
+          passed_files+=("${file} (auto-fixed)")
         else
-            # When auto-fix is disabled, collect issues but don't show immediately
-            local shellcheck_output
-            if ! shellcheck_output=$(shellcheck "$file" 2>&1); then
-                issues_found=true
-                failed_files+=("$file")
-                exit_code=1
+          log_error "Could not auto-fix shellcheck issues in ${file}"
+          failed_files+=("${file}")
 
-                # Store output for summary
-                echo -e "${RED}Issues in $file:${NC}"
-                echo "$shellcheck_output" | head -15
-                if [[ $(echo "$shellcheck_output" | wc -l) -gt 15 ]]; then
-                    echo -e "${YELLOW}... (output truncated, run 'shellcheck $file' for full details)${NC}"
-                fi
-                echo ""
-            else
-                log_success "$file passed shellcheck"
-                passed_files+=("$file")
-            fi
+          # Store detailed output for later display
+          echo -e "${RED}Issues in ${file}:${NC}"
+          shellcheck "${file}" | head -20 # Limit output to prevent overwhelming
+          local line_count
+          line_count=$(shellcheck "${file}" | wc -l)
+          if [[ ${line_count} -gt 20 ]]; then
+            echo -e "${YELLOW}... (output truncated, run 'shellcheck ${file}' for full details)${NC}"
+          fi
+          exit_code=1
         fi
-    done
+      else
+        log_success "${file} passed shellcheck"
+        passed_files+=("${file}")
+      fi
+    else
+      # When auto-fix is disabled, collect issues but don't show immediately
+      local shellcheck_output
+      if ! shellcheck_output=$(shellcheck "${file}" 2>&1); then
+        failed_files+=("${file}")
+        exit_code=1
 
-    # Show summary
-    echo -e "\n${BLUE}=== SHELLCHECK SUMMARY ===${NC}"
-    if [[ ${#passed_files[@]} -gt 0 ]]; then
-        log_success "${#passed_files[@]} files passed"
-    fi
-    if [[ ${#failed_files[@]} -gt 0 ]]; then
-        log_error "${#failed_files[@]} files failed: ${failed_files[*]}"
-
-        if [ "$AUTO_FIX_SHELLCHECK" = false ]; then
-            echo ""
-            log_info "To auto-fix shellcheck issues, set AUTO_FIX_SHELLCHECK=true in the pre-commit hook."
-            echo ""
+        # Store output for summary
+        echo -e "${RED}Issues in ${file}:${NC}"
+        echo "${shellcheck_output}" | head -15
+        local output_line_count
+        output_line_count=$(echo "${shellcheck_output}" | wc -l)
+        if [[ ${output_line_count} -gt 15 ]]; then
+          echo -e "${YELLOW}... (output truncated, run 'shellcheck ${file}' for full details)${NC}"
         fi
+        echo ""
+      else
+        log_success "${file} passed shellcheck"
+        passed_files+=("${file}")
+      fi
     fi
+  done
 
-    return $exit_code
+  # Show summary
+  echo -e "\n${BLUE}=== SHELLCHECK SUMMARY ===${NC}"
+  if [[ ${#passed_files[@]} -gt 0 ]]; then
+    log_success "${#passed_files[@]} files passed"
+  fi
+  if [[ ${#failed_files[@]} -gt 0 ]]; then
+    log_error "${#failed_files[@]} files failed: ${failed_files[*]}"
+
+    if [[ "${AUTO_FIX_SHELLCHECK}" = false ]]; then
+      echo ""
+      log_info "To auto-fix shellcheck issues, set AUTO_FIX_SHELLCHECK=true in the pre-commit hook."
+      echo ""
+    fi
+  fi
+
+  return "${exit_code}"
 }
 
 # =========================================================
 # SHFMT PROCESSING
 # =========================================================
 run_shfmt() {
-    local files=("$@")
-    local exit_code=0
-    local issues_found=false
-    local failed_files=()
-    local passed_files=()
-    local current_file_count=0
+  local files=("$@")
+  local exit_code=0
+  local failed_files=()
+  local passed_files=()
+  local current_file_count=0
 
-    log_info "Running shfmt on ${#files[@]} shell script(s)..."
+  log_info "Running shfmt on ${#files[@]} shell script(s)..."
 
-    for file in "${files[@]}"; do
-        ((current_file_count++))
-        echo -e "${BLUE}=== [$current_file_count/${#files[@]}] Formatting $file ===${NC}"
+  for file in "${files[@]}"; do
+    ((current_file_count++))
+    echo -e "${BLUE}=== [${current_file_count}/${#files[@]}] Formatting ${file} ===${NC}"
 
-        # Check formatting without writing
-        if ! shfmt $SHFMT_OPTS "$file" >/dev/null 2>&1; then
-            issues_found=true
+    # Check formatting without writing
+    if ! shfmt "${SHFMT_OPTS}" "${file}" >/dev/null 2>&1; then
 
-            if [ "$AUTO_FIX_SHELL" = true ]; then
-                log_warning "Auto-fixing formatting in $file..."
-                if shfmt $SHFMT_WRITE_OPTS "$file" 2>/dev/null; then
-                    log_success "Auto-fixed formatting in $file"
-                    # Re-stage the formatted file
-                    git add "$file"
-                    passed_files+=("$file (auto-fixed)")
-                else
-                    log_error "Could not auto-fix formatting in $file"
-                    failed_files+=("$file")
-                    exit_code=1
-                fi
-            else
-                log_error "Formatting issues found in $file"
-                failed_files+=("$file")
-                exit_code=1
-            fi
+      if [[ "${AUTO_FIX_SHELL}" = true ]]; then
+        log_warning "Auto-fixing formatting in ${file}..."
+        if shfmt "${SHFMT_WRITE_OPTS}" "${file}" 2>/dev/null; then
+          log_success "Auto-fixed formatting in ${file}"
+          # Re-stage the formatted file
+          git add "${file}"
+          passed_files+=("${file} (auto-fixed)")
         else
-            log_success "$file formatting OK"
-            passed_files+=("$file")
+          log_error "Could not auto-fix formatting in ${file}"
+          failed_files+=("${file}")
+          exit_code=1
         fi
-    done
-
-    # Show summary
-    echo -e "\n${BLUE}=== SHFMT SUMMARY ===${NC}"
-    if [[ ${#passed_files[@]} -gt 0 ]]; then
-        log_success "${#passed_files[@]} files passed formatting"
+      else
+        log_error "Formatting issues found in ${file}"
+        failed_files+=("${file}")
+        exit_code=1
+      fi
+    else
+      log_success "${file} formatting OK"
+      passed_files+=("${file}")
     fi
-    if [[ ${#failed_files[@]} -gt 0 ]]; then
-        log_error "${#failed_files[@]} files failed formatting: ${failed_files[*]}"
+  done
 
-        if [ "$AUTO_FIX_SHELL" = false ]; then
-            echo ""
-            log_info "To auto-fix formatting, set AUTO_FIX_SHELL=true or run:"
-            for file in "${failed_files[@]}"; do
-                echo -e "  ${GREEN}shfmt $SHFMT_WRITE_OPTS '$file'${NC}"
-            done
-            echo ""
-        fi
+  # Show summary
+  echo -e "\n${BLUE}=== SHFMT SUMMARY ===${NC}"
+  if [[ ${#passed_files[@]} -gt 0 ]]; then
+    log_success "${#passed_files[@]} files passed formatting"
+  fi
+  if [[ ${#failed_files[@]} -gt 0 ]]; then
+    log_error "${#failed_files[@]} files failed formatting: ${failed_files[*]}"
+
+    if [[ "${AUTO_FIX_SHELL}" = false ]]; then
+      echo ""
+      log_info "To auto-fix formatting, set AUTO_FIX_SHELL=true or run:"
+      for file in "${failed_files[@]}"; do
+        echo -e "  ${GREEN}shfmt \"${SHFMT_WRITE_OPTS}\" '${file}'${NC}"
+      done
+      echo ""
     fi
+  fi
 
-    return $exit_code
+  return "${exit_code}"
 }
 
 # =========================================================
 # MARKDOWNLINT PROCESSING
 # =========================================================
 run_markdownlint() {
-    local files=("$@")
-    local exit_code=0
-    local issues_found=false
+  local files=("$@")
+  local exit_code=0
 
-    log_info "Running markdownlint on ${#files[@]} markdown file(s)..."
+  log_info "Running markdownlint on ${#files[@]} markdown file(s)..."
 
-    for file in "${files[@]}"; do
-        if ! markdownlint $MARKDOWNLINT_OPTS "$file"; then
-            issues_found=true
-            exit_code=1
+  for file in "${files[@]}"; do
+    if ! markdownlint "${MARKDOWNLINT_OPTS}" "${file}"; then
+      exit_code=1
 
-            if [ "$AUTO_FIX_MARKDOWN" = true ]; then
-                log_warning "Auto-fixing markdown issues in $file..."
-                if markdownlint $MARKDOWNLINT_OPTS --fix "$file"; then
-                    log_success "Auto-fixed markdown issues in $file"
-                    # Re-stage the fixed file
-                    git add "$file"
-                else
-                    log_error "Could not auto-fix markdown issues in $file"
-                fi
-            else
-                log_error "Markdown issues found in $file"
-                log_info "Run: markdownlint $MARKDOWNLINT_OPTS --fix $file"
-            fi
+      if [[ "${AUTO_FIX_MARKDOWN}" = true ]]; then
+        log_warning "Auto-fixing markdown issues in ${file}..."
+        if markdownlint "${MARKDOWNLINT_OPTS}" --fix "${file}"; then
+          log_success "Auto-fixed markdown issues in ${file}"
+          # Re-stage the fixed file
+          git add "${file}"
+        else
+          log_error "Could not auto-fix markdown issues in ${file}"
         fi
-    done
+      else
+        log_error "Markdown issues found in ${file}"
+        log_info "Run: markdownlint ${MARKDOWNLINT_OPTS} --fix ${file}"
+      fi
+    fi
+  done
 
-    return $exit_code
+  return "${exit_code}"
 }
 
 # =========================================================
 # TERRAFORM PROCESSING (Legacy)
 # =========================================================
 run_terraform_fmt() {
-    # Check if there are any Terraform files in the current directory or subdirectories
-    if [ -n "$(find . -name '*.tf')" ]; then
-        log_info "Running terraform fmt..."
-        terraform fmt -recursive
-        log_success "Terraform formatting complete"
-    fi
+  # Check if there are any Terraform files in the current directory or subdirectories
+  local tf_files
+  tf_files=$(find . -name '*.tf')
+  if [[ -n "${tf_files}" ]]; then
+    log_info "Running terraform fmt..."
+    terraform fmt -recursive
+    log_success "Terraform formatting complete"
+  fi
 }
 
 # =========================================================
 # YAMLLINT PROCESSING
 # =========================================================
 run_yamllint() {
-    local files=("$@")
-    local exit_code=0
-    local failed_files=()
-    local passed_files=()
+  local files=("$@")
+  local exit_code=0
+  local failed_files=()
+  local passed_files=()
 
-    log_info "Running yamllint on ${#files[@]} YAML file(s)..."
+  log_info "Running yamllint on ${#files[@]} YAML file(s)..."
 
-    for file in "${files[@]}"; do
-        if ! yamllint $YAMLLINT_OPTS "$file"; then
-            failed_files+=("$file")
-            exit_code=1
-        else
-            log_success "$file passed yamllint"
-            passed_files+=("$file")
-        fi
-    done
-
-    # Show summary
-    echo -e "\\n${BLUE}=== YAMLLINT SUMMARY ===${NC}"
-    if [[ ${#passed_files[@]} -gt 0 ]]; then
-        log_success "${#passed_files[@]} files passed"
+  for file in "${files[@]}"; do
+    if ! yamllint "${YAMLLINT_OPTS}" "${file}"; then
+      failed_files+=("${file}")
+      exit_code=1
+    else
+      log_success "${file} passed yamllint"
+      passed_files+=("${file}")
     fi
-    if [[ ${#failed_files[@]} -gt 0 ]]; then
-        log_error "${#failed_files[@]} files failed: ${failed_files[*]}"
-        echo ""
-        log_info "Fix YAML issues manually (yamllint has no auto-fix)"
-    fi
+  done
 
-    return $exit_code
+  # Show summary
+  echo -e "\\n${BLUE}=== YAMLLINT SUMMARY ===${NC}"
+  if [[ ${#passed_files[@]} -gt 0 ]]; then
+    log_success "${#passed_files[@]} files passed"
+  fi
+  if [[ ${#failed_files[@]} -gt 0 ]]; then
+    log_error "${#failed_files[@]} files failed: ${failed_files[*]}"
+    echo ""
+    log_info "Fix YAML issues manually (yamllint has no auto-fix)"
+  fi
+
+  return "${exit_code}"
 }
 
 # =========================================================
 # MAIN EXECUTION
 # =========================================================
 main() {
-    log_info "Starting pre-commit checks..."
+  log_info "Starting pre-commit checks..."
 
-    # Validate required tools
-    if ! validate_tools; then
-        exit 1
+  # Validate required tools
+  if ! validate_tools; then
+    exit 1
+  fi
+
+  # Ensure config hardlinks exist before running
+  if ! ensure_config_hardlinks; then
+    log_error "Failed to ensure config hardlinks exist - cannot proceed"
+    return 1
+  fi
+
+  local overall_exit_code=0
+  local all_failed_files=()
+
+  # Get staged files by type
+  # Shell scripts (multiple extensions and shebangs)
+  local shell_files=()
+  while IFS= read -r -d '' file; do
+    shell_files+=("${file}")
+  done < <(get_staged_files '\.(sh|bash)$' | tr '\n' '\0' || true)
+
+  # Also check for files with shell shebangs (but no extension)
+  while IFS= read -r -d '' file; do
+    if [[ -f "${file}" ]]; then
+      local first_line
+      first_line=$(head -n1 "${file}" 2>/dev/null)
+      if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]]; then
+        shell_files+=("${file}")
+      fi
+    fi
+  done < <(git diff --cached --name-only --diff-filter=ACM -z || true)
+
+  # Markdown files (exclude LICENSE.md)
+  local markdown_files=()
+  while IFS= read -r -d '' file; do
+    markdown_files+=("${file}")
+  done < <(get_staged_files '\.(md|markdown)$' | grep -v 'LICENSE\.md$' | tr '\n' '\0' || true)
+
+  # YAML files
+  local yaml_files=()
+  while IFS= read -r -d '' file; do
+    yaml_files+=("${file}")
+  done < <(get_staged_files '\\.(yml|yaml)$' | tr '\n' '\0' || true)
+
+  # Process shell files
+  if [[ ${#shell_files[@]} -gt 0 ]]; then
+    log_info "Found ${#shell_files[@]} shell script(s) to check"
+
+    # Run shellcheck
+    if ! run_shellcheck "${shell_files[@]}"; then
+      overall_exit_code=1
+      # Collect failed files from shellcheck
+      for file in "${shell_files[@]}"; do
+        if ! shellcheck "${file}" >/dev/null 2>&1; then
+          all_failed_files+=("${file}")
+        fi
+      done
     fi
 
-    # Ensure config hardlinks exist before running
-    if ! ensure_config_hardlinks; then
-        log_error "Failed to ensure config hardlinks exist - cannot proceed"
-        return 1
+    # Run shfmt
+    if ! run_shfmt "${shell_files[@]}"; then
+      overall_exit_code=1
+      # Collect failed files from shfmt (only add if not already in list)
+      for file in "${shell_files[@]}"; do
+        if ! shfmt "${SHFMT_OPTS}" "${file}" >/dev/null 2>&1; then
+          # Check if file is already in failed list
+          if [[ ! " ${all_failed_files[*]} " =~ \ ${file}\  ]]; then
+            all_failed_files+=("${file}")
+          fi
+        fi
+      done
+    fi
+  fi
+
+  # Process markdown files
+  if [[ ${#markdown_files[@]} -gt 0 ]]; then
+    log_info "Found ${#markdown_files[@]} markdown file(s) to check"
+
+    if ! run_markdownlint "${markdown_files[@]}"; then
+      overall_exit_code=1
+      # Collect failed files from markdownlint
+      for file in "${markdown_files[@]}"; do
+        if ! markdownlint "${MARKDOWNLINT_OPTS}" "${file}" >/dev/null 2>&1; then
+          all_failed_files+=("${file}")
+        fi
+      done
+    fi
+  fi
+
+  # Process YAML files
+  if [[ ${#yaml_files[@]} -gt 0 ]]; then
+    log_info "Found ${#yaml_files[@]} YAML file(s) to check"
+
+    if ! run_yamllint "${yaml_files[@]}"; then
+      overall_exit_code=1
+      for file in "${yaml_files[@]}"; do
+        if ! yamllint "${YAMLLINT_OPTS}" "${file}" >/dev/null 2>&1; then
+          all_failed_files+=("${file}")
+        fi
+      done
+    fi
+  fi
+
+  # Legacy Terraform support
+  run_terraform_fmt
+
+  # Final status
+  echo -e "\n${BLUE}========================================${NC}"
+  echo -e "${BLUE}           FINAL SUMMARY               ${NC}"
+  echo -e "${BLUE}========================================${NC}"
+
+  if [[ ${overall_exit_code} -eq 0 ]]; then
+    log_success "✅ All pre-commit checks passed!"
+    echo -e "${GREEN}Ready to commit!${NC}"
+  else
+    log_error "❌ Pre-commit checks failed"
+    echo -e "${RED}Please fix the issues listed above before committing.${NC}"
+
+    # Show list of files that need to be fixed
+    if [[ ${#all_failed_files[@]} -gt 0 ]]; then
+      echo ""
+      echo -e "${YELLOW}Files that need to be changed:${NC}"
+      printf "${RED}  %s${NC}\n" "${all_failed_files[@]}"
     fi
 
-    local overall_exit_code=0
-    local all_failed_files=()
-
-    # Get staged files by type
-    local shell_files
-    local markdown_files
-    local yaml_files
-
-    # Shell scripts (multiple extensions and shebangs)
-    shell_files=($(get_staged_files '\.(sh|bash)$'))
-
-    # Also check for files with shell shebangs (but no extension)
-    while IFS= read -r -d '' file; do
-        if [[ -f "$file" ]] && [[ "$(head -n1 "$file" 2>/dev/null)" =~ ^#!.*/(ba)?sh ]]; then
-            shell_files+=("$file")
-        fi
-    done < <(git diff --cached --name-only --diff-filter=ACM -z)
-
-    # Markdown files (exclude LICENSE.md)
-    markdown_files=($(get_staged_files '\.(md|markdown)$' | grep -v 'LICENSE\.md$'))
-
-    # YAML files
-    yaml_files=($(get_staged_files '\\.(yml|yaml)$'))
-
-    # Process shell files
-    if [ ${#shell_files[@]} -gt 0 ]; then
-        log_info "Found ${#shell_files[@]} shell script(s) to check"
-
-        # Run shellcheck
-        if ! run_shellcheck "${shell_files[@]}"; then
-            overall_exit_code=1
-            # Collect failed files from shellcheck
-            for file in "${shell_files[@]}"; do
-                if ! shellcheck "$file" >/dev/null 2>&1; then
-                    all_failed_files+=("$file")
-                fi
-            done
-        fi
-
-        # Run shfmt
-        if ! run_shfmt "${shell_files[@]}"; then
-            overall_exit_code=1
-            # Collect failed files from shfmt (only add if not already in list)
-            for file in "${shell_files[@]}"; do
-                if ! shfmt $SHFMT_OPTS "$file" >/dev/null 2>&1; then
-                    # Check if file is already in failed list
-                    if [[ ! " ${all_failed_files[*]} " =~ " ${file} " ]]; then
-                        all_failed_files+=("$file")
-                    fi
-                fi
-            done
-        fi
+    if [[ "${AUTO_FIX_SHELL}" = true ]] || [[ "${AUTO_FIX_MARKDOWN}" = true ]] || [[ "${AUTO_FIX_SHELLCHECK}" = true ]]; then
+      echo ""
+      log_info "💡 Some issues may have been auto-fixed. Review changes and commit again."
     fi
 
-    # Process markdown files
-    if [ ${#markdown_files[@]} -gt 0 ]; then
-        log_info "Found ${#markdown_files[@]} markdown file(s) to check"
-
-        if ! run_markdownlint "${markdown_files[@]}"; then
-            overall_exit_code=1
-            # Collect failed files from markdownlint
-            for file in "${markdown_files[@]}"; do
-                if ! markdownlint $MARKDOWNLINT_OPTS "$file" >/dev/null 2>&1; then
-                    all_failed_files+=("$file")
-                fi
-            done
-        fi
-    fi
-
-    # Process YAML files
-    if [ ${#yaml_files[@]} -gt 0 ]; then
-        log_info "Found ${#yaml_files[@]} YAML file(s) to check"
-
-        if ! run_yamllint "${yaml_files[@]}"; then
-            overall_exit_code=1
-            for file in "${yaml_files[@]}"; do
-                if ! yamllint $YAMLLINT_OPTS "$file" >/dev/null 2>&1; then
-                    all_failed_files+=("$file")
-                fi
-            done
-        fi
-    fi
-
-    # Legacy Terraform support
-    run_terraform_fmt
-
-    # Final status
-    echo -e "\n${BLUE}========================================${NC}"
-    echo -e "${BLUE}           FINAL SUMMARY               ${NC}"
-    echo -e "${BLUE}========================================${NC}"
-
-    if [ $overall_exit_code -eq 0 ]; then
-        log_success "✅ All pre-commit checks passed!"
-        echo -e "${GREEN}Ready to commit!${NC}"
-    else
-        log_error "❌ Pre-commit checks failed"
-        echo -e "${RED}Please fix the issues listed above before committing.${NC}"
-
-        # Show list of files that need to be fixed
-        if [ ${#all_failed_files[@]} -gt 0 ]; then
-            echo ""
-            echo -e "${YELLOW}Files that need to be changed:${NC}"
-            printf "${RED}  %s${NC}\n" "${all_failed_files[@]}"
-        fi
-
-        if [ "$AUTO_FIX_SHELL" = true ] || [ "$AUTO_FIX_MARKDOWN" = true ] || [ "$AUTO_FIX_SHELLCHECK" = true ]; then
-            echo ""
-            log_info "💡 Some issues may have been auto-fixed. Review changes and commit again."
-        fi
-
-        echo ""
-        echo -e "${YELLOW}Quick commands to fix common issues:${NC}"
-        echo -e "  ${GREEN}# Review what changed:${NC}"
-        echo -e "  git diff"
-        echo -e "  ${GREEN}# Check specific file:${NC}"
-        echo -e "  shellcheck <filename>"
-        echo -e "  ${GREEN}# Add auto-fixed files:${NC}"
-        echo -e "  git add -u"
-    fi
     echo ""
+    echo -e "${YELLOW}Quick commands to fix common issues:${NC}"
+    echo -e "  ${GREEN}# Review what changed:${NC}"
+    echo -e "  git diff"
+    echo -e "  ${GREEN}# Check specific file:${NC}"
+    echo -e "  shellcheck <filename>"
+    echo -e "  ${GREEN}# Add auto-fixed files:${NC}"
+    echo -e "  git add -u"
+  fi
+  echo ""
 
-    exit $overall_exit_code
+  exit "${overall_exit_code}"
 }
 
 # =========================================================
