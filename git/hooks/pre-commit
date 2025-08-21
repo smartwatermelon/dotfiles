@@ -259,11 +259,13 @@ run_shfmt() {
     echo -e "${BLUE}=== [${current_file_count}/${#files[@]}] Formatting ${file} ===${NC}"
 
     # Check formatting without writing
-    if ! shfmt "${SHFMT_OPTS}" "${file}" >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    if ! shfmt ${SHFMT_OPTS} "${file}" >/dev/null 2>&1; then
 
       if [[ "${AUTO_FIX_SHELL}" = true ]]; then
         log_warning "Auto-fixing formatting in ${file}..."
-        if shfmt "${SHFMT_WRITE_OPTS}" "${file}" 2>/dev/null; then
+        # shellcheck disable=SC2086
+        if shfmt ${SHFMT_WRITE_OPTS} "${file}" 2>/dev/null; then
           log_success "Auto-fixed formatting in ${file}"
           # Re-stage the formatted file
           if [[ "${LINT_MODE:-staged}" == "staged" ]]; then
@@ -489,7 +491,8 @@ main() {
       overall_exit_code=1
       # Collect failed files from shfmt (only add if not already in list)
       for file in "${shell_files[@]}"; do
-        if ! shfmt "${SHFMT_OPTS}" "${file}" >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        if ! shfmt ${SHFMT_OPTS} "${file}" >/dev/null 2>&1; then
           # Check if file is already in failed list
           if [[ ! " ${all_failed_files[*]} " =~ \ ${file}\  ]]; then
             all_failed_files+=("${file}")
