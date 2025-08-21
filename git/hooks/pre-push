@@ -72,8 +72,24 @@ ensure_config_hardlinks() {
   fi
 }
 
+# Check if remote is GitHub
+is_github_remote() {
+  local remote_url
+  remote_url=$(git remote get-url origin 2>/dev/null || echo "")
+  
+  if [[ "${remote_url}" =~ github\.com ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 # Main execution
-log "Syncing configuration files before push..."
-ensure_config_hardlinks
+if is_github_remote; then
+  log "GitHub remote detected - syncing configuration files before push..."
+  ensure_config_hardlinks
+else
+  log "Non-GitHub remote detected - skipping config sync"
+fi
 
 log_success "Pre-push config sync complete!"

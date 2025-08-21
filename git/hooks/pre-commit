@@ -96,60 +96,6 @@ validate_tools() {
   return 0
 }
 
-# =========================================================
-# CONFIG HARDLINKS
-# =========================================================
-# =========================================================
-# CONFIGURATION HARDLINKS
-# =========================================================
-ensure_config_hardlinks() {
-  local repo_root
-  repo_root=$(git rev-parse --show-toplevel)
-
-  # Define config mappings: global_path:repo_filename
-  local configs=(
-    "${HOME}/.config/shellcheck/.shellcheckrc:.shellcheckrc"
-    "${HOME}/.config/yamllint/config:.yamllint"
-  )
-
-  local any_missing=false
-
-  for config_mapping in "${configs[@]}"; do
-    local global_config="${config_mapping%:*}"
-    local repo_filename="${config_mapping#*:}"
-    local repo_config="${repo_root}/${repo_filename}"
-
-    if [[ -f "${global_config}" ]]; then
-      # Remove existing repo config (file or broken link)
-      rm -f "${repo_config}"
-      # Create hardlink to global config
-      if ln "${global_config}" "${repo_config}" 2>/dev/null; then
-        # Stage it if it's new to git
-        git add "${repo_config}" 2>/dev/null || true
-        echo "✅ Linked ${repo_filename} from global config"
-      else
-        echo "⚠️  Could not create hardlink for ${repo_filename} (may be cross-filesystem)"
-        # Fallback to copy
-        cp "${global_config}" "${repo_config}"
-        git add "${repo_config}" 2>/dev/null || true
-        echo "📋 Copied ${repo_filename} from global config"
-      fi
-    elif [[ ! -f "${repo_config}" ]]; then
-      echo "⚠️  No ${repo_filename} config found (neither global nor repo)"
-      any_missing=true
-    else
-      echo "ℹ️  Using existing repo config: ${repo_filename}"
-    fi
-  done
-
-  if [[ "${any_missing}" == true ]]; then
-    echo "⚠️  Some config files are missing - tools may use defaults"
-    # Don't fail, just warn
-    return 0
-  fi
-
-  return 0
-}
 
 # =========================================================
 # SHELLCHECK PROCESSING
@@ -413,11 +359,6 @@ main() {
     exit 1
   fi
 
-  # Ensure config hardlinks exist before running
-  if ! ensure_config_hardlinks; then
-    log_error "Failed to ensure config hardlinks exist - cannot proceed"
-    return 1
-  fi
 
   local overall_exit_code=0
   local all_failed_files=()
