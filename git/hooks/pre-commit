@@ -408,8 +408,8 @@ main() {
         fi
     done < <(git diff --cached --name-only --diff-filter=ACM -z)
 
-    # Markdown files
-    markdown_files=($(get_staged_files '\.(md|markdown)$'))
+    # Markdown files (exclude LICENSE.md)
+    markdown_files=($(get_staged_files '\.(md|markdown)$' | grep -v 'LICENSE\.md$'))
 
     # YAML files
     yaml_files=($(get_staged_files '\\.(yml|yaml)$'))
