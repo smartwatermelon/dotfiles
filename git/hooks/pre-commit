@@ -96,7 +96,6 @@ validate_tools() {
   return 0
 }
 
-
 # =========================================================
 # SHELLCHECK PROCESSING
 # =========================================================
@@ -347,7 +346,6 @@ main() {
     exit 1
   fi
 
-
   local overall_exit_code=0
   local all_failed_files=()
 
@@ -367,7 +365,7 @@ main() {
       if [[ -f "${file}" ]]; then
         local first_line
         first_line=$(head -n1 "${file}" 2>/dev/null)
-        if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]] && [[ ! "${file}" =~ \.(sh|bash)$ ]]; then
+        if [[ "${first_line}" =~ ^#!.*(ba)?sh ]] && [[ ! "${file}" =~ \.(sh|bash)$ ]]; then
           shell_files+=("${file}")
         fi
       fi
@@ -378,7 +376,7 @@ main() {
       if [[ -f "${file}" ]]; then
         local first_line
         first_line=$(head -n1 "${file}" 2>/dev/null)
-        if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]] && [[ ! "${file}" =~ \.(sh|bash)$ ]]; then
+        if [[ "${first_line}" =~ ^#!.*(ba)?sh ]] && [[ ! "${file}" =~ \.(sh|bash)$ ]]; then
           # Only add if not already in array (skip if it has shell extension)
           if [[ ! " ${shell_files[*]} " =~ \ ${file}\  ]]; then
             shell_files+=("${file}")
@@ -404,22 +402,22 @@ main() {
   echo -e "\n${BLUE}=== FILES TO BE CHECKED ===${NC}"
   local total_files=$((${#shell_files[@]} + ${#markdown_files[@]} + ${#yaml_files[@]}))
   log_info "Total files found: ${total_files}"
-  
+
   if [[ ${#shell_files[@]} -gt 0 ]]; then
     echo -e "${YELLOW}Shell scripts (${#shell_files[@]}):${NC}"
     printf "  %s\n" "${shell_files[@]}"
   fi
-  
+
   if [[ ${#markdown_files[@]} -gt 0 ]]; then
     echo -e "${YELLOW}Markdown files (${#markdown_files[@]}):${NC}"
     printf "  %s\n" "${markdown_files[@]}"
   fi
-  
+
   if [[ ${#yaml_files[@]} -gt 0 ]]; then
     echo -e "${YELLOW}YAML files (${#yaml_files[@]}):${NC}"
     printf "  %s\n" "${yaml_files[@]}"
   fi
-  
+
   if [[ ${total_files} -eq 0 ]]; then
     log_info "No files found to check"
     exit 0
