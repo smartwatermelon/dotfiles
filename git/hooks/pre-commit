@@ -124,10 +124,6 @@ run_shellcheck() {
 
         if [[ -n "${diff_output}" ]] && echo "${diff_output}" | git apply 2>/dev/null; then
           log_success "Auto-fixed shellcheck issues in ${file}"
-          # Re-stage the fixed file
-          if [[ "${LINT_MODE:-staged}" == "staged" ]]; then
-            git add "${file}"
-          fi
           passed_files+=("${file} (auto-fixed)")
         else
           log_error "Could not auto-fix shellcheck issues in ${file}"
@@ -213,10 +209,6 @@ run_shfmt() {
         # shellcheck disable=SC2086
         if shfmt ${SHFMT_WRITE_OPTS} "${file}" 2>/dev/null; then
           log_success "Auto-fixed formatting in ${file}"
-          # Re-stage the formatted file
-          if [[ "${LINT_MODE:-staged}" == "staged" ]]; then
-            git add "${file}"
-          fi
           passed_files+=("${file} (auto-fixed)")
         else
           log_error "Could not auto-fix formatting in ${file}"
@@ -272,10 +264,6 @@ run_markdownlint() {
         log_warning "Auto-fixing markdown issues in ${file}..."
         if markdownlint "${MARKDOWNLINT_OPTS}" --fix "${file}"; then
           log_success "Auto-fixed markdown issues in ${file}"
-          # Re-stage the fixed file
-          if [[ "${LINT_MODE:-staged}" == "staged" ]]; then
-            git add "${file}"
-          fi
         else
           log_error "Could not auto-fix markdown issues in ${file}"
         fi
@@ -379,7 +367,7 @@ main() {
       if [[ -f "${file}" ]]; then
         local first_line
         first_line=$(head -n1 "${file}" 2>/dev/null)
-        if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]]; then
+        if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]] && [[ ! "${file}" =~ \.(sh|bash)$ ]]; then
           shell_files+=("${file}")
         fi
       fi
@@ -390,8 +378,8 @@ main() {
       if [[ -f "${file}" ]]; then
         local first_line
         first_line=$(head -n1 "${file}" 2>/dev/null)
-        if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]]; then
-          # Only add if not already in array
+        if [[ "${first_line}" =~ ^#!.*/(ba)?sh ]] && [[ ! "${file}" =~ \.(sh|bash)$ ]]; then
+          # Only add if not already in array (skip if it has shell extension)
           if [[ ! " ${shell_files[*]} " =~ \ ${file}\  ]]; then
             shell_files+=("${file}")
           fi
@@ -412,9 +400,35 @@ main() {
     yaml_files+=("${file}")
   done < <(get_target_files '\\.(yml|yaml)$' "${mode}" "${target_files[@]}" | tr '\n' '\0' || true)
 
+  # Show comprehensive file listing
+  echo -e "\n${BLUE}=== FILES TO BE CHECKED ===${NC}"
+  local total_files=$((${#shell_files[@]} + ${#markdown_files[@]} + ${#yaml_files[@]}))
+  log_info "Total files found: ${total_files}"
+  
+  if [[ ${#shell_files[@]} -gt 0 ]]; then
+    echo -e "${YELLOW}Shell scripts (${#shell_files[@]}):${NC}"
+    printf "  %s\n" "${shell_files[@]}"
+  fi
+  
+  if [[ ${#markdown_files[@]} -gt 0 ]]; then
+    echo -e "${YELLOW}Markdown files (${#markdown_files[@]}):${NC}"
+    printf "  %s\n" "${markdown_files[@]}"
+  fi
+  
+  if [[ ${#yaml_files[@]} -gt 0 ]]; then
+    echo -e "${YELLOW}YAML files (${#yaml_files[@]}):${NC}"
+    printf "  %s\n" "${yaml_files[@]}"
+  fi
+  
+  if [[ ${total_files} -eq 0 ]]; then
+    log_info "No files found to check"
+    exit 0
+  fi
+  echo ""
+
   # Process shell files
   if [[ ${#shell_files[@]} -gt 0 ]]; then
-    log_info "Found ${#shell_files[@]} shell script(s) to check"
+    log_info "Processing ${#shell_files[@]} shell script(s)..."
 
     # Run shellcheck
     if ! run_shellcheck "${shell_files[@]}"; then
@@ -445,7 +459,7 @@ main() {
 
   # Process markdown files
   if [[ ${#markdown_files[@]} -gt 0 ]]; then
-    log_info "Found ${#markdown_files[@]} markdown file(s) to check"
+    log_info "Processing ${#markdown_files[@]} markdown file(s)..."
 
     if ! run_markdownlint "${markdown_files[@]}"; then
       overall_exit_code=1
@@ -460,7 +474,7 @@ main() {
 
   # Process YAML files
   if [[ ${#yaml_files[@]} -gt 0 ]]; then
-    log_info "Found ${#yaml_files[@]} YAML file(s) to check"
+    log_info "Processing ${#yaml_files[@]} YAML file(s)..."
 
     if ! run_yamllint "${yaml_files[@]}"; then
       overall_exit_code=1
@@ -475,17 +489,36 @@ main() {
   # Legacy Terraform support
   run_terraform_fmt
 
+  # Re-stage auto-fixed files in staged mode
+  if [[ "${LINT_MODE:-staged}" == "staged" ]] && [[ "${AUTO_FIX_SHELL}" = true || "${AUTO_FIX_MARKDOWN}" = true || "${AUTO_FIX_SHELLCHECK}" = true ]]; then
+    if git diff --quiet --exit-code; then
+      : # No changes to stage
+    else
+      log_info "Re-staging auto-fixed files..."
+      git add -u
+      log_success "Auto-fixed files have been re-staged"
+    fi
+  fi
+
   # Final status
   echo -e "\n${BLUE}========================================${NC}"
   echo -e "${BLUE}           FINAL SUMMARY               ${NC}"
   echo -e "${BLUE}========================================${NC}"
 
   if [[ ${overall_exit_code} -eq 0 ]]; then
-    log_success "✅ All pre-commit checks passed!"
-    echo -e "${GREEN}Ready to commit!${NC}"
+    log_success "✅ All checks passed!"
+    if [[ "${LINT_MODE:-staged}" == "staged" ]]; then
+      echo -e "${GREEN}Ready to commit!${NC}"
+    else
+      echo -e "${GREEN}All files are clean!${NC}"
+    fi
   else
-    log_error "❌ Pre-commit checks failed"
-    echo -e "${RED}Please fix the issues listed above before committing.${NC}"
+    log_error "❌ Checks failed"
+    if [[ "${LINT_MODE:-staged}" == "staged" ]]; then
+      echo -e "${RED}Please fix the issues listed above before committing.${NC}"
+    else
+      echo -e "${RED}Please fix the issues listed above.${NC}"
+    fi
 
     # Show list of files that need to be fixed
     if [[ ${#all_failed_files[@]} -gt 0 ]]; then
@@ -501,12 +534,14 @@ main() {
 
     echo ""
     echo -e "${YELLOW}Quick commands to fix common issues:${NC}"
-    echo -e "  ${GREEN}# Review what changed:${NC}"
-    echo -e "  git diff"
+    if [[ "${LINT_MODE:-staged}" == "staged" ]]; then
+      echo -e "  ${GREEN}# Review what changed:${NC}"
+      echo -e "  git diff"
+      echo -e "  ${GREEN}# Add auto-fixed files:${NC}"
+      echo -e "  git add -u"
+    fi
     echo -e "  ${GREEN}# Check specific file:${NC}"
     echo -e "  shellcheck <filename>"
-    echo -e "  ${GREEN}# Add auto-fixed files:${NC}"
-    echo -e "  git add -u"
   fi
   echo ""
 
