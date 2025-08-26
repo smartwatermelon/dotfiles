@@ -32,19 +32,37 @@ for f in "$@"; do
       fi
       ;;
     shfmt)
-      # Attempt auto-fix
-      if ! shfmt -i 2 -ci -bn -w "${f}"; then
-        echo "[shfmt] Error formatting ${f}" >&2
-        exit_code=1
-        continue
-      fi
+      SHFMT_OPTS="-d -i 2 -ci -bn"
+      SHFMT_WRITE_OPTS="-i 2 -ci -bn -w"
+      # Anything?
+      # shellcheck disable=SC2086
+      if ! shfmt ${SHFMT_OPTS} "${f}"; then
+        echo "[shfmt] Found issues in ${f}, will attempt to auto-fix" >&2
 
-      # Second pass: check for remaining issues (syntax errors, etc.)
-      if ! shfmt -d "${f}" >/dev/null 2>&1; then
-        echo "[shfmt] Reformatted ${f}"
-      fi
+        # Attempt auto-fix
+        # shellcheck disable=SC2086
+        if ! shfmt ${SHFMT_WRITE_OPTS} "${f}"; then
+          echo "[shfmt] Couldn't auto-fix ${f}" >&2
+          exit_code=1
+          continue
+        else
+          echo "[shfmt] Successfully auto-fixed ${f}" >&2
+          exit_code=0
+        fi
 
-      # Always allow commit to pass
+        # Second pass: check for remaining issues (syntax errors, etc.)
+        # shellcheck disable=SC2086
+        if ! shfmt ${SHFMT_OPTS} "${f}"; then
+          echo "[shfmt] Unfixable issues in ${f}" >&2
+          exit_code=1
+          continue
+        else
+          echo "[shfmt] No issues remained in ${f} after auto-fix" >&2
+          exit_code=0
+        fi
+      fi
+      # Allow commit to pass if successfully fixed
+      exit_code=0
       continue
       ;;
     *)
