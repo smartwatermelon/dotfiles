@@ -34,10 +34,10 @@
 	enabled = true
 	autoupdate = true
 [core]
-	excludesfile = /Users/andrewrich/.config/git/gitignore_global
+	excludesfile = ${HOME}/.config/git/gitignore_global
 	fsmonitor = true
 	untrackedCache = true
-	hooksPath = /Users/andrewrich/.config/git/hooks
+	hooksPath = ${HOME}/.config/git/hooks
 [rebase]
 	autoSquash = true
 	autoStash = true
