@@ -6,17 +6,17 @@ LOCAL_CONFIG=".pre-commit-config.yaml"
 GLOBAL_CONFIG="${HOME}/.config/pre-commit/config.yaml"
 
 if ! command -v pre-commit >/dev/null 2>&1; then
-    echo "[pre-commit] ERROR: 'pre-commit' command not found in PATH." >&2
-    exit 1
+  echo "[pre-commit] ERROR: 'pre-commit' command not found in PATH." >&2
+  exit 1
 fi
 
 if [[ -f "${LOCAL_CONFIG}" ]]; then
-    echo "[pre-commit] Running with repo-local config: ${LOCAL_CONFIG}"
-    exec pre-commit run --all-files "$@"
+  echo "[pre-commit] Running with repo-local config: ${LOCAL_CONFIG}"
+  exec pre-commit run --all-files "$@"
 elif [[ -f "${GLOBAL_CONFIG}" ]]; then
-    echo "[pre-commit] Running with global config: ${GLOBAL_CONFIG}"
-    exec pre-commit run --config "${GLOBAL_CONFIG}" --all-files "$@"
+  echo "[pre-commit] Running with global config: ${GLOBAL_CONFIG}"
+  exec pre-commit run --config "${GLOBAL_CONFIG}" --all-files "$@"
 else
-    echo "[pre-commit] ERROR: No config found (expected ${LOCAL_CONFIG} or ${GLOBAL_CONFIG})." >&2
-    exit 1
+  echo "[pre-commit] ERROR: No config found (expected ${LOCAL_CONFIG} or ${GLOBAL_CONFIG})." >&2
+  exit 1
 fi

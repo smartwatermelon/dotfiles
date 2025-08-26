@@ -43,7 +43,7 @@ ensure_config_hardlinks() {
     if [[ -f "${global_config}" ]]; then
       # Ensure .github/workflows directory exists
       mkdir -p "${repo_root}/.github/workflows"
-      
+
       # Check if repo config is missing or different
       if [[ ! -f "${repo_config}" ]] || ! cmp -s "${global_config}" "${repo_config}"; then
         # Remove existing repo config (file or broken link)
@@ -79,7 +79,7 @@ ensure_config_hardlinks() {
 is_github_remote() {
   local remote_url
   remote_url=$(git remote get-url origin 2>/dev/null || echo "")
-  
+
   if [[ "${remote_url}" =~ github\.com ]]; then
     return 0
   else
@@ -91,12 +91,12 @@ is_github_remote() {
 has_github_workflows_using_configs() {
   local repo_root
   repo_root=$(git rev-parse --show-toplevel)
-  
+
   # Check if .github/workflows directory exists
   if [[ ! -d "${repo_root}/.github/workflows" ]]; then
     return 1
   fi
-  
+
   # Check if any workflow files reference the config files we manage
   if grep -r "\.shellcheckrc\|\.yamllint" "${repo_root}/.github/workflows/" >/dev/null 2>&1; then
     return 0
