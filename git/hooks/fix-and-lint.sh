@@ -29,12 +29,25 @@ for f in "$@"; do
       if [[ -n "${diff}" ]]; then
         echo "[shellcheck] Auto-fixing ${f}"
         echo "${diff}" | git apply
+
+        # Re-lint after fixes
+        remaining=$(shellcheck "${f}" || true)
+        if [[ -n "${remaining}" ]]; then
+          echo "[shellcheck] ❌ Remaining issues in ${f}:"
+          echo "${remaining}"
+          exit_code=1
+          continue
+        fi
+
+        # Success: auto-fixed with no further issues
+        notify_autofix "${f}"
+        continue
       fi
 
-      # Re-lint after fixes
+      # No fixes were applied, just check normally
       remaining=$(shellcheck "${f}" || true)
       if [[ -n "${remaining}" ]]; then
-        echo "[shellcheck] Remaining issues in ${f}:"
+        echo "[shellcheck] ❌ Issues in ${f}:"
         echo "${remaining}"
         exit_code=1
       fi
