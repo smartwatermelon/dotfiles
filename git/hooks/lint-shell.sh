@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-inside_git=false
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  inside_git=true
-fi
-
 fixed_files=()
 failed_files=()
 
@@ -17,10 +12,16 @@ for f in "$@"; do
   if command -v shellcheck >/dev/null; then
     diff=$(shellcheck --format=diff "${f}" || true)
     if [[ -n "${diff}" ]]; then
-      echo "[shellcheck] ✅ Auto-fixed ${f}"
-      echo "${diff}" | git apply
-      ${inside_git} && git add "${f}"
-      fixed_files+=("${f}")
+      tmpfile=$(mktemp)
+      cp "${f}" "${tmpfile}"
+      if echo "${diff}" | patch --quiet "${tmpfile}"; then
+        mv "${tmpfile}" "${f}"
+        echo "[shellcheck] ✅ Auto-fixed ${f}"
+        fixed_files+=("${f}")
+      else
+        echo "[shellcheck] ❌ Failed to apply patch for ${f}, leaving file untouched"
+        rm -f "${tmpfile}"
+      fi
     fi
 
     remaining=$(shellcheck "${f}" || true)
@@ -35,7 +36,6 @@ for f in "$@"; do
   # --- shfmt ---
   if command -v shfmt >/dev/null; then
     shfmt -w -i 2 -ci -bn "${f}"
-    ${inside_git} && git add "${f}"
     if ! shfmt -d -i 2 -ci -bn "${f}"; then
       shfmt_remaining=$(shfmt -d -i 2 -ci -bn "${f}")
       issues_remaining+="shfmt:\n${shfmt_remaining}\n"
