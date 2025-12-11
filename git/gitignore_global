@@ -1,4 +1,3 @@
 .DS_Store
-**/.claude/settings.local.json
 /Users/andrewrich/.cache/
-CLAUDE.md
+.env
