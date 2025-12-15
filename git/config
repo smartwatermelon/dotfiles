@@ -12,8 +12,10 @@
 [init]
 	defaultBranch = main
 [diff]
+	# Custom prefixes for better diff readability (SRC/DST instead of a/b)
 	srcPrefix = "SRC "
 	dstPrefix = "DST "
+	# Histogram algorithm: better rename detection than Myers
 	algorithm = histogram
 	colorMoved = plain
 	mnemonicPrefix = true
@@ -23,9 +25,9 @@
 	autoSetupRemote = true
 	followTags = true
 [fetch]
-	prune = true
-	pruneTags = true
-	all = true
+	prune = true       # Remove stale remote-tracking branches
+	pruneTags = true   # Remove stale tags
+	all = true         # Fetch from all remotes (not just origin)
 [help]
 	autocorrect = prompt
 [commit]
@@ -35,8 +37,9 @@
 	autoupdate = true
 [core]
 	excludesfile = /Users/andrewrich/.config/git/gitignore_global
-	fsmonitor = true
-	untrackedCache = true
+	# Performance optimizations
+	fsmonitor = true          # File system monitor for large repos
+	untrackedCache = true      # Cache untracked files list
 	hooksPath = /Users/andrewrich/.config/git/hooks
 [rebase]
 	autoSquash = true
