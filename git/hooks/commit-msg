@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =========================================================
+# COMMIT MESSAGE VALIDATION
+# 1. Blocks commits to protected branches
+# 2. Runs automated code review on staged changes
+# =========================================================
+
+# --- Branch protection (redundant with pre-commit, but defense in depth) ---
+current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+if [[ "${current_branch}" == "main" || "${current_branch}" == "master" ]]; then
+  echo "" >&2
+  echo "🛑 STOP: Direct commits to '${current_branch}' are not allowed." >&2
+  exit 1
+fi
+
+# --- Run automated review ---
+REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
+
+if [[ -x "$REVIEW_SCRIPT" ]]; then
+  # Get staged diff and pipe to review
+  if ! git diff --cached | "$REVIEW_SCRIPT"; then
+    echo "" >&2
+    echo "🛑 Commit blocked by code review." >&2
+    echo "   Address the issues above and try again." >&2
+    echo "" >&2
+    echo "   To bypass (emergency only): git commit --no-verify" >&2
+    echo "" >&2
+    exit 1
+  fi
+else
+  echo "[commit-msg] Warning: Review script not found or not executable" >&2
+  echo "[commit-msg] Expected: $REVIEW_SCRIPT" >&2
+  echo "[commit-msg] Skipping automated review" >&2
+fi
+
+exit 0
