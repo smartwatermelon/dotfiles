@@ -2,6 +2,27 @@
 set -euo pipefail
 
 # =========================================================
+# BRANCH PROTECTION - Do not push directly to main/master
+# =========================================================
+protected_branch_check() {
+  local current_branch
+  current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+
+  if [[ "${current_branch}" == "main" || "${current_branch}" == "master" ]]; then
+    echo "" >&2
+    echo "🛑 STOP: Direct pushes to '${current_branch}' are not allowed." >&2
+    echo "" >&2
+    echo "   Use the PR workflow: branch → push → PR → merge" >&2
+    echo "" >&2
+    echo "   If you REALLY need to bypass this (you probably don't):" >&2
+    echo "   git push --no-verify" >&2
+    echo "" >&2
+    exit 1
+  fi
+}
+protected_branch_check
+
+# =========================================================
 # CONFIGURATION HARDLINKS (Pre-push)
 # =========================================================
 

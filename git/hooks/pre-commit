@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# =========================================================
+# BRANCH PROTECTION - Do not commit directly to main/master
+# =========================================================
+protected_branch_check() {
+  local current_branch
+  current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+
+  if [[ "${current_branch}" == "main" || "${current_branch}" == "master" ]]; then
+    echo "" >&2
+    echo "🛑 STOP: Direct commits to '${current_branch}' are not allowed." >&2
+    echo "" >&2
+    echo "   Create a feature branch first:" >&2
+    echo "   git checkout -b <branch-name>" >&2
+    echo "" >&2
+    echo "   If you REALLY need to bypass this (you probably don't):" >&2
+    echo "   git commit --no-verify" >&2
+    echo "" >&2
+    exit 1
+  fi
+}
+protected_branch_check
+
 # Prefer repo-local config if it exists, otherwise fall back to global
 LOCAL_CONFIG=".pre-commit-config.yaml"
 GLOBAL_CONFIG="${HOME}/.config/pre-commit/config.yaml"
