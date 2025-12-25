@@ -18,9 +18,9 @@ fi
 # --- Run automated review ---
 REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
 
-if [[ -x "$REVIEW_SCRIPT" ]]; then
+if [[ -x "${REVIEW_SCRIPT}" ]]; then
   # Get staged diff and pipe to review
-  if ! git diff --cached | "$REVIEW_SCRIPT"; then
+  if ! git diff --cached | "${REVIEW_SCRIPT}"; then
     echo "" >&2
     echo "🛑 Commit blocked by code review." >&2
     echo "   Address the issues above and try again." >&2
@@ -31,7 +31,7 @@ if [[ -x "$REVIEW_SCRIPT" ]]; then
   fi
 else
   echo "[commit-msg] Warning: Review script not found or not executable" >&2
-  echo "[commit-msg] Expected: $REVIEW_SCRIPT" >&2
+  echo "[commit-msg] Expected: ${REVIEW_SCRIPT}" >&2
   echo "[commit-msg] Skipping automated review" >&2
 fi
 
