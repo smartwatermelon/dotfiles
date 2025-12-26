@@ -72,24 +72,14 @@ ensure_config_hardlinks() {
         # Create hardlink to global config
         if ln "${global_config}" "${repo_config}" 2>/dev/null; then
           log_success "✅ Updated ${repo_filename} in .github/workflows/ from global config"
-          # Stage it for inclusion in push
-          if git add "${repo_config}" 2>/dev/null; then
-            log "   → File staged and will be included in this push"
-          else
-            log_warning "   ⚠️  Could not stage ${repo_filename} (already committed or git error)"
-          fi
+          git add "${repo_config}" 2>/dev/null || true
           any_updated=true
         else
           log_warning "⚠️  Could not create hardlink for ${repo_filename} (cross-filesystem)"
           # Fallback to copy
           cp "${global_config}" "${repo_config}"
-          if git add "${repo_config}" 2>/dev/null; then
-            log_success "📋 Copied ${repo_filename} to .github/workflows/ from global config"
-            log "   → File staged and will be included in this push"
-          else
-            log_success "📋 Copied ${repo_filename} to .github/workflows/ from global config"
-            log_warning "   ⚠️  Could not stage ${repo_filename} (already committed or git error)"
-          fi
+          log_success "📋 Copied ${repo_filename} to .github/workflows/ from global config"
+          git add "${repo_config}" 2>/dev/null || true
           any_updated=true
         fi
       fi
@@ -99,13 +89,25 @@ ensure_config_hardlinks() {
   done
 
   if [[ "${any_updated}" == true ]]; then
-    echo "" >&2
-    log_success "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    log_success "🔄 CONFIG SYNC: Files have been auto-staged for this push"
-    log_success "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    log "Config files in .github/workflows/ have been synced from global configs"
-    log "These files are now staged and will be included in your push"
-    echo "" >&2
+    # Check if there are actually staged changes (files might already be committed)
+    if ! git diff --cached --quiet 2>/dev/null; then
+      echo "" >&2
+      log_success "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      log_success "🔄 CONFIG SYNC: Auto-committing updated workflow configs"
+      log_success "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      log "Creating commit with synced config files from global settings..."
+      echo "" >&2
+
+      # Create auto-commit with synced configs (use --no-verify to avoid hook recursion)
+      if git commit --no-verify -m "chore(ci): sync workflow configs from global settings" 2>&1; then
+        log_success "✅ Auto-commit created - config files will be included in push"
+      else
+        log_warning "⚠️  Could not create auto-commit (may already be committed)"
+      fi
+      echo "" >&2
+    else
+      log "✅ Config files synced (no changes to commit)"
+    fi
   else
     log "✅ All config files in .github/workflows/ are up to date"
   fi
