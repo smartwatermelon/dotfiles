@@ -34,11 +34,35 @@ fi
 
 if [[ -f "${LOCAL_CONFIG}" ]]; then
   echo "[pre-commit] Running with repo-local config: ${LOCAL_CONFIG}"
-  exec pre-commit run "$@"
+  pre-commit run "$@" || exit 1
 elif [[ -f "${GLOBAL_CONFIG}" ]]; then
   echo "[pre-commit] Running with global config: ${GLOBAL_CONFIG}"
-  exec pre-commit run --config "${GLOBAL_CONFIG}" "$@"
+  pre-commit run --config "${GLOBAL_CONFIG}" "$@" || exit 1
 else
   echo "[pre-commit] ERROR: No config found (expected ${LOCAL_CONFIG} or ${GLOBAL_CONFIG})." >&2
   exit 1
 fi
+
+# =========================================================
+# AUTOMATED CODE REVIEW (runs only if pre-commit passes)
+# =========================================================
+REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
+
+if [[ -x "${REVIEW_SCRIPT}" ]]; then
+  # Get staged diff and pipe to review
+  if ! git diff --cached | "${REVIEW_SCRIPT}"; then
+    echo "" >&2
+    echo "🛑 Commit blocked by code review." >&2
+    echo "   Address the issues above and try again." >&2
+    echo "" >&2
+    echo "   To bypass (emergency only): git commit --no-verify" >&2
+    echo "" >&2
+    exit 1
+  fi
+else
+  echo "[pre-commit] Warning: Review script not found or not executable" >&2
+  echo "[pre-commit] Expected: ${REVIEW_SCRIPT}" >&2
+  echo "[pre-commit] Skipping automated review" >&2
+fi
+
+exit 0
