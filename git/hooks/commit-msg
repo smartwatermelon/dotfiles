@@ -2,37 +2,80 @@
 set -euo pipefail
 
 # =========================================================
-# COMMIT MESSAGE VALIDATION
-# 1. Blocks commits to protected branches
-# 2. Runs automated code review on staged changes
+# COMMIT MESSAGE VALIDATION - Conventional Commits Format
 # =========================================================
+#
+# Enforces conventional commits format:
+#   <type>(<scope>): <description>
+#
+# Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert
+# Scope is optional
+# Description must be present and start with lowercase
+#
+# Examples:
+#   ✅ feat(auth): add JWT token refresh
+#   ✅ fix: resolve memory leak in parser
+#   ✅ docs(api): update authentication guide
+#   ❌ Add new feature (missing type)
+#   ❌ FEAT: new feature (type must be lowercase)
+#
 
-# --- Branch protection (redundant with pre-commit, but defense in depth) ---
-current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
-if [[ "${current_branch}" == "main" || "${current_branch}" == "master" ]]; then
+COMMIT_MSG_FILE="$1"
+
+# Read the first line of the commit message
+FIRST_LINE=$(head -1 "${COMMIT_MSG_FILE}")
+
+# Skip validation for merge commits
+if [[ "${FIRST_LINE}" =~ ^Merge ]]; then
+  exit 0
+fi
+
+# Conventional commits regex pattern
+# Format: type(optional-scope): description
+PATTERN='^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([a-z0-9-]+\))?: .{1,}'
+
+if ! echo "${FIRST_LINE}" | grep -qE "${PATTERN}"; then
   echo "" >&2
-  echo "🛑 STOP: Direct commits to '${current_branch}' are not allowed." >&2
+  echo "🛑 COMMIT MESSAGE VALIDATION FAILED" >&2
+  echo "" >&2
+  echo "Commit message must follow conventional commits format:" >&2
+  echo "  <type>(<scope>): <description>" >&2
+  echo "" >&2
+  echo "Valid types:" >&2
+  echo "  feat     - New feature" >&2
+  echo "  fix      - Bug fix" >&2
+  echo "  docs     - Documentation changes" >&2
+  echo "  style    - Code style/formatting (no logic change)" >&2
+  echo "  refactor - Code refactoring" >&2
+  echo "  test     - Adding or updating tests" >&2
+  echo "  chore    - Maintenance tasks" >&2
+  echo "  perf     - Performance improvements" >&2
+  echo "  ci       - CI/CD changes" >&2
+  echo "  build    - Build system changes" >&2
+  echo "  revert   - Revert previous commit" >&2
+  echo "" >&2
+  echo "Your message:" >&2
+  echo "  ${FIRST_LINE}" >&2
+  echo "" >&2
+  echo "Examples of valid messages:" >&2
+  echo "  feat(auth): add JWT token refresh" >&2
+  echo "  fix: resolve memory leak in parser" >&2
+  echo "  docs(api): update authentication guide" >&2
+  echo "" >&2
+  echo "To bypass (emergency only): git commit --no-verify" >&2
+  echo "" >&2
   exit 1
 fi
 
-# --- Run automated review ---
-REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
-
-if [[ -x "${REVIEW_SCRIPT}" ]]; then
-  # Get staged diff and pipe to review
-  if ! git diff --cached | "${REVIEW_SCRIPT}"; then
-    echo "" >&2
-    echo "🛑 Commit blocked by code review." >&2
-    echo "   Address the issues above and try again." >&2
-    echo "" >&2
-    echo "   To bypass (emergency only): git commit --no-verify" >&2
-    echo "" >&2
-    exit 1
-  fi
-else
-  echo "[commit-msg] Warning: Review script not found or not executable" >&2
-  echo "[commit-msg] Expected: ${REVIEW_SCRIPT}" >&2
-  echo "[commit-msg] Skipping automated review" >&2
+# Optional: Check for subject line length (recommended max 72 chars)
+SUBJECT_LENGTH=${#FIRST_LINE}
+if [[ ${SUBJECT_LENGTH} -gt 72 ]]; then
+  echo "" >&2
+  echo "⚠️  WARNING: Subject line is ${SUBJECT_LENGTH} characters (recommended max: 72)" >&2
+  echo "" >&2
+  echo "Consider shortening your message or moving details to the body." >&2
+  echo "" >&2
+  # This is a warning, not an error - don't exit 1
 fi
 
 exit 0
