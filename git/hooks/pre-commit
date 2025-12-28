@@ -16,7 +16,7 @@ protected_branch_check() {
     echo "   git checkout -b <branch-name>" >&2
     echo "" >&2
     echo "   If you REALLY need to bypass this (you probably don't):" >&2
-    echo "   git commit --no-verify" >&2
+    echo "   OBTAIN EXPLICIT PERMISSION and then git commit --no-verify" >&2
     echo "" >&2
     exit 1
   fi
