@@ -15,7 +15,7 @@ protected_branch_check() {
     echo "   Use the PR workflow: branch → push → PR → merge" >&2
     echo "" >&2
     echo "   If you REALLY need to bypass this (you probably don't):" >&2
-    echo "   git push --no-verify" >&2
+    echo "   OBTAIN EXPLICIT PERMISSION and then git push --no-verify" >&2
     echo "" >&2
     exit 1
   fi

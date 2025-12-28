@@ -62,7 +62,8 @@ if ! echo "${FIRST_LINE}" | grep -qE "${PATTERN}"; then
   echo "  fix: resolve memory leak in parser" >&2
   echo "  docs(api): update authentication guide" >&2
   echo "" >&2
-  echo "To bypass (emergency only): git commit --no-verify" >&2
+  echo "To bypass (emergency only):" >&2
+  echo "  OBTAIN EXPLICIT PERMISSION and then git commit --no-verify" >&2
   echo "" >&2
   exit 1
 fi
