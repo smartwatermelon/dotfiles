@@ -66,7 +66,7 @@ check_pr_review_iteration() {
 
     # Check CI status - if gh command fails, treat as no issues (defensive)
     if gh pr checks &>/dev/null; then
-      last_ci_status=$(gh pr checks 2>/dev/null | grep -ciE '\bfail(ed|ure)?\b' || echo 0)
+      last_ci_status=$(gh pr checks 2>/dev/null | grep -ciE '\bfail(ed|ure)?\b' || true)
     fi
 
     if [[ "${last_ci_status}" -gt 0 ]]; then
@@ -79,7 +79,7 @@ check_pr_review_iteration() {
 
     # If gh command fails, treat as no comments (defensive)
     if gh pr view --comments &>/dev/null; then
-      recent_comments=$(gh pr view --comments 2>/dev/null | tail -100 | grep -ci "claude\|sentry" || echo 0)
+      recent_comments=$(gh pr view --comments 2>/dev/null | tail -100 | grep -ci "claude\|sentry" || true)
     fi
 
     if [[ "${recent_comments}" -gt 0 ]]; then
