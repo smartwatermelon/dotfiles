@@ -13,6 +13,31 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# =========================================================
+# PERMISSION RESTORATION - Fix files edited by Claude Code
+# =========================================================
+# Claude Code's Edit/Write tools strip +x during atomic writes.
+# Detect and restore +x on shell scripts with shebangs BEFORE
+# they are committed to git.
+
+for f in "$@"; do
+  [[ -f "${f}" ]] || continue
+
+  # Only check .sh files (or files with shell shebangs)
+  if [[ "${f}" == *.sh ]] || head -n1 "${f}" 2>/dev/null | grep -qE '^#!/.*(bash|sh|zsh|ksh)'; then
+    # If file has shebang but is missing +x, restore it
+    if head -n1 "${f}" 2>/dev/null | grep -qE '^#!/' && [[ ! -x "${f}" ]]; then
+      echo "[lint-shell] ⚠️  Restoring +x on ${f} (Claude Code stripped it)" >&2
+      chmod +x "${f}"
+      # File will be re-staged automatically by pre-commit framework
+    fi
+  fi
+done
+
+# =========================================================
+# SHELLCHECK AND SHFMT PROCESSING
+# =========================================================
+
 for f in "$@"; do
   [[ -f "${f}" ]] || continue
   issues_remaining=""
@@ -28,11 +53,16 @@ for f in "$@"; do
 
     if [[ -n "${shellcheck_diff}" ]]; then
       # Try to auto-fix with diff output
+      # Capture original permissions before creating tmpfile (macOS BSD stat)
+      original_perms=$(stat -f "%OLp" "${f}")
+
       # Create tmpfile in same directory for atomic mv across filesystems
       tmpfile=$(mktemp "${f}.XXXXXX")
       temp_files+=("${tmpfile}")
 
       if cp "${f}" "${tmpfile}" && echo "${shellcheck_diff}" | patch --quiet "${tmpfile}" 2>/dev/null; then
+        # Restore original permissions before replacing file
+        chmod "${original_perms}" "${tmpfile}"
         mv "${tmpfile}" "${f}"
         fixed_by_shellcheck["${f}"]=1
 
@@ -60,11 +90,16 @@ for f in "$@"; do
       :
     else
       # Needs formatting - use atomic write via tmpfile
+      # Capture original permissions before creating tmpfile (macOS BSD stat)
+      original_perms=$(stat -f "%OLp" "${f}")
+
       # Create tmpfile in same directory for atomic mv across filesystems
       tmpfile=$(mktemp "${f}.XXXXXX")
       temp_files+=("${tmpfile}")
 
       if shfmt -i 2 -ci -bn "${f}" >"${tmpfile}"; then
+        # Restore original permissions before replacing file
+        chmod "${original_perms}" "${tmpfile}"
         mv "${tmpfile}" "${f}"
         fixed_by_shfmt["${f}"]=1
       else
