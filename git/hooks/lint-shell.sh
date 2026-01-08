@@ -13,6 +13,41 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# =========================================================
+# PERMISSION VERIFICATION - Detect permission mismatches
+# =========================================================
+# Check for shell scripts with shebangs but missing +x permissions.
+# This is a PASSIVE check - we warn and fail, but don't auto-fix.
+# Claude Code CLI will handle the fix automatically.
+
+permission_errors=()
+for f in "$@"; do
+  [[ -f "${f}" ]] || continue
+
+  # Check if file has shebang but is missing +x
+  if head -n1 "${f}" 2>/dev/null | grep -qE '^#!/' && [[ ! -x "${f}" ]]; then
+    permission_errors+=("${f}")
+  fi
+done
+
+# Report errors but don't auto-fix
+if [[ ${#permission_errors[@]} -gt 0 ]]; then
+  echo "" >&2
+  echo "❌ Permission mismatch detected:" >&2
+  for f in "${permission_errors[@]}"; do
+    echo "   ${f} has shebang but is not executable" >&2
+  done
+  echo "" >&2
+  echo "   Fix with: chmod +x <file>" >&2
+  echo "   Or let Claude Code CLI handle this automatically" >&2
+  echo "" >&2
+  exit 1
+fi
+
+# =========================================================
+# SHELLCHECK AND SHFMT PROCESSING
+# =========================================================
+
 for f in "$@"; do
   [[ -f "${f}" ]] || continue
   issues_remaining=""
@@ -28,11 +63,16 @@ for f in "$@"; do
 
     if [[ -n "${shellcheck_diff}" ]]; then
       # Try to auto-fix with diff output
+      # Capture original permissions before creating tmpfile (macOS BSD stat)
+      original_perms=$(stat -f "%OLp" "${f}")
+
       # Create tmpfile in same directory for atomic mv across filesystems
       tmpfile=$(mktemp "${f}.XXXXXX")
       temp_files+=("${tmpfile}")
 
       if cp "${f}" "${tmpfile}" && echo "${shellcheck_diff}" | patch --quiet "${tmpfile}" 2>/dev/null; then
+        # Restore original permissions before replacing file
+        chmod "${original_perms}" "${tmpfile}"
         mv "${tmpfile}" "${f}"
         fixed_by_shellcheck["${f}"]=1
 
@@ -60,11 +100,16 @@ for f in "$@"; do
       :
     else
       # Needs formatting - use atomic write via tmpfile
+      # Capture original permissions before creating tmpfile (macOS BSD stat)
+      original_perms=$(stat -f "%OLp" "${f}")
+
       # Create tmpfile in same directory for atomic mv across filesystems
       tmpfile=$(mktemp "${f}.XXXXXX")
       temp_files+=("${tmpfile}")
 
       if shfmt -i 2 -ci -bn "${f}" >"${tmpfile}"; then
+        # Restore original permissions before replacing file
+        chmod "${original_perms}" "${tmpfile}"
         mv "${tmpfile}" "${f}"
         fixed_by_shfmt["${f}"]=1
       else
