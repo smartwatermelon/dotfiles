@@ -14,25 +14,35 @@ cleanup() {
 trap cleanup EXIT
 
 # =========================================================
-# PERMISSION RESTORATION - Fix files edited by Claude Code
+# PERMISSION VERIFICATION - Detect permission mismatches
 # =========================================================
-# Claude Code's Edit/Write tools strip +x during atomic writes.
-# Detect and restore +x on shell scripts with shebangs BEFORE
-# they are committed to git.
+# Check for shell scripts with shebangs but missing +x permissions.
+# This is a PASSIVE check - we warn and fail, but don't auto-fix.
+# Claude Code CLI will handle the fix automatically.
 
+permission_errors=()
 for f in "$@"; do
   [[ -f "${f}" ]] || continue
 
-  # Only check .sh files (or files with shell shebangs)
-  if [[ "${f}" == *.sh ]] || head -n1 "${f}" 2>/dev/null | grep -qE '^#!/.*(bash|sh|zsh|ksh)'; then
-    # If file has shebang but is missing +x, restore it
-    if head -n1 "${f}" 2>/dev/null | grep -qE '^#!/' && [[ ! -x "${f}" ]]; then
-      echo "[lint-shell] ⚠️  Restoring +x on ${f} (Claude Code stripped it)" >&2
-      chmod +x "${f}"
-      # File will be re-staged automatically by pre-commit framework
-    fi
+  # Check if file has shebang but is missing +x
+  if head -n1 "${f}" 2>/dev/null | grep -qE '^#!/' && [[ ! -x "${f}" ]]; then
+    permission_errors+=("${f}")
   fi
 done
+
+# Report errors but don't auto-fix
+if [[ ${#permission_errors[@]} -gt 0 ]]; then
+  echo "" >&2
+  echo "❌ Permission mismatch detected:" >&2
+  for f in "${permission_errors[@]}"; do
+    echo "   ${f} has shebang but is not executable" >&2
+  done
+  echo "" >&2
+  echo "   Fix with: chmod +x <file>" >&2
+  echo "   Or let Claude Code CLI handle this automatically" >&2
+  echo "" >&2
+  exit 1
+fi
 
 # =========================================================
 # SHELLCHECK AND SHFMT PROCESSING
