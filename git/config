@@ -11,6 +11,7 @@
 	sort = version:refname
 [init]
 	defaultBranch = main
+	templateDir = ~/.config/git/template
 [diff]
 	# Custom prefixes for better diff readability (SRC/DST instead of a/b)
 	srcPrefix = "SRC "
