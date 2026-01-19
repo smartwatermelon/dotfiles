@@ -27,20 +27,27 @@ log_warning() {
 # BRANCH PROTECTION - Do not push directly to main/master
 # =========================================================
 protected_branch_check() {
-  local current_branch
-  current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+  # Read push data from stdin
+  # Format: <local ref> <local sha1> <remote ref> <remote sha1>
+  while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    # Allow tag pushes - tags don't modify branch history
+    if [[ "${remote_ref}" =~ ^refs/tags/ ]]; then
+      continue
+    fi
 
-  if [[ "${current_branch}" == "main" || "${current_branch}" == "master" ]]; then
-    echo "" >&2
-    echo "🛑 STOP: Direct pushes to '${current_branch}' are not allowed." >&2
-    echo "" >&2
-    echo "   Use the PR workflow: branch → push → PR → merge" >&2
-    echo "" >&2
-    echo "   If you REALLY need to bypass this (you probably don't):" >&2
-    echo "   OBTAIN EXPLICIT PERMISSION and then git push --no-verify" >&2
-    echo "" >&2
-    exit 1
-  fi
+    # Block direct pushes to main/master branches
+    if [[ "${remote_ref}" == "refs/heads/main" || "${remote_ref}" == "refs/heads/master" ]]; then
+      echo "" >&2
+      echo "🛑 STOP: Direct pushes to '${remote_ref##*/}' are not allowed." >&2
+      echo "" >&2
+      echo "   Use the PR workflow: branch → push → PR → merge" >&2
+      echo "" >&2
+      echo "   If you REALLY need to bypass this (you probably don't):" >&2
+      echo "   OBTAIN EXPLICIT PERMISSION and then git push --no-verify" >&2
+      echo "" >&2
+      exit 1
+    fi
+  done
 }
 protected_branch_check
 
