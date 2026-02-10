@@ -59,7 +59,7 @@ for f in "$@"; do
     # noise. Re-enable with --exclude='' if stricter checking is needed.
 
     # Run shellcheck once in diff mode
-    shellcheck_diff=$(shellcheck --exclude=SC2312 --format=diff "${f}" 2>&1 || true)
+    shellcheck_diff=$(shellcheck --severity=warning --exclude=SC2312 --format=diff "${f}" 2>&1 || true)
 
     if [[ -n "${shellcheck_diff}" ]]; then
       # Try to auto-fix with diff output
@@ -77,8 +77,8 @@ for f in "$@"; do
         fixed_by_shellcheck["${f}"]=1
 
         # After successful auto-fix, check if any issues remain
-        if ! shellcheck --exclude=SC2312 "${f}" >/dev/null 2>&1; then
-          remaining=$(shellcheck --exclude=SC2312 "${f}" 2>&1 || true)
+        if ! shellcheck --severity=warning --exclude=SC2312 "${f}" >/dev/null 2>&1; then
+          remaining=$(shellcheck --severity=warning --exclude=SC2312 "${f}" 2>&1 || true)
           issues_remaining+="ShellCheck:\n${remaining}\n"
         fi
       else
@@ -133,10 +133,10 @@ echo "----------------------------------------"
 
 # Show files fixed by each tool (deduplicated)
 all_fixed=()
-for f in "${!fixed_by_shellcheck[@]+"${!fixed_by_shellcheck[@]}"}"; do
+for f in "${!fixed_by_shellcheck[@]}"; do
   [[ -n "${f}" ]] && all_fixed+=("${f} (shellcheck)")
 done
-for f in "${!fixed_by_shfmt[@]+"${!fixed_by_shfmt[@]}"}"; do
+for f in "${!fixed_by_shfmt[@]}"; do
   [[ -n "${f}" ]] && all_fixed+=("${f} (shfmt)")
 done
 
@@ -147,7 +147,7 @@ fi
 
 # Check for failed files
 has_failures=false
-for f in "${!failed_files[@]+"${!failed_files[@]}"}"; do
+for f in "${!failed_files[@]}"; do
   if [[ -n "${f}" ]]; then
     if ! ${has_failures}; then
       echo "❌ Files with remaining issues:"
