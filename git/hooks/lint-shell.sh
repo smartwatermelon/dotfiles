@@ -133,10 +133,10 @@ echo "----------------------------------------"
 
 # Show files fixed by each tool (deduplicated)
 all_fixed=()
-for f in "${!fixed_by_shellcheck[@]}"; do
+for f in "${!fixed_by_shellcheck[@]+"${!fixed_by_shellcheck[@]}"}"; do
   [[ -n "${f}" ]] && all_fixed+=("${f} (shellcheck)")
 done
-for f in "${!fixed_by_shfmt[@]}"; do
+for f in "${!fixed_by_shfmt[@]+"${!fixed_by_shfmt[@]}"}"; do
   [[ -n "${f}" ]] && all_fixed+=("${f} (shfmt)")
 done
 
@@ -147,7 +147,7 @@ fi
 
 # Check for failed files
 has_failures=false
-for f in "${!failed_files[@]}"; do
+for f in "${!failed_files[@]+"${!failed_files[@]}"}"; do
   if [[ -n "${f}" ]]; then
     if ! ${has_failures}; then
       echo "❌ Files with remaining issues:"
