@@ -1,1 +1,19 @@
+# Claude Code local state
 .claude/
+
+# Secrets and credentials — never commit
+*.key
+*.pem
+*.p12
+credentials.*
+secrets.*
+
+# Environment files
+.env
+.env.*
+
+# Conversation logs (contain secrets, PII, session data)
+*.jsonl
+
+# BFG reports
+*.bfg-report/
