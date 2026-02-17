@@ -1,0 +1,4 @@
+# GitHub CLI secrets - DO NOT COMMIT
+*
+!.gitignore
+!config.yml

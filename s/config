@@ -1,0 +1,8 @@
+provider: google_no_ai
+customProviders [
+  {
+    name: google_no_ai
+    url: "https://www.google.com/search?udm=14&q=%s"
+  }
+]
+whitelist: [amazon, gmail, google, google_no_ai, googledocs, googlemaps, reddit, stackoverflow,  wikipedia]

@@ -1,0 +1,37 @@
+# Default: ignore everything (safety net — new dirs are NOT auto-tracked)
+/*
+
+# ── Tracked directories ──────────────────────────────────
+!bash/
+!btop/
+!dig/
+!git/
+!markdownlint-cli/
+!pre-commit/
+!shellcheck/
+!tidy/
+!vim/
+!yamllint/
+!yt-dlp/
+!s/
+!gh/
+
+# Within gh/, only track preferences (not auth)
+gh/*
+!gh/config.yml
+!gh/.gitignore
+
+# ── Root files ────────────────────────────────────────────
+!.gitignore
+!README.md
+
+# ── Global exclusions (belt-and-suspenders) ───────────────
+**/.claude/
+**/*.key
+**/*.pem
+**/*.p12
+**/secrets.*
+**/credentials.*
+**/.env
+**/.env.*
+**/*.jsonl

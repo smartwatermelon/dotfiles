@@ -1,0 +1,51 @@
+# https://github.com/yt-dlp/yt-dlp?tab=readme-ov-file#readme
+
+# Output location
+--paths "temp:/tmp"
+# --paths "home:/Volumes/DSMedia/Media/Torrents"
+
+# Process metadata first
+--parse-metadata "title:%(title)s"
+
+# Apply replacements to generate clean title
+--replace-in-metadata "title" "_" " "
+--replace-in-metadata "title" "\\s{2,}" " "
+--replace-in-metadata "title" "\\s*[-–|:]+\\s*" " - "
+
+# Now use the processed meta_title in the output template
+--output "%(title)s (%(upload_date>%Y)s).%(ext)s"
+
+# Download management
+--continue
+--no-overwrites
+
+# Process control and display
+--quiet
+--verbose
+--progress
+--console-title
+
+# Format selection and post-processing
+--format "bv*+ba/b"
+--merge-output-format mkv
+
+# Metadata handling
+--embed-thumbnail
+--embed-metadata
+--embed-chapters
+--embed-info-json
+--xattrs
+--convert-thumbnails jpg
+
+# Network and retry options
+--socket-timeout 15
+--retries 10
+--fragment-retries 10
+--concurrent-fragments 3
+--retry-sleep fragment:exp=1:20
+--file-access-retries 5
+--throttled-rate 100K
+
+# System integration
+# ffmpeg will be found via PATH (architecture-aware via bash config)
+--cookies-from-browser chrome

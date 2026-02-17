@@ -1,0 +1,26 @@
+# ~/.digrc  Configuration file for the dig DNS utility
+
+# Concise output: suppress command echo, comments, and stats
++noall +answer +authority +additional
++nocmd
++nocomments
++nostats
+
+# Use search list from resolv.conf
++search
+
+# Faster timeout (default is 5s)
++time=2
+
+# DNSSEC validation
++dnssec
+
+# Use TCP for queries (handles large responses)
++tcp
+
+# EDNS with larger buffer for DNSSEC responses
++edns=0
++bufsize=4096
+
+# Display internationalized domain names
++idnout

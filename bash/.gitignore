@@ -1,0 +1,11 @@
+# Git ignore file for bash configuration
+
+# Sensitive files that should not be committed
+secrets.sh
+
+# Auto-created backups
+backups/
+*.bak.*
+
+# Claude Code settings
+.claude/
