@@ -37,11 +37,11 @@
 	enabled = true
 	autoupdate = true
 [core]
-	excludesfile = /Users/andrewrich/.config/git/gitignore_global
+	excludesfile = ~/.config/git/gitignore_global
 	# Performance optimizations
 	fsmonitor = true          # File system monitor for large repos
 	untrackedCache = true      # Cache untracked files list
-	hooksPath = /Users/andrewrich/.config/git/hooks
+	hooksPath = ~/.config/git/hooks
 [rebase]
 	autoSquash = true
 	autoStash = true

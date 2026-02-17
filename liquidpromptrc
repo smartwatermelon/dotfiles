@@ -1,0 +1,52 @@
+# Liquidprompt Configuration
+# Minimal setup: user, hostname, directory, git (branch + status), exit code only
+
+# Disable unwanted features
+LP_ENABLE_JOBS=0                    # No background job count
+LP_ENABLE_DETACHED_SESSIONS=0       # No screen/tmux session count
+LP_ENABLE_LOAD=0                    # No load average
+LP_ENABLE_BATT=0                    # No battery indicator
+LP_ENABLE_TEMP=0                    # No temperature
+LP_ENABLE_RAM=0                     # No RAM usage
+LP_ENABLE_DISK=0                    # No disk usage
+LP_ENABLE_TIME=0                    # No current time
+LP_ENABLE_RUNTIME=0                 # No command runtime
+LP_ENABLE_MULTIPLEXER=0             # No multiplexer info
+LP_ENABLE_PROXY=0                   # No proxy info
+LP_ENABLE_ENV_VARS=0                # No environment variables
+LP_ENABLE_SHLVL=0                   # No shell level
+LP_ENABLE_VIRTUALENV=0              # No Python virtualenv
+LP_ENABLE_RUBY_VENV=0               # No Ruby environment
+LP_ENABLE_PERL_VENV=0               # No Perl environment
+LP_ENABLE_NODE_VENV=0               # No Node.js environment
+LP_ENABLE_AWS_PROFILE=0             # No AWS profile
+LP_ENABLE_TERRAFORM=0               # No Terraform workspace
+LP_ENABLE_KUBECONTEXT=0             # No Kubernetes context
+
+# Enable wanted features
+LP_ENABLE_GIT=1                     # Git branch and status
+LP_ENABLE_ERROR=1                   # Exit code on non-zero
+
+# Display settings
+LP_USER_ALWAYS=1                    # Always show username
+LP_HOSTNAME_ALWAYS=1                # Always show hostname
+
+# Path display configuration
+LP_PATH_LENGTH=35                   # Maximum path length before shortening
+LP_PATH_KEEP=2                      # Number of directories to keep at end
+LP_PATH_METHOD="truncate_chars_from_path_left"
+
+# Hostname display
+LP_HOSTNAME_METHOD="short"          # Use short hostname (not FQDN)
+
+# Git configuration
+LP_ENABLE_VCS_ROOT=0                # Don't show VCS info when running as root
+
+# Single-line vs multi-line mode
+# Override with: export LP_PROMPT_MODE=multiline (before starting shell)
+# Or toggle at runtime with: lp_mode
+if [[ "${LP_PROMPT_MODE}" == "multiline" ]]; then
+    LP_MARK_PREFIX=$'\n'            # Multi-line: prompt symbol on own line
+else
+    LP_MARK_PREFIX=" "              # Single-line: space before prompt symbol
+fi

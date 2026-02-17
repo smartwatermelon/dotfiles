@@ -18,7 +18,10 @@ Unified configuration files, rooted at `~/.config/`.
 ├── tidy/            HTML tidy
 ├── vim/             Vim config, plugins, colorscheme
 ├── yamllint/        YAML linting
-└── yt-dlp/          Video downloader defaults
+├── yt-dlp/          Video downloader defaults
+├── Brewfile         Homebrew package manifest
+├── install.sh       Idempotent bootstrap script
+└── liquidpromptrc   Liquidprompt configuration
 ```
 
 53 tracked files across 13 directories.
@@ -34,6 +37,7 @@ Some tools expect config in `~/` rather than `~/.config/`. These symlinks bridge
 | `~/.bash_profile` | `~/.config/bash/.bash_profile` |
 | `~/.digrc` | `~/.config/dig/digrc` |
 | `~/.shellcheckrc` | `~/.config/shellcheck/.shellcheckrc` |
+| `~/.markdownlint.json` | `~/.config/markdownlint-cli/.markdownlint.json` |
 
 Git, vim, yamllint, btop, gh, and yt-dlp all read from `~/.config/` natively via XDG conventions or built-in support.
 
@@ -104,16 +108,11 @@ This repo uses global git hooks from `~/.config/git/hooks/`. See `git/README.md`
 ## Setup on a new machine
 
 ```bash
-# Clone
 git clone git@github.com:smartwatermelon/dotfiles.git ~/.config
-
-# Create symlinks
-ln -sf ~/.config/bash/.bash_profile ~/.bash_profile
-ln -sf ~/.config/dig/digrc ~/.digrc
-ln -sf ~/.config/shellcheck/.shellcheckrc ~/.shellcheckrc
-
-# Reload shell
+~/.config/install.sh
 source ~/.bash_profile
 ```
+
+`install.sh` is idempotent — safe to re-run at any time. It handles Homebrew, symlinks, directories, pipx packages, NVM, and a post-install smoke test. See the script for details.
 
 Tools that use XDG conventions (`git`, `vim`, `btop`, `yamllint`, `gh`, `yt-dlp`) will find their config automatically.
