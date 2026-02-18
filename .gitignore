@@ -24,6 +24,9 @@ gh/*
 # ── Root files ────────────────────────────────────────────
 !.gitignore
 !README.md
+!liquidpromptrc
+!install.sh
+!Brewfile
 
 # ── Global exclusions (belt-and-suspenders) ───────────────
 **/.claude/
