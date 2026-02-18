@@ -62,9 +62,10 @@ lint() {
     original_dir=$(pwd)
 
     # Cleanup function
+    # Use ${var:-} for set -u safety — locals are out of scope when EXIT trap fires
     cleanup_temp_repo() {
-      cd "${original_dir}" 2>/dev/null || true
-      rm -rf "${temp_dir}"
+      cd "${original_dir:-}" 2>/dev/null || true
+      rm -rf "${temp_dir:-}"
       trap - EXIT # Unset trap
     }
     trap cleanup_temp_repo EXIT
@@ -723,8 +724,8 @@ git() {
   fi
 
   # Trap to cleanup guard and restore directory
-  # Note: cd failure in trap is silently ignored - can't do much if original dir was deleted
-  trap 'unset _GIT_WRAPPER_ACTIVE; [[ -n "${original_dir}" ]] && cd "${original_dir}" 2>/dev/null || true' RETURN
+  # Use ${var:-} for set -u safety — locals may be out of scope in inherited contexts
+  trap 'unset _GIT_WRAPPER_ACTIVE; [[ -n "${original_dir:-}" ]] && cd "${original_dir:-}" 2>/dev/null || true' RETURN
 
   # If init created a repo in a different directory, cd there first
   # This makes git rev-parse work from inside the new repo
