@@ -108,7 +108,17 @@ This repo uses global git hooks from `~/.config/git/hooks/`. See `git/README.md`
 ## Setup on a new machine
 
 ```bash
+# Fresh machine (no ~/.config yet):
 git clone git@github.com:smartwatermelon/dotfiles.git ~/.config
+
+# Existing machine (~/.config already has other tool configs):
+cd ~/.config
+git init
+git remote add origin git@github.com:smartwatermelon/dotfiles.git
+git fetch origin
+git checkout -b main origin/main
+
+# Then bootstrap and activate:
 ~/.config/install.sh
 source ~/.bash_profile
 ```

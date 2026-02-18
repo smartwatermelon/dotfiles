@@ -10,11 +10,15 @@ _info() { printf '\033[1;34m[INFO]\033[0m  %s\n' "$*"; }
 _ok() { printf '\033[1;32m[OK]\033[0m    %s\n' "$*"; }
 _warn() { printf '\033[1;33m[WARN]\033[0m  %s\n' "$*"; }
 _err() { printf '\033[1;31m[ERR]\033[0m   %s\n' "$*" >&2; }
-_skip() { printf '\033[0;90m[SKIP]\033[0m  %s\n' "$*"; }
+_skip() {
+  printf '\033[0;90m[SKIP]\033[0m  %s\n' "$*"
+  skipped+=("$*")
+}
 
 installed=()
 skipped=()
 manual=()
+failures=()
 
 # ============================================================================
 # 1. PRE-FLIGHT CHECKS
@@ -48,12 +52,18 @@ if command -v brew &>/dev/null; then
   _skip "Homebrew already installed"
 else
   _info "Installing Homebrew..."
-  brew_installer="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+  # Let curl failure propagate — on a fresh machine, this IS fatal
+  brew_installer="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   /bin/bash -c "${brew_installer}"
   # Ensure brew is on PATH for the rest of this script
-  brew_env="$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)" || true
+  brew_env="$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)"
   eval "${brew_env}"
   installed+=("Homebrew")
+fi
+
+if ! command -v brew &>/dev/null; then
+  _err "Homebrew is not available on PATH. Cannot continue."
+  exit 1
 fi
 
 _info "Running brew bundle..."
@@ -137,12 +147,19 @@ fi
 # 6. NVM (Node Version Manager)
 # ============================================================================
 
+NVM_VERSION="v0.40.4"
 if [[ -d "${HOME}/.nvm" ]]; then
   _skip "NVM already installed at ~/.nvm"
 else
-  _info "Installing NVM..."
-  PROFILE=/dev/null bash -c 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash'
-  installed+=("NVM")
+  _info "Installing NVM ${NVM_VERSION}..."
+  nvm_installer="$(curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh")"
+  PROFILE=/dev/null bash -c "${nvm_installer}"
+  if [[ ! -d "${HOME}/.nvm" ]]; then
+    _warn "NVM installation may have failed — ~/.nvm not found"
+    failures+=("nvm-install")
+  else
+    installed+=("NVM ${NVM_VERSION}")
+  fi
 fi
 
 # ============================================================================
@@ -162,7 +179,8 @@ else
 #   export GITHUB_TOKEN="ghp_..."
 #   export OPENAI_API_KEY="sk-..."
 SECRETS_EOF
-  _ok "Created secrets stub: ${SECRETS_FILE}"
+  chmod 600 "${SECRETS_FILE}"
+  _ok "Created secrets stub: ${SECRETS_FILE} (mode 600)"
   installed+=("secrets stub")
 fi
 
@@ -171,7 +189,6 @@ fi
 # ============================================================================
 
 _info "Running smoke tests..."
-failures=()
 
 # Check key commands exist
 for cmd in git bash shellcheck shfmt pre-commit vim gh; do
