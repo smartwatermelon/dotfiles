@@ -768,6 +768,14 @@ export -f git # Exported - overrides system git command globally
 gh() {
   local review_script="${HOME}/.claude/hooks/pre-merge-review.sh"
 
+  # Pass help requests directly to the real gh — no review needed.
+  for arg in "$@"; do
+    if [[ "${arg}" == "--help" || "${arg}" == "-h" ]]; then
+      command gh "$@"
+      return $?
+    fi
+  done
+
   # Intercept: gh pr merge [...]
   if [[ "$1" == "pr" && "$2" == "merge" ]]; then
     if [[ -x "${review_script}" ]]; then
