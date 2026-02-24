@@ -770,9 +770,10 @@ gh() {
   local review_script="${HOME}/.claude/hooks/pre-merge-review.sh"
 
   # Pass help requests directly to the real gh — no review needed.
+  # Set _GH_REVIEW_DONE so ~/.local/bin/gh wrapper also skips review.
   for arg in "$@"; do
     if [[ "${arg}" == "--help" || "${arg}" == "-h" ]]; then
-      command gh "$@"
+      _GH_REVIEW_DONE=1 command gh "$@"
       return $?
     fi
   done
@@ -788,7 +789,8 @@ gh() {
     fi
   fi
 
-  # Run the real gh command
-  command gh "$@"
+  # Run the real gh command. Set _GH_REVIEW_DONE so ~/.local/bin/gh wrapper
+  # does not run the review a second time (prevents double review).
+  _GH_REVIEW_DONE=1 command gh "$@"
 }
 export -f gh # Exported - overrides system gh command globally
