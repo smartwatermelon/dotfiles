@@ -769,6 +769,33 @@ export -f git # Exported - overrides system git command globally
 gh() {
   local review_script="${HOME}/.claude/hooks/pre-merge-review.sh"
 
+  # Block: gh api .../pulls/{number}/merge (REST API merge bypass)
+  # Block: gh api graphql with mergePullRequest mutation (GraphQL bypass)
+  #
+  # IMPORTANT: These checks run BEFORE the --help early-return below so that
+  # `gh api .../pulls/NNN/merge --help` cannot bypass this defense by
+  # appending --help to the command.
+  #
+  # This is the shell-wrapper layer; the Claude Code PreToolUse hook
+  # (hook-block-api-merge.sh) is the primary layer.
+  #
+  # Suffix boundary prevents false positives on paths like pulls/NNN/merge_status.
+  # If gh pr merge fails: report the failure, ask the human to merge manually.
+  if [[ "$1" == "api" ]] && printf '%s\n' "$*" | grep -qE 'pulls/[0-9]+/merge([[:space:]]|$|[^[:alnum:]_])'; then
+    echo "[gh] BLOCKED: Direct REST API PR merge bypasses pre-merge review and merge authorization." >&2
+    echo "[gh] This endpoint skips pre-merge-review.sh and the merge-lock check." >&2
+    echo "[gh] Use 'gh pr merge <number>' instead." >&2
+    echo "[gh] If gh pr merge fails, report the failure and ask the human to merge manually." >&2
+    return 1
+  fi
+
+  if [[ "$1" == "api" ]] && printf '%s\n' "$*" | grep -qE 'graphql.*mergePullRequest[[:space:]]*\('; then
+    echo "[gh] BLOCKED: GraphQL mergePullRequest mutation bypasses pre-merge review and merge authorization." >&2
+    echo "[gh] Use 'gh pr merge <number>' instead." >&2
+    echo "[gh] If gh pr merge fails, report the failure and ask the human to merge manually." >&2
+    return 1
+  fi
+
   # Pass help requests directly to the real gh — no review needed.
   # Set _GH_REVIEW_DONE so ~/.local/bin/gh wrapper also skips review.
   for arg in "$@"; do
