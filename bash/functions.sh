@@ -778,6 +778,22 @@ gh() {
     fi
   done
 
+  # Block: gh api .../pulls/{number}/merge (REST API merge bypass)
+  #
+  # `gh api .../pulls/NNN/merge --method PUT` bypasses the gh pr merge
+  # interception below, circumventing pre-merge-review.sh and merge-lock.
+  # This block is the shell-wrapper layer of defense; the Claude Code
+  # PreToolUse hook (hook-block-api-merge.sh) is the primary layer.
+  #
+  # If gh pr merge fails: report the failure, ask the human to merge manually.
+  if [[ "$1" == "api" ]] && printf '%s\n' "$*" | grep -qE 'pulls/[0-9]+/merge'; then
+    echo "[gh] BLOCKED: Direct REST API PR merge bypasses pre-merge review and merge authorization." >&2
+    echo "[gh] This endpoint skips pre-merge-review.sh and the merge-lock check." >&2
+    echo "[gh] Use 'gh pr merge <number>' instead." >&2
+    echo "[gh] If gh pr merge fails, report the failure and ask the human to merge manually." >&2
+    return 1
+  fi
+
   # Intercept: gh pr merge [...]
   if [[ "$1" == "pr" && "$2" == "merge" ]]; then
     if [[ -x "${review_script}" ]]; then
