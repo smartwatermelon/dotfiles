@@ -805,8 +805,33 @@ gh() {
     fi
   done
 
-  # Intercept: gh pr merge [...]
-  if [[ "$1" == "pr" && "$2" == "merge" ]]; then
+  # Intercept: gh [global-flags] pr merge [...]
+  # Parse past known two-token global flags (flag + separate value) to find the
+  # actual positional subcommand. This handles both the standard form:
+  #   gh pr merge NNN
+  # and the global-flag bypass form:
+  #   gh -R owner/repo pr merge NNN
+  local _gh_sub="" _gh_subsub="" _gh_skip_next=0
+  for _gh_arg in "$@"; do
+    if [[ "${_gh_skip_next}" == "1" ]]; then
+      _gh_skip_next=0
+      continue
+    fi
+    case "${_gh_arg}" in
+      -R | --repo | --hostname | --config-dir | --token) _gh_skip_next=1 ;;
+      --*=*) ;; # --flag=value: single token, no separate value to skip
+      -*) ;;    # other single-token flags: skip
+      *)
+        if [[ -z "${_gh_sub}" ]]; then
+          _gh_sub="${_gh_arg}"
+        else
+          _gh_subsub="${_gh_arg}"
+          break
+        fi
+        ;;
+    esac
+  done
+  if [[ "${_gh_sub}" == "pr" && "${_gh_subsub}" == "merge" ]]; then
     if [[ -x "${review_script}" ]]; then
       "${review_script}" "$@" || return 1
     else
