@@ -263,6 +263,18 @@ _kill_clones() {
 # Log rotation handled by logrotate (configured in /opt/homebrew/etc/logrotate.d/local-state-logs)
 # Runs daily at 06:25 AM via launchd service (homebrew.mxcl.logrotate)
 
+# Write update output to log file; also echo to terminal during interactive runs
+# Prevents duplicate log entries when stdout is already redirected to the log
+# (e.g. via LaunchAgent StandardOutPath)
+_update_log() {
+  if [[ -t 1 ]]; then
+    tee -a "${HOME}/.local/state/updates.out"
+  else
+    cat >>"${HOME}/.local/state/updates.out"
+  fi
+}
+# Not exported - internal helper
+
 # Update Homebrew packages
 # Package managers provide their own network error diagnostics, so no pre-check needed
 _homebrew_update() {
@@ -273,11 +285,11 @@ _homebrew_update() {
 
   _notif "Updating Homebrew..."
   # Note: tee failures are acceptable - output is shown to user even if logging fails
-  echo "=== homebrew update ${timestamp} ===" | tee -a "${HOME}/.local/state/updates.out"
+  echo "=== homebrew update ${timestamp} ===" | _update_log
 
   output=$(brew update --verbose 2>&1)
   result=$?
-  echo "${output}" | tee -a "${HOME}/.local/state/updates.out"
+  echo "${output}" | _update_log
   if [[ "${result}" -ne 0 ]]; then
     _notif "brew update failed (exit ${result})"
     return "${result}"
@@ -285,7 +297,7 @@ _homebrew_update() {
 
   output=$(brew upgrade --verbose 2>&1)
   result=$?
-  echo "${output}" | tee -a "${HOME}/.local/state/updates.out"
+  echo "${output}" | _update_log
   if [[ "${result}" -ne 0 ]]; then
     _notif "brew upgrade failed (exit ${result})"
     return "${result}"
@@ -293,7 +305,7 @@ _homebrew_update() {
 
   output=$(brew cleanup --prune=all -s 2>&1)
   result=$?
-  echo "${output}" | tee -a "${HOME}/.local/state/updates.out"
+  echo "${output}" | _update_log
   if [[ "${result}" -ne 0 ]]; then
     _notif "brew cleanup failed (exit ${result})"
     return "${result}"
@@ -302,7 +314,7 @@ _homebrew_update() {
   # brew doctor often returns non-zero for warnings; log but don't fail
   output=$(brew doctor 2>&1)
   result=$?
-  echo "${output}" | tee -a "${HOME}/.local/state/updates.out"
+  echo "${output}" | _update_log
   if [[ "${result}" -eq 0 ]]; then
     _notif "Homebrew update completed successfully"
   else
@@ -327,11 +339,11 @@ _npm_update() {
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   _notif "Updating npm packages..."
-  echo "=== npm update ${timestamp} ===" | tee -a "${HOME}/.local/state/updates.out"
+  echo "=== npm update ${timestamp} ===" | _update_log
 
   output=$(npm update -g --verbose 2>&1)
   result=$?
-  echo "${output}" | tee -a "${HOME}/.local/state/updates.out"
+  echo "${output}" | _update_log
 
   if [[ "${result}" -eq 0 ]]; then
     _notif "npm update completed"
@@ -356,11 +368,11 @@ _pipx_update() {
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   _notif "Updating pipx packages..."
-  echo "=== pipx update ${timestamp} ===" | tee -a "${HOME}/.local/state/updates.out"
+  echo "=== pipx update ${timestamp} ===" | _update_log
 
   output=$(pipx upgrade-all --verbose 2>&1)
   result=$?
-  echo "${output}" | tee -a "${HOME}/.local/state/updates.out"
+  echo "${output}" | _update_log
 
   if [[ "${result}" -eq 0 ]]; then
     _notif "pipx update completed"
@@ -385,11 +397,11 @@ _gem_update() {
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   _notif "Updating Ruby gems..."
-  echo "=== gem update ${timestamp} ===" | tee -a "${HOME}/.local/state/updates.out"
+  echo "=== gem update ${timestamp} ===" | _update_log
 
   output=$(gem update --verbose 2>&1)
   result=$?
-  echo "${output}" | tee -a "${HOME}/.local/state/updates.out"
+  echo "${output}" | _update_log
 
   if [[ "${result}" -ne 0 ]]; then
     _notif "gem update failed (exit ${result})"
@@ -399,7 +411,7 @@ _gem_update() {
   # gem cleanup is non-critical - warn on failure but don't fail overall
   output=$(gem cleanup --verbose 2>&1)
   local cleanup_result=$?
-  echo "${output}" | tee -a "${HOME}/.local/state/updates.out"
+  echo "${output}" | _update_log
 
   if [[ "${cleanup_result}" -eq 0 ]]; then
     _notif "gem update and cleanup completed"
@@ -426,13 +438,13 @@ _softwareupdate() {
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   _notif "Updating macOS system software..."
-  echo "=== softwareupdate ${timestamp} ===" | tee -a "${HOME}/.local/state/updates.out"
+  echo "=== softwareupdate ${timestamp} ===" | _update_log
 
   # Run softwareupdate without sudo - it will prompt for admin credentials if needed
   # Use pipefail to capture exit code, run directly to preserve TTY for auth prompts
   (
     set -o pipefail
-    softwareupdate -i -a 2>&1 | tee -a "${HOME}/.local/state/updates.out"
+    softwareupdate -i -a 2>&1 | _update_log
   )
   result=$?
 
@@ -461,13 +473,13 @@ _mas_update() {
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   _notif "Updating Mac App Store apps..."
-  echo "=== mas update ${timestamp} ===" | tee -a "${HOME}/.local/state/updates.out"
+  echo "=== mas update ${timestamp} ===" | _update_log
 
   # Note: mas account doesn't work on macOS 12+
   # Let mas upgrade fail naturally if not authenticated
   output=$(mas upgrade 2>&1)
   result=$?
-  echo "${output}" | tee -a "${HOME}/.local/state/updates.out"
+  echo "${output}" | _update_log
 
   if [[ "${result}" -ne 0 ]]; then
     _notif "mas upgrade failed (exit ${result}) - check App Store authentication"
@@ -509,11 +521,11 @@ _claude_update() {
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   _notif "Updating Claude Code..."
-  echo "=== claude update ${timestamp} ===" | tee -a "${HOME}/.local/state/updates.out"
+  echo "=== claude update ${timestamp} ===" | _update_log
 
   output=$(claude update 2>&1)
   result=$?
-  echo "${output}" | tee -a "${HOME}/.local/state/updates.out"
+  echo "${output}" | _update_log
 
   if [[ "${result}" -eq 0 ]]; then
     _notif "claude update completed"
