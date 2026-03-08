@@ -35,10 +35,14 @@ alias gl='git log --oneline'
 alias gp='git pull'
 alias gc='git commit -m'
 
+# Exciting ways of launching Claude Code
+alias claude='$HOME/.local/bin/claude-wrapper'
+alias clauded="claude --dangerously-skip-permissions"
+alias suclaude='$HOME/.local/bin/claude'
+alias suclauded="suclaude --dangerously-skip-permissions"
+
 # Add custom aliases below
 # ------------------------
 alias markdownlint="markdownlint --config ~/.markdownlint.json"
 alias npx-markdownlint="npx markdownlint --config ~/.markdownlint.json"
-alias claude='$HOME/.local/bin/claude-wrapper'
-alias clauded="claude --dangerously-skip-permissions"
 alias diskspace='df -h /System/Volumes/Data'
