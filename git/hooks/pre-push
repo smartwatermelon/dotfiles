@@ -107,6 +107,12 @@ check_pr_review_iteration() {
       log "THE CYCLE: fix → local review → commit → push → CI → remote review → repeat"
       log ""
 
+      # Allow post-push loop to bypass interactive prompt (it manages review externally)
+      if [[ "${POSTPUSH_LOOP:-}" == "1" ]]; then
+        log "Post-push loop active — skipping interactive Protocol 4 prompt"
+        return 0
+      fi
+
       # Check for interactive terminal before prompting
       if [[ -t 0 ]]; then
         read -p "[PRE-PUSH] Local review clean? (y/N): " -n 1 -r
