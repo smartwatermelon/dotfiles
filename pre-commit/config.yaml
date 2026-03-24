@@ -61,6 +61,18 @@ repos:
         verbose: true
         args: ["--config", "~/.config/markdownlint-cli/.markdownlint.json"]
 
+  # Lua linting
+  - repo: local
+    hooks:
+      - id: luacheck
+        name: "Lua Lint (luacheck)"
+        entry: luacheck
+        language: system
+        types: [lua]
+        args: [--no-color, --ranges, --codes]
+        pass_filenames: true
+        verbose: true
+
   # Prettier formatting for JavaScript/TypeScript/JSON/CSS
   # Note: Markdown excluded - handled by markdownlint above
   - repo: local
