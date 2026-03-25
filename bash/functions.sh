@@ -517,38 +517,40 @@ _claude_update() {
 
   mkdir -p "${HOME}/.local/state" || return $?
 
-  local timestamp output result
+  local timestamp binary_output binary_result
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   _notif "Updating Claude Code..."
   echo "=== claude update ${timestamp} ===" | _update_log
 
-  output=$(claude update 2>&1)
-  result=$?
-  echo "${output}" | _update_log
+  binary_output=$(claude update 2>&1)
+  binary_result=$?
+  echo "${binary_output}" | _update_log
 
-  if [[ "${result}" -eq 0 ]]; then
+  if [[ "${binary_result}" -eq 0 ]]; then
     _notif "claude update completed"
   else
-    _notif "claude update failed (exit ${result})"
-    return "${result}"
+    _notif "claude update failed (exit ${binary_result})"
+    return "${binary_result}"
   fi
 
   # Update git-sourced Claude Code components (skills, hooks, etc.)
+  # Best-effort — failure here does not affect the binary update result.
   local tools_script="${HOME}/.claude/scripts/update-tools.sh"
   if [[ -x "${tools_script}" ]]; then
     _notif "Updating Claude Code tools..."
-    output=$("${tools_script}" 2>&1)
-    result=$?
-    echo "${output}" | _update_log
-    if [[ "${result}" -eq 0 ]]; then
+    local tools_output tools_result
+    tools_output=$("${tools_script}" 2>&1)
+    tools_result=$?
+    echo "${tools_output}" | _update_log
+    if [[ "${tools_result}" -eq 0 ]]; then
       _notif "claude tools update completed"
     else
-      _notif "claude tools update failed (exit ${result})"
+      _notif "claude tools update failed (exit ${tools_result})"
     fi
   fi
 
-  return "${result}"
+  return "${binary_result}"
 }
 # Not exported - internal helper
 
