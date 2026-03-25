@@ -531,7 +531,23 @@ _claude_update() {
     _notif "claude update completed"
   else
     _notif "claude update failed (exit ${result})"
+    return "${result}"
   fi
+
+  # Update git-sourced Claude Code components (skills, hooks, etc.)
+  local tools_script="${HOME}/.claude/scripts/update-tools.sh"
+  if [[ -x "${tools_script}" ]]; then
+    _notif "Updating Claude Code tools..."
+    output=$("${tools_script}" 2>&1)
+    result=$?
+    echo "${output}" | _update_log
+    if [[ "${result}" -eq 0 ]]; then
+      _notif "claude tools update completed"
+    else
+      _notif "claude tools update failed (exit ${result})"
+    fi
+  fi
+
   return "${result}"
 }
 # Not exported - internal helper
