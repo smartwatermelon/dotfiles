@@ -158,7 +158,7 @@ Check that `core.hooksPath` points to this directory:
 
 ```bash
 git config --get core.hooksPath
-# Should output: /Users/andrewrich/.config/git/hooks
+# Should output: ~/.config/git/hooks
 ```
 
 ### Pre-commit hook fails
