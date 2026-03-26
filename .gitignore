@@ -15,6 +15,7 @@
 !yt-dlp/
 !s/
 !gh/
+!docs/
 
 # Within gh/, only track preferences (not auth)
 gh/*
