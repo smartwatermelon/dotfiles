@@ -23,6 +23,19 @@ protected_branch_check() {
 }
 protected_branch_check
 
+# =========================================================
+# SYMLINK REPAIR — detect and fix atomic-write breakage
+# =========================================================
+# Editors and tools that do atomic writes (write temp, rename over target)
+# replace symlinks with regular files. Detect and repair before linting.
+_REPAIR_LIB="${HOME}/.config/git/hooks/lib-symlink-repair.sh"
+if [[ -f "${_REPAIR_LIB}" ]]; then
+  export REPO_DIR="${HOME}/Developer/dotfiles"
+  # shellcheck source=lib-symlink-repair.sh
+  source "${_REPAIR_LIB}"
+  repair_config_symlinks true
+fi
+
 # Prefer repo-local config if it exists, otherwise fall back to global
 LOCAL_CONFIG=".pre-commit-config.yaml"
 GLOBAL_CONFIG="${HOME}/.config/pre-commit/config.yaml"

@@ -23,12 +23,14 @@ failures=()
 
 # ── Parse arguments ──────────────────────────────────────
 DRY_RUN=false
+REPAIR_ONLY=false
 for arg in "$@"; do
   case "${arg}" in
     --dry-run) DRY_RUN=true ;;
+    --repair) REPAIR_ONLY=true ;;
     *)
       _err "Unknown argument: ${arg}"
-      echo "Usage: install.sh [--dry-run]"
+      echo "Usage: install.sh [--dry-run] [--repair]"
       exit 1
       ;;
   esac
@@ -72,6 +74,20 @@ if [[ "${EUID}" -eq 0 ]]; then
 fi
 
 _ok "Pre-flight checks passed (macOS, git repo at ${REPO_DIR}, non-root)"
+
+# ── Repair-only mode ─────────────────────────────────────
+if ${REPAIR_ONLY}; then
+  _info "Repair mode — checking symlinks only"
+  # shellcheck source=git/hooks/lib-symlink-repair.sh
+  source "${REPO_DIR}/git/hooks/lib-symlink-repair.sh"
+  repair_config_symlinks false
+  if [[ ${#SYMLINK_REPAIRS[@]} -eq 0 ]]; then
+    _ok "All symlinks healthy — nothing to repair"
+  else
+    _ok "Repaired ${#SYMLINK_REPAIRS[@]} symlink(s)"
+  fi
+  exit 0
+fi
 
 # ============================================================================
 # 2. HOMEBREW
