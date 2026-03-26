@@ -1,6 +1,6 @@
 # dotfiles
 
-Unified configuration files, rooted at `~/.config/`.
+Unified configuration files. The repo lives at `~/Developer/dotfiles` and `install.sh` creates per-file symlinks into `~/.config/`.
 
 ## Structure
 
@@ -109,7 +109,7 @@ This repo uses global git hooks from `~/.config/git/hooks/`. See `git/README.md`
 
 ```bash
 # Fresh machine (no ~/.config yet):
-git clone git@github.com:smartwatermelon/dotfiles.git ~/.config
+git clone git@github.com:smartwatermelon/dotfiles.git ~/Developer/dotfiles
 
 # Existing machine (~/.config already has other tool configs):
 cd ~/.config
@@ -119,10 +119,10 @@ git fetch origin
 git checkout -b main origin/main
 
 # Then bootstrap and activate:
-~/.config/install.sh
+~/Developer/dotfiles/install.sh
 source ~/.bash_profile
 ```
 
-`install.sh` is idempotent — safe to re-run at any time. It handles Homebrew, symlinks, directories, pipx packages, NVM, and a post-install smoke test. See the script for details.
+`install.sh` is idempotent — safe to re-run at any time. It creates per-file symlinks from `~/.config/` into the repo using `git ls-files` for discovery. It also handles Homebrew, directories, pipx packages, NVM, and a post-install smoke test. Use `--dry-run` to preview changes.
 
 Tools that use XDG conventions (`git`, `vim`, `btop`, `yamllint`, `gh`, `yt-dlp`) will find their config automatically.
