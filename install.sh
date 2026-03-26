@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ~/.config/install.sh
+# ~/Developer/dotfiles/install.sh
 # Idempotent bootstrap script for a new macOS machine.
 # Every step checks before acting — safe to re-run at any time.
 
@@ -14,11 +14,29 @@ _skip() {
   printf '\033[0;90m[SKIP]\033[0m  %s\n' "$*"
   skipped+=("$*")
 }
+_dry() { printf '\033[1;35m[DRY]\033[0m   %s\n' "$*"; }
 
 installed=()
 skipped=()
 manual=()
 failures=()
+
+# ── Parse arguments ──────────────────────────────────────
+DRY_RUN=false
+for arg in "$@"; do
+  case "${arg}" in
+    --dry-run) DRY_RUN=true ;;
+    *)
+      _err "Unknown argument: ${arg}"
+      echo "Usage: install.sh [--dry-run]"
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "${DRY_RUN}" == true ]]; then
+  _info "Dry-run mode — no changes will be made"
+fi
 
 # ============================================================================
 # 1. PRE-FLIGHT CHECKS
@@ -30,10 +48,21 @@ if [[ "${detected_os}" != "Darwin" ]]; then
   exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ "${SCRIPT_DIR}" != "${HOME}/.config" ]]; then
-  _err "This script must be run from ~/.config (got ${SCRIPT_DIR})"
-  _err "Clone the repo first: git clone git@github.com:smartwatermelon/dotfiles.git ~/.config"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ ! -d "${REPO_DIR}/.git" ]]; then
+  _err "Not a git repository: ${REPO_DIR}"
+  _err "This script must be run from the dotfiles repo root."
+  exit 1
+fi
+
+if [[ ! -f "${REPO_DIR}/git/config" ]]; then
+  _err "Canary file missing: ${REPO_DIR}/git/config"
+  exit 1
+fi
+
+if [[ ! -f "${REPO_DIR}/bash/main.sh" ]]; then
+  _err "Canary file missing: ${REPO_DIR}/bash/main.sh"
   exit 1
 fi
 
@@ -42,7 +71,7 @@ if [[ "${EUID}" -eq 0 ]]; then
   exit 1
 fi
 
-_ok "Pre-flight checks passed (macOS, ~/.config, non-root)"
+_ok "Pre-flight checks passed (macOS, git repo at ${REPO_DIR}, non-root)"
 
 # ============================================================================
 # 2. HOMEBREW
@@ -51,31 +80,41 @@ _ok "Pre-flight checks passed (macOS, ~/.config, non-root)"
 if command -v brew &>/dev/null; then
   _skip "Homebrew already installed"
 else
-  _info "Installing Homebrew..."
-  # Let curl failure propagate — on a fresh machine, this IS fatal
-  brew_installer="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  /bin/bash -c "${brew_installer}"
-  # Ensure brew is on PATH for the rest of this script
-  brew_env="$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)"
-  eval "${brew_env}"
-  installed+=("Homebrew")
+  if [[ "${DRY_RUN}" == true ]]; then
+    _dry "Would install Homebrew"
+  else
+    _info "Installing Homebrew..."
+    # Let curl failure propagate — on a fresh machine, this IS fatal
+    brew_installer="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    /bin/bash -c "${brew_installer}"
+    # Ensure brew is on PATH for the rest of this script
+    brew_env="$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)"
+    eval "${brew_env}"
+    installed+=("Homebrew")
+  fi
 fi
 
-if ! command -v brew &>/dev/null; then
+if [[ "${DRY_RUN}" == true ]]; then
+  if ! command -v brew &>/dev/null; then
+    _dry "Would verify Homebrew is on PATH (not currently available)"
+  fi
+elif ! command -v brew &>/dev/null; then
   _err "Homebrew is not available on PATH. Cannot continue."
   exit 1
 fi
 
 _info "Running brew bundle..."
-if brew bundle check --file="${HOME}/.config/Brewfile" &>/dev/null; then
+if [[ "${DRY_RUN}" == true ]]; then
+  _dry "Would run: brew bundle --file=${REPO_DIR}/Brewfile"
+elif brew bundle check --file="${REPO_DIR}/Brewfile" &>/dev/null; then
   _skip "All Brewfile packages already installed"
 else
-  brew bundle --file="${HOME}/.config/Brewfile"
+  brew bundle --file="${REPO_DIR}/Brewfile"
   installed+=("Brewfile packages")
 fi
 
 # ============================================================================
-# 3. SYMLINKS
+# 3. CONFIG SYMLINKS (repo → ~/.config)
 # ============================================================================
 
 BACKUP_DIR="${HOME}/.config/backup"
@@ -107,18 +146,112 @@ _ensure_symlink() {
   installed+=("symlink:${link}")
 }
 
-_ensure_symlink "${HOME}/.config/bash/.bash_profile" "${HOME}/.bash_profile"
-_ensure_symlink "${HOME}/.config/dig/digrc" "${HOME}/.digrc"
-_ensure_symlink "${HOME}/.config/shellcheck/.shellcheckrc" "${HOME}/.shellcheckrc"
-_ensure_symlink "${HOME}/.config/markdownlint-cli/.markdownlint.json" "${HOME}/.markdownlint.json"
+_is_excluded() {
+  case "$1" in
+    # CI / GitHub metadata
+    .github/*) return 0 ;;
+    # Git ignore files (repo-level, not app configs)
+    .gitignore) return 0 ;;
+    */.gitignore) return 0 ;;
+    # Repo management files
+    Brewfile) return 0 ;;
+    README.md) return 0 ;;
+    */README.md) return 0 ;;
+    install.sh) return 0 ;;
+    docs/*) return 0 ;;
+    # Project metadata that may be added in the future
+    LICENSE*) return 0 ;;
+    CLAUDE.md) return 0 ;;
+    */CLAUDE.md) return 0 ;;
+    MEMORY.md) return 0 ;;
+    */MEMORY.md) return 0 ;;
+    .claude/*) return 0 ;;
+    .pre-commit-config.yaml) return 0 ;;
+    # Test files
+    *.test.*) return 0 ;;
+    *.bats) return 0 ;;
+    tests/*) return 0 ;;
+    test/*) return 0 ;;
+    # Other repo-level files that may be added
+    Makefile) return 0 ;;
+    .editorconfig) return 0 ;;
+    .gitattributes) return 0 ;;
+    CONTRIBUTING.md) return 0 ;;
+    CHANGELOG.md) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Known config directories that should be symlinked into ~/.config.
+# Any top-level path not in this list AND not excluded triggers a warning.
+_KNOWN_CONFIG_DIRS="bash btop dig gh git liquidpromptrc markdownlint-cli pre-commit s shellcheck tidy vim yamllint yt-dlp"
+
+_is_known_config_path() {
+  local top_level
+  top_level="${1%%/*}"
+  # Single-file at root (e.g., liquidpromptrc) — top_level equals the file
+  for known in ${_KNOWN_CONFIG_DIRS}; do
+    if [[ "${top_level}" == "${known}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+_info "Creating config symlinks from repo to ~/.config..."
+
+while IFS= read -r file; do
+  if _is_excluded "${file}"; then
+    continue
+  fi
+
+  # Safety net: warn about tracked files not in a known config directory
+  if ! _is_known_config_path "${file}"; then
+    _warn "Unrecognized config path: ${file} — add to _KNOWN_CONFIG_DIRS or _is_excluded"
+    failures+=("unrecognized-path:${file}")
+    continue
+  fi
+
+  link="${HOME}/.config/${file}"
+  target="${REPO_DIR}/${file}"
+
+  if [[ "${DRY_RUN}" == true ]]; then
+    parent_dir="$(dirname "${link}")"
+    if [[ ! -d "${parent_dir}" ]]; then
+      _dry "Would create directory: ${parent_dir}"
+    fi
+    _dry "Would symlink: ${link} -> ${target}"
+  else
+    mkdir -p "$(dirname "${link}")"
+    _ensure_symlink "${target}" "${link}"
+  fi
+done < <(git -C "${REPO_DIR}" ls-files)
 
 # ============================================================================
-# 4. CREATE DIRECTORIES
+# 4. HOME SYMLINKS (~/.<file> → ~/.config/<path>)
+# ============================================================================
+
+if [[ "${DRY_RUN}" == true ]]; then
+  _dry "Would symlink: ~/.bash_profile -> ~/.config/bash/.bash_profile"
+  _dry "Would symlink: ~/.digrc -> ~/.config/dig/digrc"
+  _dry "Would symlink: ~/.shellcheckrc -> ~/.config/shellcheck/.shellcheckrc"
+  _dry "Would symlink: ~/.markdownlint.json -> ~/.config/markdownlint-cli/.markdownlint.json"
+else
+  _ensure_symlink "${HOME}/.config/bash/.bash_profile" "${HOME}/.bash_profile"
+  _ensure_symlink "${HOME}/.config/dig/digrc" "${HOME}/.digrc"
+  _ensure_symlink "${HOME}/.config/shellcheck/.shellcheckrc" "${HOME}/.shellcheckrc"
+  _ensure_symlink "${HOME}/.config/markdownlint-cli/.markdownlint.json" "${HOME}/.markdownlint.json"
+fi
+
+# ============================================================================
+# 5. CREATE DIRECTORIES
 # ============================================================================
 
 for dir in "${HOME}/.local/bin" "${HOME}/.local/state/bash"; do
   if [[ -d "${dir}" ]]; then
     _skip "Directory exists: ${dir}"
+  elif [[ "${DRY_RUN}" == true ]]; then
+    _dry "Would create directory: ${dir}"
   else
     mkdir -p "${dir}"
     _ok "Created directory: ${dir}"
@@ -127,7 +260,7 @@ for dir in "${HOME}/.local/bin" "${HOME}/.local/state/bash"; do
 done
 
 # ============================================================================
-# 5. PIPX PACKAGES
+# 6. PIPX PACKAGES
 # ============================================================================
 
 if ! command -v pipx &>/dev/null; then
@@ -136,6 +269,8 @@ if ! command -v pipx &>/dev/null; then
 else
   if pipx list --short 2>/dev/null | grep -q "^argcomplete "; then
     _skip "pipx package already installed: argcomplete"
+  elif [[ "${DRY_RUN}" == true ]]; then
+    _dry "Would install pipx package: argcomplete"
   else
     _info "Installing pipx package: argcomplete"
     pipx install argcomplete
@@ -144,12 +279,14 @@ else
 fi
 
 # ============================================================================
-# 6. NVM (Node Version Manager)
+# 7. NVM (Node Version Manager)
 # ============================================================================
 
 NVM_VERSION="v0.40.4"
 if [[ -d "${HOME}/.nvm" ]]; then
   _skip "NVM already installed at ~/.nvm"
+elif [[ "${DRY_RUN}" == true ]]; then
+  _dry "Would install NVM ${NVM_VERSION}"
 else
   _info "Installing NVM ${NVM_VERSION}..."
   nvm_installer="$(curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh")"
@@ -163,12 +300,14 @@ else
 fi
 
 # ============================================================================
-# 7. SECRETS STUB
+# 8. SECRETS STUB
 # ============================================================================
 
 SECRETS_FILE="${HOME}/.config/bash/secrets.sh"
 if [[ -f "${SECRETS_FILE}" ]]; then
   _skip "Secrets file already exists: ${SECRETS_FILE}"
+elif [[ "${DRY_RUN}" == true ]]; then
+  _dry "Would create secrets stub: ${SECRETS_FILE}"
 else
   cat >"${SECRETS_FILE}" <<'SECRETS_EOF'
 # ~/.config/bash/secrets.sh
@@ -185,7 +324,7 @@ SECRETS_EOF
 fi
 
 # ============================================================================
-# 8. POST-INSTALL SMOKE TEST
+# 9. POST-INSTALL SMOKE TEST
 # ============================================================================
 
 _info "Running smoke tests..."
@@ -218,8 +357,44 @@ else
   failures+=("git-hooksPath")
 fi
 
+# Symlink health check — verify all config symlinks resolve
+if [[ "${DRY_RUN}" == true ]]; then
+  _dry "Would verify config symlink health"
+else
+  _info "Checking config symlink health..."
+  symlink_errors=0
+  while IFS= read -r file; do
+    if _is_excluded "${file}"; then
+      continue
+    fi
+    if ! _is_known_config_path "${file}"; then
+      continue
+    fi
+    link="${HOME}/.config/${file}"
+    if [[ -L "${link}" ]]; then
+      if [[ ! -e "${link}" ]]; then
+        _warn "Broken symlink: ${link}"
+        failures+=("broken-symlink:${link}")
+        ((symlink_errors += 1))
+      fi
+    elif [[ -e "${link}" ]]; then
+      _warn "Not a symlink (expected symlink): ${link}"
+      failures+=("not-symlink:${link}")
+      ((symlink_errors += 1))
+    else
+      _warn "Missing symlink: ${link}"
+      failures+=("missing-symlink:${link}")
+      ((symlink_errors += 1))
+    fi
+  done < <(git -C "${REPO_DIR}" ls-files)
+
+  if [[ "${symlink_errors}" -eq 0 ]]; then
+    _ok "All config symlinks healthy"
+  fi
+fi
+
 # ============================================================================
-# 9. SUMMARY
+# 10. SUMMARY
 # ============================================================================
 
 echo ""
@@ -264,7 +439,9 @@ if [[ ${#manual[@]} -gt 0 ]]; then
 fi
 
 echo ""
-if [[ ${#failures[@]} -eq 0 ]]; then
+if [[ "${DRY_RUN}" == true ]]; then
+  _info "Dry run complete — no changes were made"
+elif [[ ${#failures[@]} -eq 0 ]]; then
   _ok "Bootstrap complete!"
 else
   _warn "Bootstrap complete with ${#failures[@]} issue(s) — see above."
