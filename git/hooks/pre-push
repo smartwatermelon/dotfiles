@@ -84,7 +84,7 @@ run_full_diff_review() {
 
   log "Running full-diff review (${diff_lines} lines, main...HEAD)"
 
-  REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
+  local REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
   if [[ ! -x "${REVIEW_SCRIPT}" ]]; then
     log_warning "run-review.sh not found — skipping full-diff review"
     return 0
@@ -102,12 +102,15 @@ run_full_diff_review() {
     fi
 
     if [[ -t 0 ]]; then
-      read -p "[PRE-PUSH] Push anyway? (y/N): " -n 1 -r
+      local push_anyway
+      read -t 30 -p "[PRE-PUSH] Push anyway? (y/N): " -n 1 -r push_anyway || true
       echo
-      if [[ ! ${REPLY} =~ ^[Yy]$ ]]; then
+      if [[ ! ${push_anyway} =~ ^[Yy]$ ]]; then
         exit 1
       fi
     else
+      # Non-interactive (CI, piped input): continue rather than block.
+      # Full-diff findings are advisory — per-commit reviews are the gate.
       log_warning "Non-interactive mode — continuing despite full-diff findings"
       return 0
     fi
@@ -179,14 +182,16 @@ check_pr_review_iteration() {
 
       # Check for interactive terminal before prompting
       if [[ -t 0 ]]; then
-        read -p "[PRE-PUSH] Local review clean? (y/N): " -n 1 -r
+        local review_clean
+        read -t 30 -p "[PRE-PUSH] Local review clean? (y/N): " -n 1 -r review_clean || true
         echo
       else
+        # Non-interactive (CI, piped input): skip prompt, don't block automation.
         log_warning "Non-interactive mode - skipping Protocol 4 prompt"
         return 0
       fi
 
-      if [[ ! ${REPLY} =~ ^[Yy]$ ]]; then
+      if [[ ! ${review_clean} =~ ^[Yy]$ ]]; then
         echo ""
         log_warning "Push cancelled per Protocol 4"
         log ""
@@ -207,6 +212,10 @@ check_pr_review_iteration() {
 # =========================================================
 # Repos can add a .ralph/pre-push script for project-specific
 # checks (tests, type-checking, etc.) that run before push.
+#
+# Trust model: same as Makefiles, npm scripts, and git hooks — if you
+# cloned the repo and are pushing from it, you trust its build tooling.
+# The extension must be executable (+x) to run.
 run_project_extensions() {
   local repo_root
   repo_root=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
