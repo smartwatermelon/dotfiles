@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Track which files were modified and which have remaining issues
-declare -A fixed_by_shellcheck fixed_by_shfmt failed_files
+declare -A fixed_by_shellcheck=() fixed_by_shfmt=() failed_files=()
 temp_files=()
 
 # Cleanup temporary files on exit
@@ -82,9 +82,10 @@ for f in "$@"; do
           issues_remaining+="ShellCheck:\n${remaining}\n"
         fi
       else
-        # Patch failed - report original shellcheck output as issues
+        # Patch failed (e.g. issues not auto-fixable) - get human-readable output
         rm -f "${tmpfile}"
-        issues_remaining+="ShellCheck:\n${shellcheck_diff}\n"
+        remaining=$(shellcheck --severity=warning --exclude=SC2312 "${f}" 2>&1 || true)
+        issues_remaining+="ShellCheck:\n${remaining}\n"
       fi
     fi
   else
@@ -133,11 +134,11 @@ echo "----------------------------------------"
 
 # Show files fixed by each tool (deduplicated)
 all_fixed=()
-for f in "${!fixed_by_shellcheck[@]+"${!fixed_by_shellcheck[@]}"}"; do
-  [[ -n "${f}" ]] && all_fixed+=("${f} (shellcheck)")
+for f in "${!fixed_by_shellcheck[@]}"; do
+  all_fixed+=("${f} (shellcheck)")
 done
-for f in "${!fixed_by_shfmt[@]+"${!fixed_by_shfmt[@]}"}"; do
-  [[ -n "${f}" ]] && all_fixed+=("${f} (shfmt)")
+for f in "${!fixed_by_shfmt[@]}"; do
+  all_fixed+=("${f} (shfmt)")
 done
 
 if [[ ${#all_fixed[@]} -gt 0 ]]; then
@@ -147,15 +148,13 @@ fi
 
 # Check for failed files
 has_failures=false
-for f in "${!failed_files[@]+"${!failed_files[@]}"}"; do
-  if [[ -n "${f}" ]]; then
-    if ! ${has_failures}; then
-      echo "❌ Files with remaining issues:"
-      has_failures=true
-    fi
-    printf "  %s\n" "${f}"
-    printf "%b" "${failed_files[${f}]}" | sed 's/^/    /'
+for f in "${!failed_files[@]}"; do
+  if ! ${has_failures}; then
+    echo "❌ Files with remaining issues:"
+    has_failures=true
   fi
+  printf "  %s\n" "${f}"
+  printf "%b" "${failed_files[${f}]}" | sed 's/^/    /'
 done
 
 if ${has_failures}; then
