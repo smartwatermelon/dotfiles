@@ -1,7 +1,7 @@
 # This is Git's per-user configuration file.
 # https://blog.gitbutler.com/how-git-core-devs-configure-git/
 [user]
-	email = andrew.rich@gmail.com
+	email = 676392+smartwatermelon@users.noreply.github.com
 	name = Andrew Rich
 [column]
 	ui = auto

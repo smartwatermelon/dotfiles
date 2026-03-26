@@ -2,7 +2,6 @@
 
 # Output location
 --paths "temp:/tmp"
-# --paths "home:/Volumes/DSMedia/Media/Torrents"
 
 # Process metadata first
 --parse-metadata "title:%(title)s"
