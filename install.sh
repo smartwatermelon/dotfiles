@@ -136,7 +136,9 @@ _ensure_symlink() {
   if [[ -e "${link}" || -L "${link}" ]]; then
     mkdir -p "${BACKUP_DIR}"
     local backup_name
-    backup_name="$(basename "${link}").$(date +%Y%m%d%H%M%S)"
+    # Include relative path in backup name to avoid collisions (e.g. git/config vs vim/config)
+    backup_name="${link#"${HOME}/.config/"}"
+    backup_name="${backup_name//\//_}.$(date +%Y%m%d%H%M%S)"
     mv "${link}" "${BACKUP_DIR}/${backup_name}"
     _warn "Backed up ${link} to ${BACKUP_DIR}/${backup_name}"
   fi
