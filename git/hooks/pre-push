@@ -52,6 +52,70 @@ protected_branch_check() {
 protected_branch_check
 
 # =========================================================
+# FULL-DIFF REVIEW (cross-file integration check)
+# =========================================================
+# Runs adversarial-reviewer on complete main...HEAD diff.
+# This catches cross-file issues that per-commit reviews miss.
+run_full_diff_review() {
+  local current_branch
+  current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+
+  # Skip for main/master (already blocked above, but defensive)
+  if [[ "${current_branch}" == "main" || "${current_branch}" == "master" ]]; then
+    return 0
+  fi
+
+  # Skip if no divergence from main
+  local merge_base
+  merge_base=$(git merge-base main HEAD 2>/dev/null || echo "")
+  if [[ -z "${merge_base}" ]]; then
+    log_warning "Could not find merge-base with main — skipping full-diff review"
+    return 0
+  fi
+
+  local full_diff
+  full_diff=$(git diff main...HEAD 2>/dev/null || echo "")
+  if [[ -z "${full_diff}" ]]; then
+    return 0
+  fi
+
+  local diff_lines
+  diff_lines=$(echo "${full_diff}" | wc -l | tr -d ' ')
+
+  log "Running full-diff review (${diff_lines} lines, main...HEAD)"
+
+  REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
+  if [[ ! -x "${REVIEW_SCRIPT}" ]]; then
+    log_warning "run-review.sh not found — skipping full-diff review"
+    return 0
+  fi
+
+  if ! echo "${full_diff}" | "${REVIEW_SCRIPT}" --mode=full-diff; then
+    echo "" >&2
+    log_warning "Full-diff review found issues. Fix before pushing."
+    echo "" >&2
+
+    # Allow post-push loop to bypass (it manages review externally)
+    if [[ "${POSTPUSH_LOOP:-}" == "1" ]]; then
+      log "Post-push loop active — continuing despite full-diff findings"
+      return 0
+    fi
+
+    if [[ -t 0 ]]; then
+      read -p "[PRE-PUSH] Push anyway? (y/N): " -n 1 -r
+      echo
+      if [[ ! ${REPLY} =~ ^[Yy]$ ]]; then
+        exit 1
+      fi
+    else
+      log_warning "Non-interactive mode — continuing despite full-diff findings"
+      return 0
+    fi
+  fi
+}
+run_full_diff_review
+
+# =========================================================
 # ITERATIVE PR REVIEW CHECKPOINT (Protocol 4)
 # =========================================================
 check_pr_review_iteration() {
@@ -137,6 +201,30 @@ check_pr_review_iteration() {
     fi
   fi
 }
+
+# =========================================================
+# PROJECT-LOCAL PRE-PUSH EXTENSIONS
+# =========================================================
+# Repos can add a .ralph/pre-push script for project-specific
+# checks (tests, type-checking, etc.) that run before push.
+run_project_extensions() {
+  local repo_root
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+  if [[ -z "${repo_root}" ]]; then
+    return 0
+  fi
+
+  local ext="${repo_root}/.ralph/pre-push"
+  if [[ -x "${ext}" ]]; then
+    log "Running project-local pre-push extension: ${ext}"
+    if ! "${ext}"; then
+      echo "" >&2
+      log_warning "Project pre-push extension failed — fix before pushing"
+      exit 1
+    fi
+  fi
+}
+run_project_extensions
 
 # Run PR review checkpoint
 check_pr_review_iteration
