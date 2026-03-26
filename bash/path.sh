@@ -86,6 +86,11 @@ if command -v ruby &>/dev/null; then
   unset GEM_EXE_DIR
 fi
 
+# Bun JavaScript runtime
+if [[ -d "${HOME}/.bun/bin" ]]; then
+  _prepend_path_once "${HOME}/.bun/bin"
+fi
+
 # ============================================================================
 # STEP 3: Prepend User Binaries (Priority 1 - Highest)
 # ============================================================================
