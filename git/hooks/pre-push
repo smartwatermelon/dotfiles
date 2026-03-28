@@ -52,6 +52,83 @@ protected_branch_check() {
 protected_branch_check
 
 # =========================================================
+# SEMGREP SUPPLY CHAIN (SCA) — runs only when lockfiles change
+# =========================================================
+LOCKFILE_PATTERNS=(
+  "package-lock.json"
+  "yarn.lock"
+  "pnpm-lock.yaml"
+  "poetry.lock"
+  "Pipfile.lock"
+  "uv.lock"
+  "go.sum"
+  "Gemfile.lock"
+  "Cargo.lock"
+  "composer.lock"
+  "pubspec.lock"
+  "mix.lock"
+  "Package.resolved"
+  "gradle.lockfile"
+  "packages.lock.json"
+)
+
+run_supply_chain_scan() {
+  if ! command -v semgrep &>/dev/null; then
+    return 0
+  fi
+
+  # Build grep pattern from lockfile list
+  local pattern
+  pattern=$(printf '%s\n' "${LOCKFILE_PATTERNS[@]}" | paste -sd'|' -)
+
+  # Check if any lockfiles changed between main and HEAD
+  local merge_base
+  merge_base=$(git merge-base main HEAD 2>/dev/null || echo "")
+  if [[ -z "${merge_base}" ]]; then
+    return 0
+  fi
+
+  local changed_lockfiles
+  changed_lockfiles=$(git diff --name-only "${merge_base}...HEAD" 2>/dev/null \
+    | grep -E "(${pattern})$" || true)
+
+  if [[ -z "${changed_lockfiles}" ]]; then
+    return 0
+  fi
+
+  log "Lockfile changes detected — running Semgrep Supply Chain scan..."
+  log "  Changed: ${changed_lockfiles//$'\n'/, }"
+
+  # Resolve token from settings file
+  local token
+  token=$(grep api_token "${HOME}/.semgrep/settings.yml" 2>/dev/null | awk '{print $2}')
+  if [[ -z "${token}" ]]; then
+    log_warning "No Semgrep API token found — skipping Supply Chain scan"
+    return 0
+  fi
+
+  if ! SEMGREP_APP_TOKEN="${token}" semgrep ci --supply-chain --quiet 2>/dev/null; then
+    echo "" >&2
+    log_warning "⚠️  Semgrep Supply Chain found vulnerable dependencies."
+    echo "" >&2
+
+    if [[ -t 0 ]]; then
+      local push_anyway
+      read -t 30 -p "[PRE-PUSH] Push anyway? (y/N): " -n 1 -r push_anyway || true
+      echo
+      if [[ ! ${push_anyway} =~ ^[Yy]$ ]]; then
+        exit 1
+      fi
+    else
+      log_warning "Non-interactive mode — continuing despite SCA findings"
+    fi
+  else
+    log_success "Supply Chain scan clean"
+  fi
+}
+run_supply_chain_scan
+
+# =========================================================
 # FULL-DIFF REVIEW (cross-file integration check)
 # =========================================================
 # Runs adversarial-reviewer on complete main...HEAD diff.
