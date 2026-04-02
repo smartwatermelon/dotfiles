@@ -128,7 +128,7 @@ fi
 
 # Directory navigation
 # Set CDPATH to include Developer directory (from previous .profile)
-export CDPATH=".:${HOME}/Developer:${HOME}/Developer/clients"
+export CDPATH=".:${HOME}/Developer:${HOME}/Developer/clients:${HOME}/Developer/netlify"
 
 # Set correct terminal type for SSH sessions with color support
 export TERM=xterm-256color
