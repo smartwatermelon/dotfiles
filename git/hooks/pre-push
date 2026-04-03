@@ -174,6 +174,7 @@ run_reviews() {
   local fulldiff_log codebase_log
   fulldiff_log=$(mktemp)
   codebase_log=$(mktemp)
+  trap 'rm -f "${fulldiff_log:-}" "${codebase_log:-}"' EXIT
 
   (echo "${full_diff}" | "${REVIEW_SCRIPT}" --mode=full-diff >"${fulldiff_log}" 2>&1) &
   local fulldiff_pid=$!
