@@ -129,11 +129,13 @@ run_supply_chain_scan() {
 run_supply_chain_scan
 
 # =========================================================
-# FULL-DIFF REVIEW (cross-file integration check)
+# FULL-DIFF + CODEBASE REVIEW (parallel)
 # =========================================================
-# Runs adversarial-reviewer on complete main...HEAD diff.
-# This catches cross-file issues that per-commit reviews miss.
-run_full_diff_review() {
+# Runs two reviews in parallel on complete main...HEAD diff:
+#   --mode=full-diff: diff-only cross-file integration check
+#   --mode=codebase:  whole-codebase review with tool access
+# Both must pass for push to succeed.
+run_reviews() {
   local current_branch
   current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
 
@@ -146,7 +148,7 @@ run_full_diff_review() {
   local merge_base
   merge_base=$(git merge-base main HEAD 2>/dev/null || echo "")
   if [[ -z "${merge_base}" ]]; then
-    log_warning "Could not find merge-base with main — skipping full-diff review"
+    log_warning "Could not find merge-base with main — skipping reviews"
     return 0
   fi
 
@@ -159,22 +161,59 @@ run_full_diff_review() {
   local diff_lines
   diff_lines=$(echo "${full_diff}" | wc -l | tr -d ' ')
 
-  log "Running full-diff review (${diff_lines} lines, main...HEAD)"
-
   local REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
   if [[ ! -x "${REVIEW_SCRIPT}" ]]; then
-    log_warning "run-review.sh not found — skipping full-diff review"
+    log_warning "run-review.sh not found — skipping reviews"
     return 0
   fi
 
-  if ! echo "${full_diff}" | "${REVIEW_SCRIPT}" --mode=full-diff; then
+  log "Running full-diff + codebase review in parallel (${diff_lines} lines)"
+
+  # Run both reviews in parallel
+  local fulldiff_exit=0 codebase_exit=0
+  local fulldiff_log codebase_log
+  fulldiff_log=$(mktemp)
+  codebase_log=$(mktemp)
+  trap 'rm -f "${fulldiff_log:-}" "${codebase_log:-}"' EXIT
+
+  (echo "${full_diff}" | "${REVIEW_SCRIPT}" --mode=full-diff >"${fulldiff_log}" 2>&1) &
+  local fulldiff_pid=$!
+
+  (echo "${full_diff}" | "${REVIEW_SCRIPT}" --mode=codebase >"${codebase_log}" 2>&1) &
+  local codebase_pid=$!
+
+  # Wait for both
+  wait "${fulldiff_pid}" || fulldiff_exit=$?
+  wait "${codebase_pid}" || codebase_exit=$?
+
+  # Show output from both
+  if [[ -s "${fulldiff_log}" ]]; then
+    cat "${fulldiff_log}" >&2
+  fi
+  if [[ -s "${codebase_log}" ]]; then
+    cat "${codebase_log}" >&2
+  fi
+  rm -f "${fulldiff_log}" "${codebase_log}"
+
+  # Evaluate results
+  local has_failure=false
+  if [[ ${fulldiff_exit} -ne 0 ]]; then
+    has_failure=true
+    log_warning "Full-diff review found issues"
+  fi
+  if [[ ${codebase_exit} -ne 0 ]]; then
+    has_failure=true
+    log_warning "Codebase review found issues"
+  fi
+
+  if [[ "${has_failure}" == true ]]; then
     echo "" >&2
-    log_warning "Full-diff review found issues. Fix before pushing."
+    log_warning "Review found issues. Fix before pushing."
     echo "" >&2
 
     # Allow post-push loop to bypass (it manages review externally)
     if [[ "${POSTPUSH_LOOP:-}" == "1" ]]; then
-      log "Post-push loop active — continuing despite full-diff findings"
+      log "Post-push loop active — continuing despite review findings"
       return 0
     fi
 
@@ -186,14 +225,14 @@ run_full_diff_review() {
         exit 1
       fi
     else
-      # Non-interactive (CI, piped input): continue rather than block.
-      # Full-diff findings are advisory — per-commit reviews are the gate.
-      log_warning "Non-interactive mode — continuing despite full-diff findings"
+      log_warning "Non-interactive mode — continuing despite review findings"
       return 0
     fi
+  else
+    log_success "Full-diff + codebase review passed"
   fi
 }
-run_full_diff_review
+run_reviews
 
 # =========================================================
 # ITERATIVE PR REVIEW CHECKPOINT (Protocol 4)
