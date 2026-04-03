@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =========================================================
+# POST-COMMIT — Patch review log with actual commit hash
+# =========================================================
+#
+# Pre-commit review runs before the commit object exists, so
+# run-review.sh logs the PARENT commit hash. This hook
+# overwrites the stale "commit:" line with the real hash in
+# both the per-repo and global review logs.
+#
+
+_real_hash=$(git rev-parse --short HEAD 2>/dev/null) || exit 0
+
+# Per-repo log
+_repo_log="$(git rev-parse --git-dir 2>/dev/null)/last-review-result.log"
+if [[ -f "${_repo_log}" ]]; then
+  sed -i '' "s/^commit: .*/commit: ${_real_hash}/" "${_repo_log}"
+fi
+
+# Global pointer
+_global_log="${HOME}/.claude/last-review-result.log"
+if [[ -f "${_global_log}" ]]; then
+  sed -i '' "s/^commit: .*/commit: ${_real_hash}/" "${_global_log}"
+fi
