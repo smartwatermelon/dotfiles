@@ -951,19 +951,21 @@ gpush() {
   fi
 
   # Step 4: Watch CI (use gh run watch — gh pr checks fails with PAT errors)
-  # Extract the specific run ID for this branch to avoid watching a stale run
-  echo -e "${BLUE}[gpush]${NC} Waiting for CI run to appear..."
+  # Anchor on the pushed commit SHA to avoid watching a stale run from a prior push
+  local head_sha
+  head_sha=$(git rev-parse HEAD)
+  echo -e "${BLUE}[gpush]${NC} Waiting for CI run on ${head_sha:0:7}..."
   local run_id=""
   local attempts=0
-  while [[ -z "${run_id}" && ${attempts} -lt 10 ]]; do
-    run_id=$(gh run list --branch "${branch}" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
+  while [[ -z "${run_id}" && ${attempts} -lt 15 ]]; do
+    run_id=$(gh run list --branch "${branch}" --commit "${head_sha}" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
     if [[ -z "${run_id}" ]]; then
       ((attempts += 1))
       sleep 2
     fi
   done
   if [[ -z "${run_id}" ]]; then
-    echo -e "${RED}[gpush]${NC} No CI run found after 20s. Check GitHub Actions." >&2
+    echo -e "${RED}[gpush]${NC} No CI run found for ${head_sha:0:7} after 30s. Check GitHub Actions." >&2
     return 1
   fi
   echo -e "${BLUE}[gpush]${NC} Watching CI run ${run_id} for PR #${pr_number}..."
