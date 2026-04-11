@@ -876,3 +876,124 @@ gh() {
   _GH_REVIEW_DONE=1 command gh "$@"
 }
 export -f gh # Exported - overrides system gh command globally
+
+# ============================================================================
+# gpush — Push, create PR, wait for CI, merge, and clean up in one command
+# ============================================================================
+# Usage: gpush [--no-merge]
+#   --no-merge  Stop after CI passes (don't authorize or merge)
+#
+# Not exported — user-facing convenience function only
+
+gpush() {
+  # Validate arguments
+  case "${1:-}" in
+    --no-merge) ;;
+    "") ;;
+    *)
+      echo "Usage: gpush [--no-merge]" >&2
+      return 1
+      ;;
+  esac
+
+  local no_merge=false
+  if [[ "${1:-}" == "--no-merge" ]]; then
+    no_merge=true
+  fi
+
+  local GREEN='\033[0;32m'
+  local RED='\033[0;31m'
+  local BLUE='\033[0;34m'
+  local NC='\033[0m'
+
+  # Step 1: Guard — refuse to run on main/master
+  local branch
+  branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+  if [[ -z "${branch}" || "${branch}" == "main" || "${branch}" == "master" ]]; then
+    echo -e "${RED}[gpush]${NC} Refusing to run on ${branch:-detached HEAD}. Create a branch first." >&2
+    return 1
+  fi
+  echo -e "${BLUE}[gpush]${NC} Branch: ${branch}"
+
+  # Step 2: Push
+  echo -e "${BLUE}[gpush]${NC} Pushing to origin..."
+  if ! git push -u origin HEAD; then
+    echo -e "${RED}[gpush]${NC} Push failed." >&2
+    return 1
+  fi
+
+  # Step 3: Create PR (or detect existing one)
+  local pr_number=""
+  local pr_output
+  echo -e "${BLUE}[gpush]${NC} Creating PR..."
+  if pr_output=$(gh pr create --fill 2>&1); then
+    # Extract PR number from URL in output (last line is typically the URL)
+    pr_number=$(echo "${pr_output}" | grep -oE '/pull/[0-9]+' | tail -1 | grep -oE '[0-9]+')
+    echo -e "${GREEN}[gpush]${NC} Created PR #${pr_number}"
+  else
+    # PR may already exist
+    if echo "${pr_output}" | grep -qi "already exists"; then
+      pr_number=$(gh pr view --json number -q .number 2>/dev/null)
+      if [[ -n "${pr_number}" ]]; then
+        echo -e "${BLUE}[gpush]${NC} PR #${pr_number} already exists, continuing"
+      fi
+    fi
+    if [[ -z "${pr_number}" ]]; then
+      echo -e "${RED}[gpush]${NC} Failed to create PR:" >&2
+      echo "${pr_output}" >&2
+      return 1
+    fi
+  fi
+
+  # Step 4: Watch CI (use gh run watch — gh pr checks fails with PAT errors)
+  echo -e "${BLUE}[gpush]${NC} Watching CI for PR #${pr_number}..."
+  if ! gh run watch --exit-status; then
+    echo -e "${RED}[gpush]${NC} CI failed. Fix and re-run gpush." >&2
+    return 1
+  fi
+  echo -e "${GREEN}[gpush]${NC} CI passed"
+
+  if [[ "${no_merge}" == true ]]; then
+    echo -e "${GREEN}[gpush]${NC} --no-merge: stopping after CI. PR #${pr_number} is ready."
+    return 0
+  fi
+
+  # Step 5: Confirm and authorize merge
+  local confirm
+  echo ""
+  read -r -p "[gpush] Merge PR #${pr_number}? [y/N] " confirm
+  if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
+    echo -e "${BLUE}[gpush]${NC} Merge cancelled. PR #${pr_number} is ready for manual merge."
+    return 0
+  fi
+
+  if ! command -v merge-lock &>/dev/null; then
+    echo -e "${RED}[gpush]${NC} merge-lock not found on PATH." >&2
+    return 1
+  fi
+  if ! merge-lock auth "${pr_number}" "gpush"; then
+    echo -e "${RED}[gpush]${NC} merge-lock authorization failed." >&2
+    return 1
+  fi
+
+  # Step 6: Merge (goes through gh wrapper → pre-merge-review.sh)
+  echo -e "${BLUE}[gpush]${NC} Merging PR #${pr_number}..."
+  if ! gh pr merge "${pr_number}" --squash --delete-branch; then
+    echo -e "${RED}[gpush]${NC} Merge failed. Check pre-merge review output above." >&2
+    return 1
+  fi
+  echo -e "${GREEN}[gpush]${NC} PR #${pr_number} merged"
+
+  # Step 7: Cleanup — handle each step independently
+  echo -e "${BLUE}[gpush]${NC} Cleaning up..."
+  if ! git switch main; then
+    echo -e "${RED}[gpush]${NC} Failed to switch to main." >&2
+    return 1
+  fi
+  if ! git pull; then
+    echo -e "${RED}[gpush]${NC} Failed to pull main. Run 'git pull' manually." >&2
+    return 1
+  fi
+  git branch -D "${branch}" 2>/dev/null || true
+  echo -e "${GREEN}[gpush]${NC} Done. Back on main."
+}
