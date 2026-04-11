@@ -57,21 +57,6 @@ else
 fi
 
 # =========================================================
-# SEMGREP STATIC ANALYSIS (fetches rules from registry on first run)
-# =========================================================
-if command -v semgrep &>/dev/null; then
-  echo "[pre-commit] Running Semgrep static analysis..."
-  if ! semgrep scan --config auto --error --quiet .; then
-    echo "" >&2
-    echo "🛑 Semgrep found issues. Fix them before committing." >&2
-    echo "" >&2
-    exit 1
-  fi
-else
-  echo "[pre-commit] Semgrep not installed — skipping static analysis" >&2
-fi
-
-# =========================================================
 # AUTOMATED CODE REVIEW (runs only if pre-commit passes)
 # =========================================================
 REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"

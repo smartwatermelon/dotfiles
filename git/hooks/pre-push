@@ -129,6 +129,26 @@ run_supply_chain_scan() {
 run_supply_chain_scan
 
 # =========================================================
+# SEMGREP STATIC ANALYSIS (fetches rules from registry on first run)
+# =========================================================
+run_static_analysis() {
+  if ! command -v semgrep &>/dev/null; then
+    log_warning "Semgrep not installed — skipping static analysis"
+    return 0
+  fi
+
+  log "Running Semgrep static analysis..."
+  if ! semgrep scan --config auto --error --quiet .; then
+    echo "" >&2
+    log_warning "🛑 Semgrep found issues. Fix them before pushing."
+    echo "" >&2
+    exit 1
+  fi
+  log_success "Semgrep static analysis clean"
+}
+run_static_analysis
+
+# =========================================================
 # FULL-DIFF + CODEBASE REVIEW (parallel)
 # =========================================================
 # Runs two reviews in parallel on complete main...HEAD diff:
