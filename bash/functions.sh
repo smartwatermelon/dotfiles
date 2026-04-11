@@ -929,6 +929,11 @@ gpush() {
   if pr_output=$(gh pr create --fill 2>&1); then
     # Extract PR number from URL in output (last line is typically the URL)
     pr_number=$(echo "${pr_output}" | grep -oE '/pull/[0-9]+' | tail -1 | grep -oE '[0-9]+')
+    if [[ -z "${pr_number}" ]]; then
+      echo -e "${RED}[gpush]${NC} Could not parse PR number from create output." >&2
+      echo "${pr_output}" >&2
+      return 1
+    fi
     echo -e "${GREEN}[gpush]${NC} Created PR #${pr_number}"
   else
     # PR may already exist
@@ -946,8 +951,23 @@ gpush() {
   fi
 
   # Step 4: Watch CI (use gh run watch — gh pr checks fails with PAT errors)
-  echo -e "${BLUE}[gpush]${NC} Watching CI for PR #${pr_number}..."
-  if ! gh run watch --exit-status; then
+  # Extract the specific run ID for this branch to avoid watching a stale run
+  echo -e "${BLUE}[gpush]${NC} Waiting for CI run to appear..."
+  local run_id=""
+  local attempts=0
+  while [[ -z "${run_id}" && ${attempts} -lt 10 ]]; do
+    run_id=$(gh run list --branch "${branch}" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
+    if [[ -z "${run_id}" ]]; then
+      ((attempts += 1))
+      sleep 2
+    fi
+  done
+  if [[ -z "${run_id}" ]]; then
+    echo -e "${RED}[gpush]${NC} No CI run found after 20s. Check GitHub Actions." >&2
+    return 1
+  fi
+  echo -e "${BLUE}[gpush]${NC} Watching CI run ${run_id} for PR #${pr_number}..."
+  if ! gh run watch "${run_id}" --exit-status; then
     echo -e "${RED}[gpush]${NC} CI failed. Fix and re-run gpush." >&2
     return 1
   fi
@@ -985,15 +1005,18 @@ gpush() {
   echo -e "${GREEN}[gpush]${NC} PR #${pr_number} merged"
 
   # Step 7: Cleanup — handle each step independently
+  local default_branch
+  default_branch=$(git remote show origin 2>/dev/null | awk '/HEAD branch/ {print $NF}')
+  default_branch="${default_branch:-main}"
   echo -e "${BLUE}[gpush]${NC} Cleaning up..."
-  if ! git switch main; then
-    echo -e "${RED}[gpush]${NC} Failed to switch to main." >&2
+  if ! git switch "${default_branch}"; then
+    echo -e "${RED}[gpush]${NC} Failed to switch to ${default_branch}." >&2
     return 1
   fi
   if ! git pull; then
-    echo -e "${RED}[gpush]${NC} Failed to pull main. Run 'git pull' manually." >&2
+    echo -e "${RED}[gpush]${NC} Failed to pull ${default_branch}. Run 'git pull' manually." >&2
     return 1
   fi
   git branch -D "${branch}" 2>/dev/null || true
-  echo -e "${GREEN}[gpush]${NC} Done. Back on main."
+  echo -e "${GREEN}[gpush]${NC} Done. Back on ${default_branch}."
 }
