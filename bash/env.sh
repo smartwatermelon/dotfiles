@@ -9,12 +9,6 @@ if [[ -f "${BASH_CONFIG_DIR}/secrets.sh" ]]; then
   source "${BASH_CONFIG_DIR}/secrets.sh"
 fi
 
-# Load 1Password CLI configuration (service account + gh shell plugin)
-if [[ -f "${BASH_CONFIG_DIR}/1password.sh" ]]; then
-  #shellcheck source=/dev/null
-  source "${BASH_CONFIG_DIR}/1password.sh"
-fi
-
 # Silence macOS Bash deprecation warning
 export BASH_SILENCE_DEPRECATION_WARNING=1
 
