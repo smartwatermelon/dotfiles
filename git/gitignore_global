@@ -1,3 +1,4 @@
 .DS_Store
 .env
 claude-secrets.md
+.claude/scheduled_tasks.lock
