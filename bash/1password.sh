@@ -17,10 +17,18 @@ _OP_KEYCHAIN_SERVICE="op-service-account-claude-automation"
 # biometric prompts in non-interactive contexts (CCCLI, MCP).
 # Guard prevents redundant Keychain lookups if already set (e.g. CI).
 if [[ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]]; then
-  _op_token="$(security find-generic-password \
-    -a "$USER" \
-    -s "${_OP_KEYCHAIN_SERVICE}" \
-    -w 2>/dev/null || true)"
+  # Use timeout if available to guard against Keychain hangs;
+  # $(id -un) is more robust than $USER which can be unset/spoofed.
+  _op_cmd=(security find-generic-password
+    -a "$(id -un)"
+    -s "${_OP_KEYCHAIN_SERVICE}"
+    -w)
+  if command -v timeout &>/dev/null; then
+    _op_token="$(timeout 3 "${_op_cmd[@]}" 2>/dev/null || true)"
+  else
+    _op_token="$("${_op_cmd[@]}" 2>/dev/null || true)"
+  fi
+  unset _op_cmd
 
   if [[ -n "${_op_token}" ]]; then
     export OP_SERVICE_ACCOUNT_TOKEN="${_op_token}"
