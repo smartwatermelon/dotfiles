@@ -1022,3 +1022,22 @@ gpush() {
   git branch -D "${branch}" 2>/dev/null || true
   echo -e "${GREEN}[gpush]${NC} Done. Back on ${default_branch}."
 }
+
+# ============================================================================
+# 1Password Helper
+# ============================================================================
+# opp — run op as personal account, bypassing the service account token.
+# In interactive shells, OP_SERVICE_ACCOUNT_TOKEN is not set so this is
+# equivalent to plain op. Inside CCCLI sessions (where the wrapper has set
+# OP_SERVICE_ACCOUNT_TOKEN), this provides Personal vault access.
+
+opp() {
+  (
+    unset OP_SERVICE_ACCOUNT_TOKEN
+    if ! op whoami &>/dev/null; then
+      op signin
+    fi
+    op "$@"
+  )
+}
+export -f opp # Exported - available inside CCCLI sessions
