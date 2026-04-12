@@ -38,11 +38,32 @@ fi
 unset _OP_KEYCHAIN_SERVICE
 
 # =========================================================
-# SHELL PLUGIN
+# GITHUB TOKEN
 # =========================================================
-# Injects GH_TOKEN for all gh invocations from 1Password.
-# No-op until Phase 2 (op plugin init gh) creates this file.
-if [[ -f "${HOME}/.config/op/plugins.sh" ]]; then
-  #shellcheck source=/dev/null
-  source "${HOME}/.config/op/plugins.sh"
+# Fetch GH_TOKEN from 1Password at shell startup.
+# Direct injection avoids the op shell plugin alias (alias gh="op plugin run -- gh")
+# which conflicts with the gh() function wrapper in functions.sh and bypasses
+# the pre-merge review enforcement it provides.
+if [[ -z "${GH_TOKEN:-}" ]] && [[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]]; then
+  _gh_token="$(op read "op://Automation/GitHub - CCCLI/Token" 2>/dev/null || true)"
+  if [[ -n "${_gh_token}" ]]; then
+    export GH_TOKEN="${_gh_token}"
+  fi
+  unset _gh_token
 fi
+
+# =========================================================
+# PERSONAL ACCOUNT HELPER
+# =========================================================
+# Unsets the service account token and signs in interactively.
+# Required for scripts that access the Personal vault (e.g. prep-airdrop.sh).
+# Usage: opp
+opp() {
+  (
+    unset OP_SERVICE_ACCOUNT_TOKEN
+    if ! op whoami &>/dev/null; then
+      op signin
+    fi
+    op "$@"
+  )
+}
