@@ -9,6 +9,11 @@ if [[ -f "${BASH_CONFIG_DIR}/secrets.sh" ]]; then
   source "${BASH_CONFIG_DIR}/secrets.sh"
 fi
 
+# 1Password CLI tokens (OP_SERVICE_ACCOUNT_TOKEN, GH_TOKEN) are injected
+# exclusively by claude-wrapper at CCCLI launch. Interactive shells started
+# outside claude-wrapper will have neither token set and must run `op signin`
+# (or use `opp` from functions.sh) for 1Password CLI auth.
+
 # Silence macOS Bash deprecation warning
 export BASH_SILENCE_DEPRECATION_WARNING=1
 
