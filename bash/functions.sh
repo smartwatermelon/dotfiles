@@ -1111,7 +1111,7 @@ opp() {
   (
     unset OP_SERVICE_ACCOUNT_TOKEN
     if ! op whoami &>/dev/null; then
-      op signin
+      eval "$(op signin)"
     fi
     op "$@"
   )
