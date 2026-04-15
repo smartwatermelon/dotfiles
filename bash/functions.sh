@@ -348,6 +348,8 @@ _homebrew_update() {
       upgrade_path="${shim_dir}:${PATH}"
       tolerate_upgrade_failure=true
       _notif "Non-interactive: casks requiring sudo will be skipped"
+    else
+      _notif "Warning: sudo shim unavailable - sudo-requiring casks may prompt"
     fi
   fi
 
