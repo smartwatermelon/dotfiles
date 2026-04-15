@@ -503,22 +503,16 @@ _softwareupdate() {
   _notif "Updating macOS system software..."
   echo "=== softwareupdate ${timestamp} ===" | _update_log
 
-  # In non-interactive mode, `softwareupdate -i -a` will pause on an admin
-  # credential dialog (SFAuthorization, not sudo) for any system-scope update.
-  # Download-only doesn't require admin, so pre-stage updates and defer the
-  # install to the next interactive `updates` run.
+  # In non-interactive mode, any step beyond listing can prompt for admin
+  # credentials — observed in the wild: `softwareupdate --download --all`
+  # prompts when a system-scope update (e.g. a macOS point release) is in
+  # the list, because the downloader stages it into a privileged location.
+  # Only `-l` is truly admin-free. Log what's pending and defer both
+  # download and install to the next interactive `updates` run.
   if _updates_noninteractive; then
-    _notif "Non-interactive: listing and pre-downloading updates only"
+    _notif "Non-interactive: listing pending updates only (download/install deferred)"
     output=$(softwareupdate -l 2>&1)
     echo "${output}" | _update_log
-    output=$(softwareupdate --download --all 2>&1)
-    result=$?
-    echo "${output}" | _update_log
-    if [[ "${result}" -ne 0 ]]; then
-      _notif "softwareupdate download failed (exit ${result}) - check log"
-    else
-      _notif "softwareupdate download completed (install deferred to interactive run)"
-    fi
     return 0 # Don't fail the chain - install deferred by design
   fi
 
