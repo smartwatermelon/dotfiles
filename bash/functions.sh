@@ -275,6 +275,46 @@ _update_log() {
 }
 # Not exported - internal helper
 
+# Detect non-interactive invocation (e.g. LaunchAgent run overnight).
+# In this mode, update functions must skip anything that would prompt for
+# sudo / admin credentials / TouchID, since there's no user to respond and
+# pam_tid surfaces a GUI dialog that pauses the whole run until login.
+# Override with UPDATES_NONINTERACTIVE=1 to force this mode from a TTY
+# (useful for testing), or UPDATES_NONINTERACTIVE=0 to force interactive.
+_updates_noninteractive() {
+  if [[ -n "${UPDATES_NONINTERACTIVE:-}" ]]; then
+    [[ "${UPDATES_NONINTERACTIVE}" == "1" ]]
+    return $?
+  fi
+  # No controlling TTY on stdin => LaunchAgent / cron / ssh-noninteractive
+  [[ ! -t 0 ]]
+}
+# Not exported - internal helper
+
+# Create a temporary directory containing a `sudo` shim that fails fast with
+# a clear message instead of prompting. Echoes the directory path to stdout
+# for the caller to prepend to PATH and to clean up when done.
+# Intended for wrapping tools (e.g. `brew upgrade`) that invoke sudo for
+# specific sub-operations (cask pkg installers) so those sub-operations
+# fail individually while the rest of the run proceeds.
+_updates_sudo_shim() {
+  local shim_dir
+  shim_dir=$(mktemp -d -t updates-sudo-shim) || return 1
+  cat >"${shim_dir}/sudo" <<'SHIM'
+#!/bin/bash
+# Injected by _updates_sudo_shim during non-interactive `updates` run.
+# Refuses to prompt the user; fails fast so the parent tool skips this op.
+echo "sudo blocked (non-interactive updates): $*" >&2
+exit 1
+SHIM
+  chmod +x "${shim_dir}/sudo" || {
+    rm -rf "${shim_dir}"
+    return 1
+  }
+  echo "${shim_dir}"
+}
+# Not exported - internal helper
+
 # Update Homebrew packages
 # Package managers provide their own network error diagnostics, so no pre-check needed
 _homebrew_update() {
@@ -295,12 +335,33 @@ _homebrew_update() {
     return "${result}"
   fi
 
-  output=$(brew upgrade --verbose 2>&1)
+  # Non-interactive mode: prepend PATH with a sudo shim so any cask requiring
+  # sudo (pkg/installer artifacts) fails fast and gets logged, while formulae
+  # and user-scope casks upgrade normally. Don't treat individual cask
+  # sudo-failures as overall update failure.
+  local shim_dir=""
+  local upgrade_path="${PATH}"
+  local tolerate_upgrade_failure=false
+  if _updates_noninteractive; then
+    shim_dir=$(_updates_sudo_shim) || shim_dir=""
+    if [[ -n "${shim_dir}" ]]; then
+      upgrade_path="${shim_dir}:${PATH}"
+      tolerate_upgrade_failure=true
+      _notif "Non-interactive: casks requiring sudo will be skipped"
+    fi
+  fi
+
+  output=$(PATH="${upgrade_path}" brew upgrade --verbose 2>&1)
   result=$?
   echo "${output}" | _update_log
+  [[ -n "${shim_dir}" ]] && rm -rf "${shim_dir}"
   if [[ "${result}" -ne 0 ]]; then
-    _notif "brew upgrade failed (exit ${result})"
-    return "${result}"
+    if [[ "${tolerate_upgrade_failure}" == "true" ]]; then
+      _notif "brew upgrade completed with skipped casks (exit ${result}) - check log"
+    else
+      _notif "brew upgrade failed (exit ${result})"
+      return "${result}"
+    fi
   fi
 
   output=$(brew cleanup --prune=all -s 2>&1)
@@ -439,6 +500,25 @@ _softwareupdate() {
 
   _notif "Updating macOS system software..."
   echo "=== softwareupdate ${timestamp} ===" | _update_log
+
+  # In non-interactive mode, `softwareupdate -i -a` will pause on an admin
+  # credential dialog (SFAuthorization, not sudo) for any system-scope update.
+  # Download-only doesn't require admin, so pre-stage updates and defer the
+  # install to the next interactive `updates` run.
+  if _updates_noninteractive; then
+    _notif "Non-interactive: listing and pre-downloading updates only"
+    output=$(softwareupdate -l 2>&1)
+    echo "${output}" | _update_log
+    output=$(softwareupdate --download --all 2>&1)
+    result=$?
+    echo "${output}" | _update_log
+    if [[ "${result}" -ne 0 ]]; then
+      _notif "softwareupdate download failed (exit ${result}) - check log"
+    else
+      _notif "softwareupdate download completed (install deferred to interactive run)"
+    fi
+    return 0 # Don't fail the chain - install deferred by design
+  fi
 
   # Run softwareupdate without sudo - it will prompt for admin credentials if needed
   # Use pipefail to capture exit code, run directly to preserve TTY for auth prompts
