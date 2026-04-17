@@ -170,8 +170,16 @@ run_static_analysis() {
 
   log "Running Semgrep static analysis (CI-equivalent code scan)..."
   local exit_code=0
-  SEMGREP_APP_TOKEN="${token}" SEMGREP_BASELINE_REF="origin/main" \
-    semgrep ci --code --dry-run --oss-only --quiet || exit_code=$?
+  # Only set SEMGREP_BASELINE_REF when origin/main is actually fetched —
+  # fresh clones / forks using different remotes would otherwise surface a
+  # confusing "network/auth" error from the exit-2 branch below.
+  (
+    export SEMGREP_APP_TOKEN="${token}"
+    if git rev-parse --verify --quiet origin/main >/dev/null; then
+      export SEMGREP_BASELINE_REF="origin/main"
+    fi
+    semgrep ci --code --dry-run --oss-only --quiet
+  ) || exit_code=$?
 
   case ${exit_code} in
     0)
