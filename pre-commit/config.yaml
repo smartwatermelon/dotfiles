@@ -13,7 +13,6 @@ repos:
         language: system
         pass_filenames: true
         exclude_types: [binary]
-        verbose: true
 
   # Python formatting and linting (installed via GitHub repos)
   - repo: https://github.com/psf/black
