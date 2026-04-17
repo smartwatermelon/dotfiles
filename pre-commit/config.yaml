@@ -1,5 +1,19 @@
 ---
 repos:
+  # Secrets detection — catches leaked tokens/keys before they enter git
+  # history. Uses Semgrep's public p/secrets + p/gitleaks rulesets (OSS engine,
+  # no token required). p/gitleaks catches common token formats (GH, AWS, etc);
+  # p/secrets adds Semgrep-maintained patterns. The paid Semgrep Secrets product
+  # is not enabled on this deployment, so we use these open-source rules.
+  - repo: local
+    hooks:
+      - id: semgrep-secrets
+        name: "Semgrep Secrets Scan (p/secrets + p/gitleaks)"
+        entry: semgrep scan --config=p/secrets --config=p/gitleaks --error --quiet --oss-only
+        language: system
+        pass_filenames: true
+        exclude_types: [binary]
+
   # Python formatting and linting (installed via GitHub repos)
   - repo: https://github.com/psf/black
     rev: 25.1.0
