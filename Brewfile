@@ -20,6 +20,7 @@ brew "shfmt"
 brew "yamllint"
 brew "tidy-html5"
 brew "markdownlint-cli"
+brew "semgrep"
 
 # ── Core: Tools referenced by configs ────────────────────
 brew "bat"
