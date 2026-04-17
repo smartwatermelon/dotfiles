@@ -129,22 +129,77 @@ run_supply_chain_scan() {
 run_supply_chain_scan
 
 # =========================================================
-# SEMGREP STATIC ANALYSIS (fetches rules from registry on first run)
+# SEMGREP STATIC ANALYSIS
 # =========================================================
+# With a Semgrep token: runs `semgrep ci --code` against the connected
+# Policies (same ruleset remote CI uses) — closes the local/CI coverage gap.
+# Without a token: falls back to `--config auto` (public Registry rules only).
+#
+# --dry-run: local run; do not upload findings (real CI uploads later).
+# --oss-only: Pro Engine local binary has a version-check issue; OSS engine
+#   still runs ~2866 rules (vs ~100 with --config auto). Remove this flag
+#   once the Pro binary installs cleanly locally.
+# SEMGREP_BASELINE_REF=origin/main: diff-aware scan, matches CI PR behavior.
 run_static_analysis() {
   if ! command -v semgrep &>/dev/null; then
     log_warning "Semgrep not installed — skipping static analysis"
     return 0
   fi
 
-  log "Running Semgrep static analysis..."
-  if ! semgrep scan --config auto --error --quiet .; then
-    echo "" >&2
-    log_warning "🛑 Semgrep found issues. Fix them before pushing."
-    echo "" >&2
-    exit 1
+  # Read token safely: anchor grep, strip quotes, tolerate missing file / pipefail.
+  local token=""
+  local settings="${HOME}/.semgrep/settings.yml"
+  if [[ -f "${settings}" ]]; then
+    token=$(grep -E '^[[:space:]]*api_token:' "${settings}" 2>/dev/null \
+      | head -n1 \
+      | awk '{print $2}' \
+      | tr -d "\"'" || true)
   fi
-  log_success "Semgrep static analysis clean"
+
+  if [[ -z "${token}" ]]; then
+    log_warning "No Semgrep API token — falling back to --config auto (narrower ruleset than CI)"
+    if ! semgrep scan --config auto --error --quiet .; then
+      echo "" >&2
+      log_warning "🛑 Semgrep found issues. Fix them before pushing."
+      echo "" >&2
+      exit 1
+    fi
+    log_success "Semgrep static analysis clean"
+    return 0
+  fi
+
+  log "Running Semgrep static analysis (CI-equivalent code scan)..."
+  local exit_code=0
+  SEMGREP_APP_TOKEN="${token}" SEMGREP_BASELINE_REF="origin/main" \
+    semgrep ci --code --dry-run --oss-only --quiet || exit_code=$?
+
+  case ${exit_code} in
+    0)
+      log_success "Semgrep static analysis clean (CI-equivalent)"
+      ;;
+    1)
+      echo "" >&2
+      log_warning "🛑 Semgrep found blocking issues. Fix them before pushing."
+      echo "" >&2
+      exit 1
+      ;;
+    *)
+      echo "" >&2
+      log_warning "⚠️  Semgrep failed to complete (exit ${exit_code}) — likely network/auth/rules issue, not findings."
+      log_warning "   Diagnose: SEMGREP_APP_TOKEN=<token> semgrep ci --code --dry-run --oss-only"
+      echo "" >&2
+      if [[ -t 0 ]]; then
+        local push_anyway
+        read -t 30 -p "[PRE-PUSH] Push without code scan? (y/N): " -n 1 -r push_anyway || true
+        echo
+        if [[ ! ${push_anyway} =~ ^[Yy]$ ]]; then
+          exit 1
+        fi
+      else
+        log_warning "Non-interactive mode — continuing despite scan infra error"
+      fi
+      ;;
+  esac
 }
 run_static_analysis
 
