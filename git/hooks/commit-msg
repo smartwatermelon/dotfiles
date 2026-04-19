@@ -46,7 +46,7 @@ if ! echo "${FIRST_LINE}" | grep -qE "${PATTERN}"; then
   echo "🛑 COMMIT MESSAGE VALIDATION FAILED" >&2
   echo "" >&2
   echo "Commit message must follow conventional commits format:" >&2
-  echo "  <type>(<scope>): <description>" >&2
+  echo "  <type>(<scope>)!?: <description>   (scope optional; ! marks breaking change)" >&2
   echo "" >&2
   echo "Valid types:" >&2
   echo "  feat     - New feature" >&2
