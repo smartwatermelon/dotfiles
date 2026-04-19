@@ -31,8 +31,13 @@ if [[ "${FIRST_LINE}" =~ ^Merge ]]; then
 fi
 
 # Conventional commits regex pattern
-# Format: type(optional-scope): description
-PATTERN='^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([a-z0-9-]+\))?: .{1,}'
+# Format: type(optional-scope)!?: description
+# The optional `!` marks a breaking change per the conventional-commits spec
+# (https://www.conventionalcommits.org/en/v1.0.0/#summary). Examples:
+#   feat!: drop support for Node 10        (no scope, breaking)
+#   feat(api)!: rename authenticate()      (scoped breaking)
+#   fix: resolve null-check regression     (unchanged, non-breaking)
+PATTERN='^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([a-z0-9-]+\))?!?: .{1,}'
 
 if ! echo "${FIRST_LINE}" | grep -qE "${PATTERN}"; then
   echo "" >&2
@@ -61,6 +66,8 @@ if ! echo "${FIRST_LINE}" | grep -qE "${PATTERN}"; then
   echo "  feat(auth): add JWT token refresh" >&2
   echo "  fix: resolve memory leak in parser" >&2
   echo "  docs(api): update authentication guide" >&2
+  echo "  feat!: drop support for Node 10 (breaking change)" >&2
+  echo "  feat(api)!: rename authenticate() (scoped breaking change)" >&2
   echo "" >&2
   echo "To bypass (emergency only):" >&2
   echo "  OBTAIN EXPLICIT PERMISSION and then git commit --no-verify" >&2
