@@ -6,16 +6,18 @@ set -euo pipefail
 # =========================================================
 #
 # Enforces conventional commits format:
-#   <type>(<scope>): <description>
+#   <type>(<scope>)!?: <description>
 #
 # Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert
-# Scope is optional
-# Description must be present and start with lowercase
+# Scope is optional; trailing ! marks a breaking change (spec v1.0.0).
+# Description must be present and start with lowercase.
 #
 # Examples:
 #   ✅ feat(auth): add JWT token refresh
 #   ✅ fix: resolve memory leak in parser
 #   ✅ docs(api): update authentication guide
+#   ✅ feat!: drop support for Node 10 (breaking change)
+#   ✅ feat(api)!: rename authenticate() (scoped breaking change)
 #   ❌ Add new feature (missing type)
 #   ❌ FEAT: new feature (type must be lowercase)
 #
@@ -31,15 +33,20 @@ if [[ "${FIRST_LINE}" =~ ^Merge ]]; then
 fi
 
 # Conventional commits regex pattern
-# Format: type(optional-scope): description
-PATTERN='^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([a-z0-9-]+\))?: .{1,}'
+# Format: type(optional-scope)!?: description
+# The optional `!` marks a breaking change per the conventional-commits spec
+# (https://www.conventionalcommits.org/en/v1.0.0/#summary). Examples:
+#   feat!: drop support for Node 10        (no scope, breaking)
+#   feat(api)!: rename authenticate()      (scoped breaking)
+#   fix: resolve null-check regression     (unchanged, non-breaking)
+PATTERN='^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([a-z0-9-]+\))?!?: .{1,}'
 
 if ! echo "${FIRST_LINE}" | grep -qE "${PATTERN}"; then
   echo "" >&2
   echo "🛑 COMMIT MESSAGE VALIDATION FAILED" >&2
   echo "" >&2
   echo "Commit message must follow conventional commits format:" >&2
-  echo "  <type>(<scope>): <description>" >&2
+  echo "  <type>(<scope>)!?: <description>   (scope optional; ! marks breaking change)" >&2
   echo "" >&2
   echo "Valid types:" >&2
   echo "  feat     - New feature" >&2
@@ -61,6 +68,8 @@ if ! echo "${FIRST_LINE}" | grep -qE "${PATTERN}"; then
   echo "  feat(auth): add JWT token refresh" >&2
   echo "  fix: resolve memory leak in parser" >&2
   echo "  docs(api): update authentication guide" >&2
+  echo "  feat!: drop support for Node 10 (breaking change)" >&2
+  echo "  feat(api)!: rename authenticate() (scoped breaking change)" >&2
   echo "" >&2
   echo "To bypass (emergency only):" >&2
   echo "  OBTAIN EXPLICIT PERMISSION and then git commit --no-verify" >&2
