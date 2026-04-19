@@ -24,6 +24,42 @@ log_warning() {
 }
 
 # =========================================================
+# NON-INTERACTIVE STRICT MODE
+# =========================================================
+# CI was narrowed (smartwatermelon/github-workflows claude-blocking-review v2+)
+# to block only on production bugs / regressions / security / data-loss.
+# Everything else — style, integration, coverage, supply-chain hygiene — must
+# now be caught locally. Inside Claude Code sessions (CLAUDECODE=1), any
+# finding from the four non-interactive review paths below blocks the push by
+# default, rather than silently degrading to advisory.
+#
+# Escape hatches:
+#   POSTPUSH_LOOP=1   — post-push-loop manages review externally (pre-existing)
+#   STRICT_PREPUSH=0  — temporary opt-out during hook bake-in
+#                       Remove once the default has proven itself. Tracked.
+strict_noninteractive_block() {
+  [[ ! -t 0 ]] \
+    && [[ "${CLAUDECODE:-}" == "1" ]] \
+    && [[ "${POSTPUSH_LOOP:-}" != "1" ]] \
+    && [[ "${STRICT_PREPUSH:-1}" != "0" ]]
+}
+
+# =========================================================
+# SEMGREP TOKEN READER (shared)
+# =========================================================
+# Safe read of ~/.semgrep/settings.yml — anchors the grep to the api_token
+# key, strips surrounding quotes, tolerates missing file or empty value.
+# Used by both run_supply_chain_scan and run_static_analysis.
+_read_semgrep_token() {
+  local settings="${HOME}/.semgrep/settings.yml"
+  [[ -f "${settings}" ]] || return 0
+  grep -E '^[[:space:]]*api_token:' "${settings}" 2>/dev/null \
+    | head -n1 \
+    | awk '{print $2}' \
+    | tr -d "\"'" || true
+}
+
+# =========================================================
 # BRANCH PROTECTION - Do not push directly to main/master
 # =========================================================
 protected_branch_check() {
@@ -99,9 +135,9 @@ run_supply_chain_scan() {
   log "Lockfile changes detected — running Semgrep Supply Chain scan..."
   log "  Changed: ${changed_lockfiles//$'\n'/, }"
 
-  # Resolve token from settings file
+  # Resolve token from settings file (shared helper, anchored read)
   local token
-  token=$(grep api_token "${HOME}/.semgrep/settings.yml" 2>/dev/null | awk '{print $2}')
+  token=$(_read_semgrep_token)
   if [[ -z "${token}" ]]; then
     log_warning "No Semgrep API token found — skipping Supply Chain scan"
     return 0
@@ -119,8 +155,12 @@ run_supply_chain_scan() {
       if [[ ! ${push_anyway} =~ ^[Yy]$ ]]; then
         exit 1
       fi
+    elif strict_noninteractive_block; then
+      log_warning "🛑 Non-interactive strict mode — blocking push due to SCA findings"
+      log_warning "   Escape hatches: STRICT_PREPUSH=0 (temporary) or POSTPUSH_LOOP=1"
+      exit 1
     else
-      log_warning "Non-interactive mode — continuing despite SCA findings"
+      log_warning "Non-interactive advisory mode — continuing despite SCA findings"
     fi
   else
     log_success "Supply Chain scan clean"
@@ -146,15 +186,9 @@ run_static_analysis() {
     return 0
   fi
 
-  # Read token safely: anchor grep, strip quotes, tolerate missing file / pipefail.
-  local token=""
-  local settings="${HOME}/.semgrep/settings.yml"
-  if [[ -f "${settings}" ]]; then
-    token=$(grep -E '^[[:space:]]*api_token:' "${settings}" 2>/dev/null \
-      | head -n1 \
-      | awk '{print $2}' \
-      | tr -d "\"'" || true)
-  fi
+  # Read token via shared helper (anchored grep, strips quotes, tolerates missing file)
+  local token
+  token=$(_read_semgrep_token)
 
   if [[ -z "${token}" ]]; then
     log_warning "No Semgrep API token — falling back to --config auto (narrower ruleset than CI)"
@@ -203,8 +237,12 @@ run_static_analysis() {
         if [[ ! ${push_anyway} =~ ^[Yy]$ ]]; then
           exit 1
         fi
+      elif strict_noninteractive_block; then
+        log_warning "🛑 Non-interactive strict mode — blocking push due to scan infra error"
+        log_warning "   Escape hatches: STRICT_PREPUSH=0 (temporary) or POSTPUSH_LOOP=1"
+        exit 1
       else
-        log_warning "Non-interactive mode — continuing despite scan infra error"
+        log_warning "Non-interactive advisory mode — continuing despite scan infra error"
       fi
       ;;
   esac
@@ -307,8 +345,12 @@ run_reviews() {
       if [[ ! ${push_anyway} =~ ^[Yy]$ ]]; then
         exit 1
       fi
+    elif strict_noninteractive_block; then
+      log_warning "🛑 Non-interactive strict mode — blocking push due to review findings"
+      log_warning "   Escape hatches: STRICT_PREPUSH=0 (temporary) or POSTPUSH_LOOP=1"
+      exit 1
     else
-      log_warning "Non-interactive mode — continuing despite review findings"
+      log_warning "Non-interactive advisory mode — continuing despite review findings"
       return 0
     fi
   else
@@ -326,38 +368,52 @@ check_pr_review_iteration() {
     return 0
   fi
 
+  # Fetch PR state once. statusCheckRollup needs Checks permission on the PAT;
+  # fall back gracefully if not granted (reviewDecision alone is still useful).
+  local pr_json
+  pr_json=$(gh pr view --json number,reviewDecision,reviews,statusCheckRollup 2>/dev/null || echo "")
+  if [[ -z "${pr_json}" ]]; then
+    pr_json=$(gh pr view --json number,reviewDecision,reviews 2>/dev/null || echo "")
+  fi
+  [[ -n "${pr_json}" ]] || return 0
+
   local pr_number
-  pr_number=$(gh pr view --json number -q .number 2>/dev/null || echo "")
+  pr_number=$(echo "${pr_json}" | jq -r '.number // empty' 2>/dev/null || echo "")
 
   if [[ -n "${pr_number}" ]]; then
     echo ""
     log "Pushing to existing PR #${pr_number}"
 
-    # Check if we're pushing after a CI failure or review comments
     local has_issues=false
-    local last_ci_status=0
 
-    # Check CI status - if gh command fails, treat as no issues (defensive)
-    if gh pr checks &>/dev/null; then
-      last_ci_status=$(gh pr checks 2>/dev/null | grep -ciE '\bfail(ed|ure)?\b' || true)
-    fi
+    # Unresolved CHANGES_REQUESTED reviews (latest per author — matches
+    # pre-merge-review.sh logic so the signals are consistent).
+    local changes_requested
+    changes_requested=$(echo "${pr_json}" | jq -r '
+      .reviews // []
+      | group_by(.author.login // "unknown")
+      | map(sort_by(.submittedAt // "") | last)
+      | map(select(.state == "CHANGES_REQUESTED"))
+      | length' 2>/dev/null || echo "0")
 
-    if [[ "${last_ci_status}" -gt 0 ]]; then
+    if [[ "${changes_requested}" -gt 0 ]]; then
       has_issues=true
-      log_warning "⚠️  Last CI run had failures"
+      log_warning "⚠️  PR has ${changes_requested} unresolved CHANGES_REQUESTED review(s)"
     fi
 
-    # Check for recent review comments (claude or sentry bot)
-    local recent_comments=0
+    # Failing CI checks (excludes Seer — advisory per Protocol 5).
+    local ci_failures
+    ci_failures=$(echo "${pr_json}" | jq -r '
+      .statusCheckRollup // []
+      | map(select(
+          (.conclusion == "FAILURE" or .conclusion == "FAILED")
+          and (.name | startswith("Seer") | not)
+        ))
+      | length' 2>/dev/null || echo "0")
 
-    # If gh command fails, treat as no comments (defensive)
-    if gh pr view --comments &>/dev/null; then
-      recent_comments=$(gh pr view --comments 2>/dev/null | tail -100 | grep -ci "claude\|sentry" || true)
-    fi
-
-    if [[ "${recent_comments}" -gt 0 ]]; then
+    if [[ "${ci_failures}" -gt 0 ]]; then
       has_issues=true
-      log_warning "⚠️  PR has review comments"
+      log_warning "⚠️  PR has ${ci_failures} failing CI check(s)"
     fi
 
     if [[ "${has_issues}" == true ]]; then
@@ -384,9 +440,14 @@ check_pr_review_iteration() {
         local review_clean
         read -t 30 -p "[PRE-PUSH] Local review clean? (y/N): " -n 1 -r review_clean || true
         echo
+      elif strict_noninteractive_block; then
+        log_warning "🛑 Non-interactive strict mode — blocking push; Protocol 4 checkpoint triggered"
+        log_warning "   Run code-reviewer locally, address findings, then retry."
+        log_warning "   Escape hatches: STRICT_PREPUSH=0 (temporary) or POSTPUSH_LOOP=1"
+        exit 1
       else
-        # Non-interactive (CI, piped input): skip prompt, don't block automation.
-        log_warning "Non-interactive mode - skipping Protocol 4 prompt"
+        # Non-interactive advisory (legacy CI / opt-out): skip prompt, don't block automation.
+        log_warning "Non-interactive advisory mode - skipping Protocol 4 prompt"
         return 0
       fi
 
