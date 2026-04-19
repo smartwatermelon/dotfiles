@@ -57,6 +57,39 @@ else
 fi
 
 # =========================================================
+# PROJECT-LOCAL PRE-COMMIT EXTENSIONS
+# =========================================================
+# Repos can add a .ralph/pre-commit script for project-specific checks
+# (e.g. typecheck-affected, test-affected, custom lints) that run after
+# the global lint pass but before the expensive AI review. Symmetric
+# with .ralph/pre-push — same trust model (if you cloned the repo and
+# are committing to it, you trust its build tooling) and same +x
+# activation requirement.
+#
+# Placed here deliberately so the cheaper project-local checks fail
+# fast before the 60-120s AI review cycle spends compute on a diff
+# the project already knows is broken.
+run_project_extensions() {
+  local repo_root
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+  if [[ -z "${repo_root}" ]]; then
+    return 0
+  fi
+
+  local ext="${repo_root}/.ralph/pre-commit"
+  if [[ -x "${ext}" ]]; then
+    echo "[pre-commit] Running project-local pre-commit extension: ${ext}"
+    if ! "${ext}"; then
+      echo "" >&2
+      echo "🛑 Project pre-commit extension failed — fix before committing." >&2
+      echo "" >&2
+      exit 1
+    fi
+  fi
+}
+run_project_extensions
+
+# =========================================================
 # AUTOMATED CODE REVIEW (runs only if pre-commit passes)
 # =========================================================
 REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
