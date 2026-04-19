@@ -6,16 +6,18 @@ set -euo pipefail
 # =========================================================
 #
 # Enforces conventional commits format:
-#   <type>(<scope>): <description>
+#   <type>(<scope>)!?: <description>
 #
 # Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert
-# Scope is optional
-# Description must be present and start with lowercase
+# Scope is optional; trailing ! marks a breaking change (spec v1.0.0).
+# Description must be present and start with lowercase.
 #
 # Examples:
 #   ✅ feat(auth): add JWT token refresh
 #   ✅ fix: resolve memory leak in parser
 #   ✅ docs(api): update authentication guide
+#   ✅ feat!: drop support for Node 10 (breaking change)
+#   ✅ feat(api)!: rename authenticate() (scoped breaking change)
 #   ❌ Add new feature (missing type)
 #   ❌ FEAT: new feature (type must be lowercase)
 #
