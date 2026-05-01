@@ -538,6 +538,11 @@ _softwareupdate() {
 # Returns 0 (success) if mas is not installed to allow graceful degradation
 # Fails fast if mas upgrade fails (including authentication issues)
 _mas_update() {
+  if [[ "${MAS_UPDATE_DISABLE:-}" == "true" ]]; then
+    _notif "skipping mas per MAS_UPDATE_DISABLE"
+    return 0
+  fi
+
   if ! command -v mas &>/dev/null; then
     _notif "mas not found, skipping"
     return 0 # Not an error - mas is optional
@@ -1111,7 +1116,10 @@ opp() {
   (
     unset OP_SERVICE_ACCOUNT_TOKEN
     if ! op whoami &>/dev/null; then
-      eval "$(op signin)"
+      #      eval "$(op signin)"
+      local signin_cmd
+      signin_cmd=$(op signin) || return $?
+      eval "${signin_cmd}"
     fi
     op "$@"
   )
