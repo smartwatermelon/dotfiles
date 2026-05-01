@@ -156,3 +156,6 @@ fi
 
 # Claude Code configuration
 export CLAUDE_CONFIG_DIR="${HOME}/.claude"
+
+# mas update disable
+export MAS_UPDATE_DISABLE=true
