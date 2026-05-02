@@ -2,10 +2,23 @@
 set -euo pipefail
 
 # =========================================================
-# COMMIT MESSAGE VALIDATION - Conventional Commits Format
+# COMMIT MESSAGE VALIDATION + AI CODE REVIEW
 # =========================================================
 #
-# Enforces conventional commits format:
+# This hook runs two checks in sequence:
+#   1. Conventional Commits format validation on the in-progress
+#      commit message ($1).
+#   2. AI code review of the staged diff, with the proposed commit
+#      message forwarded via run-review.sh's --message-file=PATH flag
+#      so the reviewer sees both the code change and the author's
+#      stated intent.
+#
+# AI review lives here (rather than in pre-commit) because git only
+# materializes the commit message on disk by the time commit-msg fires;
+# during pre-commit, COMMIT_EDITMSG still contains the PREVIOUS commit's
+# message (per `man githooks`).
+#
+# Conventional Commits format:
 #   <type>(<scope>)!?: <description>
 #
 # Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert
@@ -86,6 +99,30 @@ if [[ ${SUBJECT_LENGTH} -gt 72 ]]; then
   echo "Consider shortening your message or moving details to the body." >&2
   echo "" >&2
   # This is a warning, not an error - don't exit 1
+fi
+
+# =========================================================
+# AUTOMATED CODE REVIEW (runs only if message validation passes)
+# =========================================================
+# Forwards the in-progress commit message file to the reviewer via
+# --message-file=PATH so the AI sees both the diff and the author's
+# stated intent. Pre-commit cannot do this — see header.
+REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
+
+if [[ -x "${REVIEW_SCRIPT}" ]]; then
+  if ! git diff --cached -U10 | "${REVIEW_SCRIPT}" --message-file="${COMMIT_MSG_FILE}"; then
+    echo "" >&2
+    echo "🛑 Commit blocked by code review." >&2
+    echo "   Address the issues above and try again." >&2
+    echo "" >&2
+    echo "   To bypass (emergency only): git commit --no-verify" >&2
+    echo "" >&2
+    exit 1
+  fi
+else
+  echo "[commit-msg] Warning: Review script not found or not executable" >&2
+  echo "[commit-msg] Expected: ${REVIEW_SCRIPT}" >&2
+  echo "[commit-msg] Skipping automated review" >&2
 fi
 
 exit 0

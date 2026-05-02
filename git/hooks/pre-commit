@@ -2,6 +2,19 @@
 set -euo pipefail
 
 # =========================================================
+# RESPONSIBILITY SPLIT
+# =========================================================
+# This hook runs BEFORE git materializes the proposed commit message
+# anywhere on disk (per `man githooks`), so it cannot pass the message
+# to the AI reviewer. Keep deterministic, message-independent checks
+# here: branch protection, symlink repair, linters via the pre-commit
+# framework, and project-local .ralph/pre-commit extensions.
+#
+# AI code review now lives in the commit-msg hook, which receives the
+# in-progress commit message file as $1 and forwards it to the reviewer
+# via run-review.sh's --message-file=PATH flag.
+#
+# =========================================================
 # BRANCH PROTECTION - Do not commit directly to main/master
 # =========================================================
 protected_branch_check() {
@@ -89,26 +102,7 @@ run_project_extensions() {
 }
 run_project_extensions
 
-# =========================================================
-# AUTOMATED CODE REVIEW (runs only if pre-commit passes)
-# =========================================================
-REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
-
-if [[ -x "${REVIEW_SCRIPT}" ]]; then
-  # Get staged diff and pipe to review
-  if ! git diff --cached -U10 | "${REVIEW_SCRIPT}"; then
-    echo "" >&2
-    echo "🛑 Commit blocked by code review." >&2
-    echo "   Address the issues above and try again." >&2
-    echo "" >&2
-    echo "   To bypass (emergency only): git commit --no-verify" >&2
-    echo "" >&2
-    exit 1
-  fi
-else
-  echo "[pre-commit] Warning: Review script not found or not executable" >&2
-  echo "[pre-commit] Expected: ${REVIEW_SCRIPT}" >&2
-  echo "[pre-commit] Skipping automated review" >&2
-fi
+# AI code review runs in the commit-msg hook (where the in-progress
+# commit message is available as $1) — not here.
 
 exit 0
