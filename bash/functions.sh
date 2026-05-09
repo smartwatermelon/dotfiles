@@ -433,7 +433,9 @@ _pipx_update() {
   _notif "Updating pipx packages..."
   echo "=== pipx update ${timestamp} ===" | _update_log
 
-  output=$(pipx upgrade-all --verbose 2>&1)
+  # headroom-ai is installed as an editable local fork with a maturin (Rust)
+  # build backend; PyO3 needs this flag to build on Python > 3.13.
+  output=$(PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 pipx upgrade-all --verbose 2>&1)
   result=$?
   echo "${output}" | _update_log
 
