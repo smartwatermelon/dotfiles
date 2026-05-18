@@ -25,6 +25,7 @@ alias pip3='pipx'
 # System commands
 alias softboot="osascript -e 'tell app \"System Events\" to restart'"
 # updates is now a function in functions.sh (orchestrates all package managers)
+alias allup="pull-my-repos && ~/Developer/dotfiles/install.sh --repair && ~/Developer/claude-config/install.sh --repair && updates"
 
 # Homebrew update alias (uses function from functions.sh)
 alias brewup='_homebrew_update'
