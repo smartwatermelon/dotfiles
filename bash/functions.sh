@@ -318,10 +318,13 @@ SHIM
 # Update Homebrew packages
 # Package managers provide their own network error diagnostics, so no pre-check needed
 _homebrew_update() {
-  local brew_prefix
+  local brew_prefix brew_owner my_id whoami
   brew_prefix="$(brew --prefix 2>/dev/null)" || { return 0; }
-  if [[ "$(id -u)" != "$(stat -f '%u' "${brew_prefix}" 2>/dev/null)" ]]; then
-    _notif "Skipping Homebrew update: ${brew_prefix} is not owned by $(whoami)"
+  brew_owner="$(stat -f '%u' "${brew_prefix}" 2>/dev/null)"
+  my_id="$(id -u)"
+  if [[ "${my_id}" != "${brew_owner}" ]]; then
+    whoami="$(whoami)"
+    _notif "Skipping Homebrew update: ${brew_prefix} is not owned by ${whoami}"
     return 0
   fi
 
