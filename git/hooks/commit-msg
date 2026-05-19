@@ -45,6 +45,12 @@ if [[ "${FIRST_LINE}" =~ ^Merge ]]; then
   exit 0
 fi
 
+# Skip validation + review for WIP/fixup/squash commits (will be squashed before merge)
+if [[ "${FIRST_LINE}" =~ ^(fixup!|squash!|wip:|WIP:|wip[[:space:]]|WIP[[:space:]]) ]]; then
+  echo "ℹ️  WIP/fixup commit — skipping review" >&2
+  exit 0
+fi
+
 # Conventional commits regex pattern
 # Format: type(optional-scope)!?: description
 # The optional `!` marks a breaking change per the conventional-commits spec
