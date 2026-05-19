@@ -11,7 +11,7 @@ alias brwe='brew' # "I can't type" (as noted)
 # Tool enhancements
 alias batp='bat -p'
 alias pbat='bat -p'
-alias profile='source ~/.bash_profile'
+alias profile='source ${HOME}/.bash_profile'
 alias ps='ps -efww'
 alias rsync='rsync -avz'
 
@@ -24,7 +24,6 @@ alias pip3='pipx'
 
 # System commands
 alias softboot="osascript -e 'tell app \"System Events\" to restart'"
-# updates is now a function in functions.sh (orchestrates all package managers)
 
 # Homebrew update alias (uses function from functions.sh)
 alias brewup='_homebrew_update'
@@ -36,13 +35,13 @@ alias gp='git pull'
 alias gc='git commit -m'
 
 # Exciting ways of launching Claude Code
-alias claude='$HOME/.local/bin/claude-wrapper'
+alias claude='${HOME}/.local/bin/claude-wrapper'
 alias clauded="claude --dangerously-skip-permissions"
-alias suclaude='$HOME/.local/bin/claude'
+alias suclaude='${HOME}/.local/bin/claude'
 alias suclauded="suclaude --dangerously-skip-permissions"
 
 # Add custom aliases below
 # ------------------------
-alias markdownlint="markdownlint --config ~/.markdownlint.json"
-alias npx-markdownlint="npx markdownlint --config ~/.markdownlint.json"
+alias markdownlint='markdownlint --config ${HOME}/.markdownlint.json'
+alias npx-markdownlint='npx markdownlint --config ${HOME}/.markdownlint.json'
 alias diskspace='df -h /System/Volumes/Data'

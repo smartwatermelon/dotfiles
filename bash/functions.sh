@@ -318,10 +318,13 @@ SHIM
 # Update Homebrew packages
 # Package managers provide their own network error diagnostics, so no pre-check needed
 _homebrew_update() {
-  local brew_prefix
+  local brew_prefix brew_owner my_id whoami
   brew_prefix="$(brew --prefix 2>/dev/null)" || { return 0; }
-  if [[ "$(id -u)" != "$(stat -f '%u' "${brew_prefix}" 2>/dev/null)" ]]; then
-    _notif "Skipping Homebrew update: ${brew_prefix} is not owned by $(whoami)"
+  brew_owner="$(stat -f '%u' "${brew_prefix}" 2>/dev/null)"
+  my_id="$(id -u)"
+  if [[ "${my_id}" != "${brew_owner}" ]]; then
+    whoami="$(whoami)"
+    _notif "Skipping Homebrew update: ${brew_prefix} is not owned by ${whoami}"
     return 0
   fi
 
@@ -661,6 +664,16 @@ updates() {
 
   _notif "All updates completed successfully"
   return 0
+}
+# Not exported - interactive command only
+
+# Update all local repos, repair local config symlinks, run software updates
+# pull-my-repos is from ~/Developer/scripts, symlinked into ~/.local/bin
+allup() {
+  pull-my-repos || return $?
+  "${HOME}/Developer/dotfiles/install.sh" --repair || return $?
+  "${HOME}/Developer/claude-config/install.sh" --repair || return $?
+  updates
 }
 # Not exported - interactive command only
 
@@ -1041,26 +1054,82 @@ gpush() {
   fi
 
   # Step 4: Watch CI (use gh run watch — gh pr checks fails with PAT errors)
-  # Anchor on the pushed commit SHA to avoid watching a stale run from a prior push
+  # Anchor on the pushed commit SHA to avoid watching a stale run from a prior push.
+  # A push can trigger multiple workflow runs (e.g. "Claude Blocking Review" +
+  # "Dependabot Auto-Merge"). We fetch all runs for the commit, watch each one,
+  # and skip runs whose workflow name matches ignorable_when_skipped when their
+  # conclusion is "skipped" (e.g. Dependabot workflows on non-Dependabot branches).
   local head_sha
   head_sha=$(git rev-parse HEAD)
-  echo -e "${BLUE}[gpush]${NC} Waiting for CI run on ${head_sha:0:7}..."
-  local run_id=""
+  echo -e "${BLUE}[gpush]${NC} Waiting for CI runs on ${head_sha:0:7}..."
+
+  local ignorable_when_skipped=("Dependabot")
+  local all_runs=""
   local attempts=0
-  while [[ -z "${run_id}" && ${attempts} -lt 15 ]]; do
-    run_id=$(gh run list --branch "${branch}" --commit "${head_sha}" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
-    if [[ -z "${run_id}" ]]; then
+  while [[ -z "${all_runs}" && ${attempts} -lt 15 ]]; do
+    all_runs=$(gh run list --branch "${branch}" --commit "${head_sha}" --json databaseId,name -q '.[] | (.databaseId | tostring) + "\t" + .name' 2>/dev/null || true)
+    if [[ -z "${all_runs}" ]]; then
       ((attempts += 1))
       sleep 2
     fi
   done
-  if [[ -z "${run_id}" ]]; then
-    echo -e "${RED}[gpush]${NC} No CI run found for ${head_sha:0:7} after 30s. Check GitHub Actions." >&2
+  if [[ -z "${all_runs}" ]]; then
+    echo -e "${RED}[gpush]${NC} No CI runs found for ${head_sha:0:7} after 30s. Check GitHub Actions." >&2
     return 1
   fi
-  echo -e "${BLUE}[gpush]${NC} Watching CI run ${run_id} for PR #${pr_number}..."
-  if ! gh run watch "${run_id}" --exit-status; then
-    echo -e "${RED}[gpush]${NC} CI failed. Fix and re-run gpush." >&2
+
+  # Re-poll after a short delay to catch late-registering workflows.
+  # Only adopt the result if non-empty — a transient API failure must not
+  # discard the known-good first poll.
+  sleep 3
+  local repoll
+  repoll=$(gh run list --branch "${branch}" --commit "${head_sha}" --json databaseId,name -q '.[] | (.databaseId | tostring) + "\t" + .name' 2>/dev/null || true)
+  [[ -n "${repoll}" ]] && all_runs="${repoll}"
+
+  local ci_passed=false
+  local ci_failed=false
+  local fail_detail=""
+  while IFS=$'\t' read -r run_id run_name; do
+    [[ -z "${run_id}" ]] && continue
+    echo -e "${BLUE}[gpush]${NC} Watching run ${run_id} (${run_name})..."
+    gh run watch "${run_id}" >/dev/null 2>&1 || true
+
+    local run_conclusion
+    run_conclusion=$(gh run view "${run_id}" --json conclusion --jq '.conclusion') || {
+      echo -e "${RED}[gpush]${NC} Failed to query run ${run_id} status." >&2
+      return 1
+    }
+
+    if [[ "${run_conclusion}" == "success" ]]; then
+      echo -e "${GREEN}[gpush]${NC} Passed: ${run_name}"
+      ci_passed=true
+    elif [[ "${run_conclusion}" == "skipped" ]]; then
+      local ignorable=false
+      for pattern in "${ignorable_when_skipped[@]}"; do
+        if [[ "${run_name}" == *"${pattern}"* ]]; then
+          ignorable=true
+          break
+        fi
+      done
+      if [[ "${ignorable}" == true ]]; then
+        echo -e "${BLUE}[gpush]${NC} Ignoring skipped run: ${run_name}"
+      else
+        ci_failed=true
+        fail_detail+="${run_name}: ${run_conclusion}; "
+      fi
+    else
+      ci_failed=true
+      fail_detail+="${run_name}: ${run_conclusion}; "
+    fi
+  done <<<"${all_runs}"
+
+  if [[ "${ci_failed}" == true ]]; then
+    fail_detail="${fail_detail%; }"
+    echo -e "${RED}[gpush]${NC} CI failed (${fail_detail}). Fix and re-run gpush." >&2
+    return 1
+  fi
+  if [[ "${ci_passed}" == false ]]; then
+    echo -e "${RED}[gpush]${NC} No CI runs succeeded (all were skipped). Check GitHub Actions." >&2
     return 1
   fi
   echo -e "${GREEN}[gpush]${NC} CI passed"
