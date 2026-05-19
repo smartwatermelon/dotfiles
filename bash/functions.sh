@@ -318,13 +318,13 @@ SHIM
 # Update Homebrew packages
 # Package managers provide their own network error diagnostics, so no pre-check needed
 _homebrew_update() {
-  local brew_prefix brew_owner my_id whoami
+  local brew_prefix brew_owner my_id current_user
   brew_prefix="$(brew --prefix 2>/dev/null)" || { return 0; }
   brew_owner="$(stat -f '%u' "${brew_prefix}" 2>/dev/null)"
   my_id="$(id -u)"
   if [[ "${my_id}" != "${brew_owner}" ]]; then
-    whoami="$(whoami)"
-    _notif "Skipping Homebrew update: ${brew_prefix} is not owned by ${whoami}"
+    current_user="$(whoami)"
+    _notif "Skipping Homebrew update: ${brew_prefix} is not owned by ${current_user}"
     return 0
   fi
 
@@ -1084,11 +1084,14 @@ gpush() {
   sleep 3
   local repoll
   repoll=$(gh run list --branch "${branch}" --commit "${head_sha}" --json databaseId,name -q '.[] | (.databaseId | tostring) + "\t" + .name' 2>/dev/null || true)
-  [[ -n "${repoll}" ]] && all_runs="${repoll}"
+  if [[ -n "${repoll}" ]]; then
+    all_runs=$(printf '%s\n%s\n' "${all_runs}" "${repoll}" | sort -u -t$'\t' -k1,1)
+  fi
 
   local ci_passed=false
   local ci_failed=false
   local fail_detail=""
+  local run_id run_name pattern
   while IFS=$'\t' read -r run_id run_name; do
     [[ -z "${run_id}" ]] && continue
     echo -e "${BLUE}[gpush]${NC} Watching run ${run_id} (${run_name})..."
