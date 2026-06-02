@@ -15,9 +15,6 @@ alias profile='source ${HOME}/.bash_profile'
 alias ps='ps -efww'
 alias rsync='rsync -avz'
 
-# Python -> Python3
-alias python='python3'
-
 # Force pipx for global package installation (use \pip3 to bypass)
 alias pip='echo "Use pipx instead: pipx install <package>" && false'
 alias pip3='pipx'
