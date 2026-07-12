@@ -50,3 +50,5 @@
 	conflictstyle = zdiff3
 [pull]
 	rebase = true
+[includeIf "gitdir:~/Developer/beacon/"]
+	path = ~/.gitconfig-beacon
