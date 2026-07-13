@@ -345,31 +345,37 @@ _homebrew_update() {
     return "${result}"
   fi
 
-  # Non-interactive mode: prepend PATH with a sudo shim so any cask requiring
-  # sudo (pkg/installer artifacts) fails fast and gets logged, while formulae
-  # and user-scope casks upgrade normally. Don't treat individual cask
-  # sudo-failures as overall update failure.
+  # Non-interactive mode (overnight LaunchAgent): upgrade formulae only and
+  # defer ALL casks to the next interactive run. Casks such as tunnelblick
+  # invoke `/usr/bin/sudo` by absolute path, which a PATH-based shim cannot
+  # intercept; under pam_tid that surfaces a GUI TouchID prompt macOS defers
+  # to unlock. Skipping casks removes that whole class of prompt. The sudo
+  # shim is kept as defense-in-depth for a formula that shells out to a bare
+  # `sudo`, and individual failures are tolerated so one bad formula does not
+  # abort the unattended chain.
   local shim_dir=""
   local upgrade_path="${PATH}"
+  local -a upgrade_args=(--verbose)
   local tolerate_upgrade_failure=false
   if _updates_noninteractive; then
+    upgrade_args+=(--formula)
+    tolerate_upgrade_failure=true
     shim_dir=$(_updates_sudo_shim) || shim_dir=""
     if [[ -n "${shim_dir}" ]]; then
       upgrade_path="${shim_dir}:${PATH}"
-      tolerate_upgrade_failure=true
-      _notif "Non-interactive: casks requiring sudo will be skipped"
     else
-      _notif "Warning: sudo shim unavailable - sudo-requiring casks may prompt"
+      _notif "Warning: sudo shim unavailable - a sudo-invoking formula may prompt"
     fi
+    _notif "Non-interactive: upgrading formulae only; casks deferred to next interactive run"
   fi
 
-  output=$(PATH="${upgrade_path}" brew upgrade --verbose 2>&1)
+  output=$(PATH="${upgrade_path}" brew upgrade "${upgrade_args[@]}" 2>&1)
   result=$?
   echo "${output}" | _update_log
   [[ -n "${shim_dir}" ]] && rm -rf "${shim_dir}"
   if [[ "${result}" -ne 0 ]]; then
     if [[ "${tolerate_upgrade_failure}" == "true" ]]; then
-      _notif "brew upgrade completed with skipped casks (exit ${result}) - check log"
+      _notif "brew upgrade (formulae) completed with errors (exit ${result}) - check log"
     else
       _notif "brew upgrade failed (exit ${result})"
       return "${result}"
