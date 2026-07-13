@@ -1,0 +1,17 @@
+# Template for a per-machine work-identity override.
+#
+# Copy this file to ~/.gitconfig-beacon and fill in your work email:
+#
+#   cp ~/Developer/dotfiles/git/gitconfig-beacon.example ~/.gitconfig-beacon
+#
+# Referenced by an includeIf block in git/config:
+#
+#   [includeIf "gitdir:~/Developer/beacon/"]
+#       path = ~/.gitconfig-beacon
+#
+# ~/.gitconfig-beacon itself is intentionally NOT tracked by this repo —
+# only this template is. install.sh warns if it's missing while
+# ~/Developer/beacon/ exists.
+
+[user]
+	email = your-work-email@example.com

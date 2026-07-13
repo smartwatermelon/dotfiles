@@ -190,6 +190,8 @@ _is_excluded() {
     *.bats) return 0 ;;
     tests/*) return 0 ;;
     test/*) return 0 ;;
+    # Copy-and-edit templates — meant to be copied by hand, not symlinked
+    *.example) return 0 ;;
     # Other repo-level files that may be added
     Makefile) return 0 ;;
     .editorconfig) return 0 ;;
@@ -373,6 +375,21 @@ if [[ -n "${hooks_path}" ]]; then
 else
   _warn "Git core.hooksPath not set"
   failures+=("git-hooksPath")
+fi
+
+# Check per-machine work-identity gitconfig — only relevant if a
+# ~/Developer/beacon/ (or similar) workdir exists but its includeIf target
+# is missing, which would silently fall back to the personal git identity.
+BEACON_WORKDIR="${HOME}/Developer/beacon"
+BEACON_GITCONFIG="${HOME}/.gitconfig-beacon"
+if [[ -d "${BEACON_WORKDIR}" ]]; then
+  if [[ -f "${BEACON_GITCONFIG}" ]]; then
+    _ok "Work-identity gitconfig present: ${BEACON_GITCONFIG}"
+  else
+    _warn "Missing ${BEACON_GITCONFIG} — ${BEACON_WORKDIR} repos will silently use your personal git identity"
+    _warn "  Fix: cp ${REPO_DIR}/git/gitconfig-beacon.example ${BEACON_GITCONFIG} && edit the email"
+    failures+=("beacon-gitconfig")
+  fi
 fi
 
 # Symlink health check — verify all config symlinks resolve
