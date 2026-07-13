@@ -190,6 +190,8 @@ _is_excluded() {
     *.bats) return 0 ;;
     tests/*) return 0 ;;
     test/*) return 0 ;;
+    # Copy-and-edit templates — meant to be copied by hand, not symlinked
+    *.example) return 0 ;;
     # Other repo-level files that may be added
     Makefile) return 0 ;;
     .editorconfig) return 0 ;;
