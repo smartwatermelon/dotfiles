@@ -32,8 +32,10 @@ alias gp='git pull'
 alias gc='git commit -m'
 
 # Exciting ways of launching Claude Code
-alias claude='${HOME}/.local/bin/claude-wrapper'
-alias clauded="claude --dangerously-skip-permissions"
+if [[ -f "${HOME}/.local/bin/claude-wrapper" ]]; then
+  alias claude='${HOME}/.local/bin/claude-wrapper'
+  alias clauded="claude --dangerously-skip-permissions"
+fi
 alias suclaude='${HOME}/.local/bin/claude'
 alias suclauded="suclaude --dangerously-skip-permissions"
 
