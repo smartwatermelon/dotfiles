@@ -95,8 +95,27 @@ for f in "$@"; do
 
   # --- shfmt ---
   if command -v shfmt >/dev/null; then
+    # shfmt only consults .editorconfig when given no formatting flags; passing
+    # -i/-ci/-bn suppresses that lookup. Search upward from the file for a
+    # .editorconfig and defer to it when present; otherwise fall back to our
+    # own defaults so repos without one keep prior behavior.
+    shfmt_flags=()
+    editorconfig_dir="$(cd "$(dirname "${f}")" && pwd)"
+    has_editorconfig=false
+    while true; do
+      if [[ -f "${editorconfig_dir}/.editorconfig" ]]; then
+        has_editorconfig=true
+        break
+      fi
+      [[ "${editorconfig_dir}" == "/" ]] && break
+      editorconfig_dir="$(dirname "${editorconfig_dir}")"
+    done
+    if ! ${has_editorconfig}; then
+      shfmt_flags=(-i 2 -ci -bn)
+    fi
+
     # Check if formatting is needed (without modifying)
-    if shfmt -d -i 2 -ci -bn "${f}" >/dev/null 2>&1; then
+    if shfmt -d "${shfmt_flags[@]}" "${f}" >/dev/null 2>&1; then
       # Already formatted correctly
       :
     else
@@ -108,7 +127,7 @@ for f in "$@"; do
       tmpfile=$(mktemp "${f}.XXXXXX")
       temp_files+=("${tmpfile}")
 
-      if shfmt -i 2 -ci -bn "${f}" >"${tmpfile}"; then
+      if shfmt "${shfmt_flags[@]}" "${f}" >"${tmpfile}"; then
         # Restore original permissions before replacing file
         chmod "${original_perms}" "${tmpfile}"
         mv "${tmpfile}" "${f}"

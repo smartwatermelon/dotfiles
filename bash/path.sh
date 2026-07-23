@@ -91,6 +91,11 @@ if [[ -d "${HOME}/.bun/bin" ]]; then
   _prepend_path_once "${HOME}/.bun/bin"
 fi
 
+# asdf shims (multiple runtime version manager)
+if [[ -d "${HOME}/.asdf/shims" ]]; then
+  _prepend_path_once "${HOME}/.asdf/shims"
+fi
+
 # ============================================================================
 # STEP 3: Prepend User Binaries (Priority 1 - Highest)
 # ============================================================================
