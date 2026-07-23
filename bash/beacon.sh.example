@@ -1,0 +1,24 @@
+# Template for per-machine work (Beacon) environment overrides.
+#
+# Copy this file to ~/.config/bash/beacon.sh and adjust as needed:
+#
+#   cp ~/Developer/dotfiles/bash/beacon.sh.example ~/.config/bash/beacon.sh
+#
+# Referenced by an existence check in bash/env.sh:
+#
+#   if [[ -f "${BASH_CONFIG_DIR}/beacon.sh" ]]; then
+#       source "${BASH_CONFIG_DIR}/beacon.sh"
+#   fi
+#
+# ~/.config/bash/beacon.sh itself is intentionally NOT tracked by this repo —
+# only this template is. install.sh warns if it's missing while
+# ~/Developer/beacon/ exists.
+
+#shellcheck shell=bash
+
+# AWS defaults (Beacon). Leave AWS_PROFILE unset when aws-vault is managing
+# the session so it doesn't fight with AWS_VAULT-scoped credentials.
+if [[ -z "${AWS_VAULT}" ]]; then
+  export AWS_PROFILE=arich
+fi
+export AWS_DEFAULT_REGION="us-east-2"

@@ -3,6 +3,9 @@
 # Sensitive files that should not be committed
 secrets.sh
 
+# Machine-local work overrides (see beacon.sh.example)
+beacon.sh
+
 # Auto-created backups
 backups/
 *.bak.*
