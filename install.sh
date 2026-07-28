@@ -463,9 +463,8 @@ fi
 echo ""
 echo "── Manual steps (cannot be automated) ──────────────"
 echo "  1. Claude Code setup (~/.claude/ infrastructure)"
-echo "  2. Headroom LaunchAgent configuration"
-echo "  3. iTerm2 shell integration (Install Shell Integration from menu)"
-echo "  4. source ~/.bash_profile   # activate the new shell config"
+echo "  2. iTerm2 shell integration (Install Shell Integration from menu)"
+echo "  3. source ~/.bash_profile   # activate the new shell config"
 
 if [[ ${#manual[@]} -gt 0 ]]; then
   for item in "${manual[@]}"; do
