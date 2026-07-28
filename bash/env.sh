@@ -9,6 +9,14 @@ if [[ -f "${BASH_CONFIG_DIR}/secrets.sh" ]]; then
   source "${BASH_CONFIG_DIR}/secrets.sh"
 fi
 
+# Load work-specific (Beacon) env vars — untracked, machine-local.
+# See bash/beacon.sh.example for the template; install.sh warns if
+# ~/Developer/beacon/ exists but this file doesn't.
+if [[ -f "${BASH_CONFIG_DIR}/beacon.sh" ]]; then
+  #shellcheck source=/dev/null
+  source "${BASH_CONFIG_DIR}/beacon.sh"
+fi
+
 # 1Password CLI tokens (OP_SERVICE_ACCOUNT_TOKEN, GH_TOKEN) are injected
 # exclusively by claude-wrapper at CCCLI launch. Interactive shells started
 # outside claude-wrapper will have neither token set and must run `op signin`
@@ -159,3 +167,5 @@ export CLAUDE_CONFIG_DIR="${HOME}/.claude"
 
 # mas update disable
 export MAS_UPDATE_DISABLE=true
+
+export PATH="$HOME/.local/bin:$PATH"

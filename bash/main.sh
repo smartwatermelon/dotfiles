@@ -58,6 +58,11 @@ shopt -s nocaseglob
 # Correct simple directory spelling errors when using cd
 shopt -s cdspell
 
+# direnv (must load after prompt.sh, since it wraps PROMPT_COMMAND)
+if command -v direnv &>/dev/null; then
+  eval "$(direnv hook bash)"
+fi
+
 # End of custom configuration
 
 # Print startup message (comment out if not desired)

@@ -35,6 +35,9 @@ alias gc='git commit -m'
 if [[ -f "${HOME}/.local/bin/claude-wrapper" ]]; then
   alias claude='${HOME}/.local/bin/claude-wrapper'
   alias clauded="claude --dangerously-skip-permissions"
+else
+  alias claude='${HOME}/.local/bin/claude'
+  alias clauded="claude --dangerously-skip-permissions"
 fi
 alias suclaude='${HOME}/.local/bin/claude'
 alias suclauded="suclaude --dangerously-skip-permissions"

@@ -392,6 +392,21 @@ if [[ -d "${BEACON_WORKDIR}" ]]; then
   fi
 fi
 
+# Check per-machine work (Beacon) bash env overrides — only relevant if a
+# ~/Developer/beacon/ workdir exists but env.sh's sourced target is missing,
+# which would silently skip work-only env vars (e.g. AWS_PROFILE) with no
+# warning.
+BEACON_BASHENV="${HOME}/.config/bash/beacon.sh"
+if [[ -d "${BEACON_WORKDIR}" ]]; then
+  if [[ -f "${BEACON_BASHENV}" ]]; then
+    _ok "Work bash env overrides present: ${BEACON_BASHENV}"
+  else
+    _warn "Missing ${BEACON_BASHENV} — work-only env vars (e.g. AWS_PROFILE) won't be set"
+    _warn "  Fix: cp ${REPO_DIR}/bash/beacon.sh.example ${BEACON_BASHENV} && adjust as needed"
+    failures+=("beacon-bashenv")
+  fi
+fi
+
 # Symlink health check — verify all config symlinks resolve
 if [[ "${DRY_RUN}" == true ]]; then
   _dry "Would verify config symlink health"
