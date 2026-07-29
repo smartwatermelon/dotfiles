@@ -672,7 +672,12 @@ updates() {
   )
   local start_index=0
 
-  if [[ "${1:-}" == "--continue" ]]; then
+  if [[ -n "${1:-}" ]]; then
+    if [[ "${1}" != "--continue" ]]; then
+      _notif "Unknown option '${1}'; only --continue is supported"
+      return 1
+    fi
+
     if [[ -f "${_UPDATES_STATE_FILE}" ]]; then
       local last_failed i found=false
       last_failed=$(<"${_UPDATES_STATE_FILE}")
@@ -690,6 +695,16 @@ updates() {
       fi
     else
       _notif "No previous failure recorded; running full updates"
+    fi
+
+    # _homebrew_update defers casks to the next interactive run when the
+    # prior invocation was non-interactive (e.g. the nightly LaunchAgent).
+    # Skipping straight to a later step on --continue would silently drop
+    # that catch-up forever, so always re-run it (idempotent, cheap) unless
+    # it's already covered by the normal loop below.
+    if ((start_index > 0)); then
+      _notif "Re-running Homebrew update to pick up any casks deferred by a non-interactive run..."
+      _homebrew_update || return $?
     fi
   fi
 
@@ -721,7 +736,7 @@ allup() {
   pull-my-repos || return $?
   "${HOME}/Developer/dotfiles/install.sh" --repair || return $?
   "${HOME}/Developer/claude-config/install.sh" --repair || return $?
-  updates
+  updates "$@"
 }
 # Not exported - interactive command only
 
