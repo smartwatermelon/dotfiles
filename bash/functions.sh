@@ -655,19 +655,61 @@ _claude_update() {
 
 # Orchestrate all system updates
 # Each updater function is self-sufficient and creates its own log directory
+# Records the failing step to a state file so `updates --continue` can resume
+# after the user fixes the underlying problem, instead of re-running steps
+# that already succeeded (e.g. brew update/upgrade before a broken gem dir).
+_UPDATES_STATE_FILE="${HOME}/.local/state/updates.progress"
+
 updates() {
+  local -a steps=(
+    _homebrew_update
+    _softwareupdate
+    _mas_update
+    _npm_update
+    _pipx_update
+    _gem_update
+    _claude_update
+  )
+  local start_index=0
+
+  if [[ "${1:-}" == "--continue" ]]; then
+    if [[ -f "${_UPDATES_STATE_FILE}" ]]; then
+      local last_failed i found=false
+      last_failed=$(<"${_UPDATES_STATE_FILE}")
+      for i in "${!steps[@]}"; do
+        if [[ "${steps[i]}" == "${last_failed}" ]]; then
+          start_index="${i}"
+          found=true
+          break
+        fi
+      done
+      if [[ "${found}" == "true" ]]; then
+        _notif "Resuming updates from ${last_failed}..."
+      else
+        _notif "State file references unknown step '${last_failed}'; running full updates"
+      fi
+    else
+      _notif "No previous failure recorded; running full updates"
+    fi
+  fi
+
   _notif "Starting system updates..."
 
-  # Run updates in order: Homebrew first (updates other package managers)
-  # Fail fast: stop on first failure
-  _homebrew_update || return $?
-  _softwareupdate || return $?
-  _mas_update || return $?
-  _npm_update || return $?
-  _pipx_update || return $?
-  _gem_update || return $?
-  _claude_update || return $?
+  local i step result
+  for ((i = start_index; i < ${#steps[@]}; i++)); do
+    step="${steps[i]}"
+    "${step}"
+    result=$?
+    if [[ "${result}" -ne 0 ]]; then
+      if ! mkdir -p "${HOME}/.local/state" || ! echo "${step}" >"${_UPDATES_STATE_FILE}"; then
+        _notif "Warning: could not save resume state; 'updates --continue' will run from the start"
+      fi
+      _notif "updates stopped at ${step} (exit ${result}); fix the issue and run 'updates --continue'"
+      return "${result}"
+    fi
+  done
 
+  rm -f "${_UPDATES_STATE_FILE}"
   _notif "All updates completed successfully"
   return 0
 }
