@@ -158,8 +158,6 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   # ~/.local/bin/gh symlink) ---
   set -euo pipefail
 
-  REAL_GH="$(_gh_wrapper_find_real_gh)"
-
   # Note whether this is a help request, but the REST/GraphQL bypass block
   # below must run regardless — `gh api pulls/123/merge --help` must not
   # escape it by appending --help.
@@ -187,6 +185,20 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     if [[ "${_gh_wrapper_help}" != "1" ]]; then
       _gh_wrapper_maybe_review strict "$@" || exit 1
     fi
+  fi
+
+  # Only needed for the final exec below — computed here (after the
+  # _GH_REVIEW_DONE-guarded checks above) rather than unconditionally at the
+  # top of this block, so we don't do a needless PATH scan before knowing
+  # this call is going to pass those checks.
+  REAL_GH="$(_gh_wrapper_find_real_gh)"
+  # set -e does NOT fire on a failed command substitution used in an
+  # assignment, so a lookup failure would otherwise fall through silently to
+  # `exec "" "$@"` and produce a confusing low-level exec error. Check
+  # explicitly instead.
+  if [[ -z "${REAL_GH}" ]]; then
+    echo "[gh] ERROR: could not locate real gh binary on PATH" >&2
+    exit 1
   fi
 
   # Token routing for claude-wrapper multi-org support
