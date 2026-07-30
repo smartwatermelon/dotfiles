@@ -958,138 +958,33 @@ git() {
 export -f git # Exported - overrides system git command globally
 
 # ============================================================================
-# GitHub CLI identity auto-switch
-# ============================================================================
-# gh has one active account per host (not per repo), unlike git+SSH which
-# already resolves the right identity per remote via ~/.ssh/config host
-# aliases. This keeps gh in sync with that same per-repo intent: repos owned
-# by smartwatermelon use the smartwatermelon account; everything else
-# (Beacon repos, etc.) falls back to andrewmrich. Local-only (reads/writes
-# gh's config file, no network), so it's cheap to run on every invocation.
-# Caveat: this mutates global gh state, so concurrent shells working in
-# different-owner repos at the same time can race each other.
-_gh_sync_identity() {
-  local remote_url owner desired current
-
-  remote_url=$(command git config --get remote.origin.url 2>/dev/null)
-  [[ -z "${remote_url}" ]] && return 0
-
-  owner=$(printf '%s\n' "${remote_url}" | sed -E 's#^(git@[^:]+:|[a-zA-Z]+://[^/]+/)##; s#/.*##')
-  [[ -z "${owner}" ]] && return 0
-
-  if [[ "${owner}" == "smartwatermelon" ]]; then
-    desired="smartwatermelon"
-  else
-    desired="andrewmrich"
-  fi
-
-  current=$(awk '/^github\.com:/{f=1} f && /^ *user:/{print $2; exit}' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'")
-
-  if [[ -n "${current}" && "${current}" != "${desired}" ]]; then
-    if ! command gh auth switch --hostname github.com --user "${desired}" >/dev/null 2>&1; then
-      echo "[gh] ERROR: failed to switch identity to '${desired}' (repo owner: '${owner}') — refusing to run as '${current}' instead" >&2
-      return 1
-    fi
-  fi
-}
-export -f _gh_sync_identity # Exported - used by the exported gh() wrapper
-
-# ============================================================================
 # GitHub CLI Wrapper
 # ============================================================================
-# Intercepts `gh pr merge` to run pre-merge review
-# All other gh commands pass through unchanged
+# Canonical implementation (including the identity auto-switch and the
+# pre-merge review + REST/GraphQL merge-bypass blocking) lives in
+# gh-wrapper.sh (sourced below), which also doubles as the standalone
+# ~/.local/bin/gh wrapper when symlinked and executed directly. See that
+# file for how the two modes interoperate.
 
-gh() {
-  local review_script="${HOME}/.claude/hooks/pre-merge-review.sh"
-
-  # Don't auto-switch identity while the user is managing accounts directly,
-  # or for --help/-h — informational calls shouldn't mutate global auth state.
-  local _gh_is_help=0 _gh_help_arg
-  for _gh_help_arg in "$@"; do
-    [[ "${_gh_help_arg}" == "--help" || "${_gh_help_arg}" == "-h" ]] && _gh_is_help=1 && break
-  done
-  if [[ "$1" != "auth" && "${_gh_is_help}" == "0" ]]; then
-    _gh_sync_identity || return 1
-  fi
-
-  # Block: gh api .../pulls/{number}/merge (REST API merge bypass)
-  # Block: gh api graphql with mergePullRequest mutation (GraphQL bypass)
-  #
-  # IMPORTANT: These checks run BEFORE the --help early-return below so that
-  # `gh api .../pulls/NNN/merge --help` cannot bypass this defense by
-  # appending --help to the command.
-  #
-  # This is the shell-wrapper layer; the Claude Code PreToolUse hook
-  # (hook-block-api-merge.sh) is the primary layer.
-  #
-  # Suffix boundary prevents false positives on paths like pulls/NNN/merge_status.
-  # If gh pr merge fails: report the failure, ask the human to merge manually.
-  if [[ "$1" == "api" ]] && printf '%s\n' "$*" | grep -qE 'pulls/[0-9]+/merge([[:space:]]|$|[^[:alnum:]_])'; then
-    echo "[gh] BLOCKED: Direct REST API PR merge bypasses pre-merge review and merge authorization." >&2
-    echo "[gh] This endpoint skips pre-merge-review.sh and the merge-lock check." >&2
-    echo "[gh] Use 'gh pr merge <number>' instead." >&2
-    echo "[gh] If gh pr merge fails, report the failure and ask the human to merge manually." >&2
+if [[ -f "${HOME}/.config/bash/gh-wrapper.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${HOME}/.config/bash/gh-wrapper.sh"
+else
+  # Fail closed: a missing/broken symlink here (e.g. mid-install, or a
+  # symlink-forest repair gone wrong) must not silently drop the
+  # REST/GraphQL merge-bypass block and pre-merge review gate.
+  echo "[gh] WARNING: ${HOME}/.config/bash/gh-wrapper.sh not found — gh merge guard is NOT active." >&2
+  # install.sh --repair only re-links files that already exist as plain
+  # copies; it skips paths that are missing entirely. A fully absent
+  # gh-wrapper.sh needs the plain (non-repair) install.sh run.
+  echo "[gh] Run install.sh to restore it." >&2
+  gh() {
+    echo "[gh] ERROR: gh-wrapper.sh is missing; refusing to run gh unguarded." >&2
+    echo "[gh] Run install.sh to restore ${HOME}/.config/bash/gh-wrapper.sh." >&2
     return 1
-  fi
-
-  if [[ "$1" == "api" ]] && printf '%s\n' "$*" | grep -qE 'graphql.*mergePullRequest[[:space:]]*\('; then
-    echo "[gh] BLOCKED: GraphQL mergePullRequest mutation bypasses pre-merge review and merge authorization." >&2
-    echo "[gh] Use 'gh pr merge <number>' instead." >&2
-    echo "[gh] If gh pr merge fails, report the failure and ask the human to merge manually." >&2
-    return 1
-  fi
-
-  # Pass help requests directly to the real gh — no review needed.
-  # Set _GH_REVIEW_DONE so ~/.local/bin/gh wrapper also skips review.
-  for arg in "$@"; do
-    if [[ "${arg}" == "--help" || "${arg}" == "-h" ]]; then
-      _GH_REVIEW_DONE=1 command gh "$@"
-      return $?
-    fi
-  done
-
-  # Intercept: gh [global-flags] pr merge [...]
-  # Parse past known two-token global flags (flag + separate value) to find the
-  # actual positional subcommand. This handles both the standard form:
-  #   gh pr merge NNN
-  # and the global-flag bypass form:
-  #   gh -R owner/repo pr merge NNN
-  local _gh_sub="" _gh_subsub="" _gh_skip_next=0
-  for _gh_arg in "$@"; do
-    if [[ "${_gh_skip_next}" == "1" ]]; then
-      _gh_skip_next=0
-      continue
-    fi
-    case "${_gh_arg}" in
-      -R | --repo | --hostname | --config-dir | --token) _gh_skip_next=1 ;;
-      --*=*) ;; # --flag=value: single token, no separate value to skip
-      -*) ;;    # other single-token flags: skip
-      *)
-        if [[ -z "${_gh_sub}" ]]; then
-          _gh_sub="${_gh_arg}"
-        else
-          _gh_subsub="${_gh_arg}"
-          break
-        fi
-        ;;
-    esac
-  done
-  if [[ "${_gh_sub}" == "pr" && "${_gh_subsub}" == "merge" ]]; then
-    if [[ -x "${review_script}" ]]; then
-      "${review_script}" "$@" || return 1
-    else
-      echo "[gh] Warning: pre-merge review script not found or not executable" >&2
-      echo "[gh] Expected: ${review_script}" >&2
-      echo "[gh] Proceeding without review..." >&2
-    fi
-  fi
-
-  # Run the real gh command. Set _GH_REVIEW_DONE so ~/.local/bin/gh wrapper
-  # does not run the review a second time (prevents double review).
-  _GH_REVIEW_DONE=1 command gh "$@"
-}
-export -f gh # Exported - overrides system gh command globally
+  }
+  export -f gh
+fi
 
 # ============================================================================
 # gpush — Push, create PR, wait for CI, merge, and clean up in one command
