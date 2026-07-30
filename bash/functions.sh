@@ -958,6 +958,43 @@ git() {
 export -f git # Exported - overrides system git command globally
 
 # ============================================================================
+# GitHub CLI identity auto-switch
+# ============================================================================
+# gh has one active account per host (not per repo), unlike git+SSH which
+# already resolves the right identity per remote via ~/.ssh/config host
+# aliases. This keeps gh in sync with that same per-repo intent: repos owned
+# by smartwatermelon use the smartwatermelon account; everything else
+# (Beacon repos, etc.) falls back to andrewmrich. Local-only (reads/writes
+# gh's config file, no network), so it's cheap to run on every invocation.
+# Caveat: this mutates global gh state, so concurrent shells working in
+# different-owner repos at the same time can race each other.
+_gh_sync_identity() {
+  local remote_url owner desired current
+
+  remote_url=$(command git config --get remote.origin.url 2>/dev/null)
+  [[ -z "${remote_url}" ]] && return 0
+
+  owner=$(printf '%s\n' "${remote_url}" | sed -E 's#^(git@[^:]+:|[a-zA-Z]+://[^/]+/)##; s#/.*##')
+  [[ -z "${owner}" ]] && return 0
+
+  if [[ "${owner}" == "smartwatermelon" ]]; then
+    desired="smartwatermelon"
+  else
+    desired="andrewmrich"
+  fi
+
+  current=$(awk '/^github\.com:/{f=1} f && /^ *user:/{print $2; exit}' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'")
+
+  if [[ -n "${current}" && "${current}" != "${desired}" ]]; then
+    if ! command gh auth switch --hostname github.com --user "${desired}" >/dev/null 2>&1; then
+      echo "[gh] ERROR: failed to switch identity to '${desired}' (repo owner: '${owner}') — refusing to run as '${current}' instead" >&2
+      return 1
+    fi
+  fi
+}
+export -f _gh_sync_identity # Exported - used by the exported gh() wrapper
+
+# ============================================================================
 # GitHub CLI Wrapper
 # ============================================================================
 # Intercepts `gh pr merge` to run pre-merge review
@@ -965,6 +1002,16 @@ export -f git # Exported - overrides system git command globally
 
 gh() {
   local review_script="${HOME}/.claude/hooks/pre-merge-review.sh"
+
+  # Don't auto-switch identity while the user is managing accounts directly,
+  # or for --help/-h — informational calls shouldn't mutate global auth state.
+  local _gh_is_help=0 _gh_help_arg
+  for _gh_help_arg in "$@"; do
+    [[ "${_gh_help_arg}" == "--help" || "${_gh_help_arg}" == "-h" ]] && _gh_is_help=1 && break
+  done
+  if [[ "$1" != "auth" && "${_gh_is_help}" == "0" ]]; then
+    _gh_sync_identity || return 1
+  fi
 
   # Block: gh api .../pulls/{number}/merge (REST API merge bypass)
   # Block: gh api graphql with mergePullRequest mutation (GraphQL bypass)
