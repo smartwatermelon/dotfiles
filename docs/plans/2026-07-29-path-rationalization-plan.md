@@ -264,55 +264,23 @@ git commit -m "fix(env): stop env.sh from mutating PATH, remove stray duplicate 
 
 ---
 
-## Task 3: Fix the `updates` LaunchAgent's bash
+## Task 3: `updates` LaunchAgent's bash — REJECTED, not implemented
 
-**Files:**
+Originally planned to change `com.andrewrich.updates.plist`'s
+`ProgramArguments[0]` from `/bin/bash` to `/opt/homebrew/bin/bash`. **Do not
+do this.** Homebrew's `bash` binary's real path changes on every
+`brew upgrade bash` (versioned Cellar target), and TCC/Full Disk Access
+grants for that binary don't survive the change — pinning the unattended
+nightly job to Homebrew bash would silently lose FDA after any bash upgrade
+and reintroduce the "bash wants to use local files" TCC prompts documented in
+`2026-07-10-nightly-updates-sudo-tcc-plan.md`. `/bin/bash` (system bash 3.2,
+SIP-protected, permanent) is the only stable FDA grantee for this job. See
+the design doc's §3 for full rationale.
 
-- Modify: `~/Library/LaunchAgents/com.andrewrich.updates.plist` (not part of the dotfiles repo — lives outside version control; edit in place)
-
-**Step 1: Edit the plist**
-
-Change `ProgramArguments[0]` from `/bin/bash` to `/opt/homebrew/bin/bash`:
-
-```bash
-/usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 /opt/homebrew/bin/bash" \
-  ~/Library/LaunchAgents/com.andrewrich.updates.plist
-```
-
-**Step 2: Lint the plist**
-
-Run: `plutil -lint ~/Library/LaunchAgents/com.andrewrich.updates.plist`
-Expected: `... OK`
-
-**Step 3: Reload the agent**
-
-```bash
-launchctl bootout gui/$(id -u)/com.andrewrich.updates 2>/dev/null
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.andrewrich.updates.plist
-```
-
-**Step 4: Verify it now runs under Homebrew bash**
-
-This agent's `StartCalendarInterval` is 03:55 daily, so triggering it for real
-isn't practical to verify interactively. Instead verify directly:
-
-```bash
-/opt/homebrew/bin/bash -l -c 'echo "BASH_VERSION=$BASH_VERSION"'
-```
-
-Expected: `BASH_VERSION=5.x...`
-
-Confirm the plist's first argument is the same absolute path used above:
-
-```bash
-/usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" ~/Library/LaunchAgents/com.andrewrich.updates.plist
-```
-
-Expected: `/opt/homebrew/bin/bash`
-
-**Step 5: No commit** — this file lives outside the dotfiles repo
-(`~/Library/LaunchAgents/`), so there's nothing to commit here. Note in the
-PR description that this manual step was performed.
+This doesn't block the rest of the plan: Tasks 1–2 fix the actual reported
+symptom (the `brew doctor` PATH warning) using plain bash-3.2-compatible
+syntax, so the nightly job gets correct PATH ordering under system bash with
+no plist change needed.
 
 ---
 

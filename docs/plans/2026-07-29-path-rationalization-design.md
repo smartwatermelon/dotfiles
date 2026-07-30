@@ -75,12 +75,27 @@ times out or fails, only those secondary vars are missing — PATH is already
 correct and unaffected. This fully absorbs the "fallback" requirement: PATH
 correctness no longer depends on `brew shellenv` succeeding at all.
 
-### 3. Fix the `updates` LaunchAgent's bash
+### 3. `updates` LaunchAgent's bash — rejected, stays on system bash
 
-Change `com.andrewrich.updates.plist`'s `ProgramArguments[0]` from
-`/bin/bash` to `/opt/homebrew/bin/bash`, matching `UserShell`. This is
-independent of the PATH changes above — no PATH fix can correct it, since
-launchd invokes the named executable directly without PATH resolution.
+Originally proposed changing `com.andrewrich.updates.plist`'s
+`ProgramArguments[0]` from `/bin/bash` to `/opt/homebrew/bin/bash`, matching
+`UserShell`. **Rejected** on reconsideration: Homebrew's `bash` binary's real
+path changes on every `brew upgrade bash` (a versioned Cellar target), and
+TCC/Full Disk Access grants for that binary don't survive the change — an
+unattended nightly job pinned to Homebrew bash would silently lose FDA after
+any bash upgrade and start re-triggering "bash wants to use local files" TCC
+prompts (deferred to next unlock, since the agent runs with no GUI session).
+`/bin/bash` is SIP-protected, permanent, and code-signed by Apple, making it
+the only stable FDA grantee available for this job. This is a deliberate,
+standing constraint (see `2026-07-10-nightly-updates-sudo-tcc-plan.md`), not
+an oversight to fix — do not revisit without a concrete plan for keeping FDA
+stable across Homebrew bash upgrades.
+
+This has no effect on fixes #1–#2 above: `path.sh`'s new tier-array logic is
+plain bash-3.2-compatible syntax (indexed arrays, parameter expansion; no
+`declare -A`, no bash-4-only globstar reliance), so the nightly job gets
+correct, deterministic PATH ordering under system bash without any plist
+change.
 
 ## Testing
 
