@@ -10,6 +10,12 @@
 # Prepend to PATH, ensuring it's at the front (moves existing entry if needed)
 # macOS path_helper pre-populates PATH from /etc/paths.d, often placing user
 # directories after system ones. This function corrects that ordering.
+#
+# Not called by the tier construction below (that builds PATH directly via
+# _path_tiers so the whole order is visible in one place, not accumulated
+# via repeated prepend calls). Kept available for one-off/interactive use
+# (e.g. a tool installer script that needs to prepend its own bin dir after
+# path.sh has already run).
 _prepend_path_once() {
   local dir="$1"
   [[ -d "${dir}" ]] || return 0
@@ -86,7 +92,7 @@ for _dir in "${_path_tiers[@]}"; do
   done
   _new_path="${_new_path:+${_new_path}:}${_dir}"
 done
-export PATH="${_new_path}${_new_path:+:}${PATH}"
+export PATH="${_new_path}${_new_path:+${PATH:+:}}${PATH}"
 unset _path_tiers _dir _new_path GEM_EXE_DIR
 
 # ============================================================================

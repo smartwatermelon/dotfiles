@@ -17,7 +17,8 @@ export HOME="/tmp/path-order-test-home-$$"
 mkdir -p "${HOME}/.local/bin" "${HOME}/.bun/bin"
 trap 'rm -rf "${HOME}"' EXIT
 
-# functions.sh defines _get_homebrew_root, _prepend_path_once, etc.
+# functions.sh defines _get_homebrew_root, etc. (_prepend_path_once and
+# _append_path_once are defined in path.sh itself, sourced below.)
 #shellcheck source=/dev/null
 source "${BASH_CONFIG_DIR}/functions.sh"
 
@@ -77,5 +78,63 @@ case ":${PATH}:" in
     echo "PASS: no empty PATH segments"
     ;;
 esac
+
+# Run path.sh in a fresh subshell with a given starting PATH, printing the
+# resulting PATH. Used by the two regression checks below, each of which
+# needs its own starting PATH rather than the one already built up above.
+_run_with_path() {
+  local starting_path="$1"
+  (
+    #shellcheck source=/dev/null
+    source "${BASH_CONFIG_DIR}/functions.sh"
+    export PATH="${starting_path}"
+    #shellcheck source=/dev/null
+    source "${BASH_CONFIG_DIR}/path.sh"
+    printf '%s' "${PATH}"
+  )
+}
+
+assert_no_stray_colons() {
+  local label="$1" result_path="$2"
+  local ok=1
+  [[ "${result_path}" == :* ]] && ok=0
+  [[ "${result_path}" == *: ]] && ok=0
+  [[ "${result_path}" == *"::"* ]] && ok=0
+  if [[ "${ok}" -eq 1 ]]; then
+    echo "PASS: ${label} (no leading/trailing/double colon): ${result_path}"
+  else
+    echo "FAIL: ${label} — stray colon in PATH: ${result_path}"
+    fail=1
+  fi
+}
+
+# Regression: when every existing PATH entry is itself tier-managed (i.e.
+# the "remainder" left after stripping tiers is fully consumed), the final
+# assembly must not leave a trailing ":" — a trailing colon is read by
+# bash/POSIX as "include the current directory," a PATH-injection risk.
+homebrew_root="$(_get_homebrew_root)"
+if [[ -d "${homebrew_root}/bin" ]]; then
+  fully_consumed_path="${HOME}/.local/bin:${homebrew_root}/bin"
+  result="$(_run_with_path "${fully_consumed_path}")"
+  assert_no_stray_colons "fully-consumed remainder" "${result}"
+else
+  echo "SKIP: Homebrew not installed at ${homebrew_root}; skipping trailing-colon regression check"
+fi
+
+# Regression: a duplicate tier entry already present (twice) in the
+# starting PATH must not survive as a duplicate in the result.
+dup_start_path="${HOME}/.local/bin:${HOME}/.local/bin:/usr/bin"
+dup_result="$(_run_with_path "${dup_start_path}")"
+dup_count=0
+IFS=':' read -ra dup_parts <<<"${dup_result}"
+for p in "${dup_parts[@]}"; do
+  [[ "${p}" == "${HOME}/.local/bin" ]] && ((dup_count += 1))
+done
+if [[ "${dup_count}" -eq 1 ]]; then
+  echo "PASS: duplicate starting-PATH entry collapsed to one occurrence"
+else
+  echo "FAIL: expected exactly 1 occurrence of '${HOME}/.local/bin', found ${dup_count}: ${dup_result}"
+  fail=1
+fi
 
 exit "${fail}"
