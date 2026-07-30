@@ -974,10 +974,13 @@ else
   # symlink-forest repair gone wrong) must not silently drop the
   # REST/GraphQL merge-bypass block and pre-merge review gate.
   echo "[gh] WARNING: ${HOME}/.config/bash/gh-wrapper.sh not found — gh merge guard is NOT active." >&2
-  echo "[gh] Run install.sh (or install.sh --repair) to restore it." >&2
+  # install.sh --repair only re-links files that already exist as plain
+  # copies; it skips paths that are missing entirely. A fully absent
+  # gh-wrapper.sh needs the plain (non-repair) install.sh run.
+  echo "[gh] Run install.sh to restore it." >&2
   gh() {
     echo "[gh] ERROR: gh-wrapper.sh is missing; refusing to run gh unguarded." >&2
-    echo "[gh] Run install.sh (or install.sh --repair) to restore ${HOME}/.config/bash/gh-wrapper.sh." >&2
+    echo "[gh] Run install.sh to restore ${HOME}/.config/bash/gh-wrapper.sh." >&2
     return 1
   }
   export -f gh
