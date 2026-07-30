@@ -1198,12 +1198,13 @@ gpush() {
 # In interactive shells, OP_SERVICE_ACCOUNT_TOKEN is not set so this is
 # equivalent to plain op. Inside CCCLI sessions (where the wrapper has set
 # OP_SERVICE_ACCOUNT_TOKEN), this provides Personal vault access.
+# Usage: opp <op-args> (e.g. `opp item list`); bare `opp` just runs `op`
+# with no arguments, which prints op's own help text.
 
 opp() {
   (
     unset OP_SERVICE_ACCOUNT_TOKEN
     if ! op whoami &>/dev/null; then
-      #      eval "$(op signin)"
       local signin_cmd
       signin_cmd=$(op signin) || return $?
       eval "${signin_cmd}"
