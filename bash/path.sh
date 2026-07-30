@@ -1,20 +1,11 @@
 # ~/.config/bash/path.sh
 #shellcheck shell=bash
-# Consolidated PATH management
+# Consolidated PATH management — this file is the ONLY place PATH priority
+# is decided. env.sh does not touch PATH.
 #
-# PATH Search Order (left-to-right, first match wins):
-# 1. User binaries (highest priority) - ~/.local/bin, maestro
-# 2. Language-specific tools - Ruby, Gem executables
-# 3. Homebrew system tools - sbin
-# 4. System defaults - /usr/local/bin, /usr/bin, /bin, /usr/sbin, /sbin
-# 5. Android SDK tools (lowest priority) - emulator, platform-tools
-#
-# Prepending adds to the BEGINNING (higher priority, searched first)
-# Appending adds to the END (lower priority, searched last)
-
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
+# _path_tiers below is the final PATH order, highest priority first.
+# Read top-to-bottom: that IS the resulting search order. No mental
+# simulation of prepend calls required.
 
 # Prepend to PATH, ensuring it's at the front (moves existing entry if needed)
 # macOS path_helper pre-populates PATH from /etc/paths.d, often placing user
@@ -23,7 +14,6 @@ _prepend_path_once() {
   local dir="$1"
   [[ -d "${dir}" ]] || return 0
 
-  # Remove existing entry (if any) before prepending
   if [[ "${PATH}" == "${dir}" ]]; then
     export PATH="${dir}"
     return 0
@@ -44,30 +34,13 @@ _append_path_once() {
 }
 
 # ============================================================================
-# PREPEND ORDER (reverse of priority - lowest priority prepended first)
-# ============================================================================
-# When prepending to PATH, the LAST item prepended has HIGHEST priority.
-# Therefore, we must prepend in REVERSE order of desired priority.
-
-# ============================================================================
-# STEP 1: Prepend Homebrew System Tools (Priority 3 - Lower)
+# EXPLICIT PATH ORDER — highest priority first
 # ============================================================================
 
-# Homebrew sbin (for system tools like nginx, unbound, postgresql)
-# Note: brew shellenv may already add this via path_helper
 HOMEBREW_ROOT=$(_get_homebrew_root)
-_prepend_path_once "${HOMEBREW_ROOT}/sbin"
 
-# ============================================================================
-# STEP 2: Prepend Language-Specific Tools (Priority 2 - Medium)
-# ============================================================================
-
-# Ruby and Gem executables (only if Homebrew Ruby is installed)
+GEM_EXE_DIR=""
 if command -v ruby &>/dev/null; then
-  # Ruby bin directory (prepended first, so lower priority than gem executables)
-  _prepend_path_once "${HOMEBREW_ROOT}/opt/ruby/bin"
-
-  # Gem executables (prepended last, so higher priority than ruby bin)
   if [[ $(type -t _profile_time) == "function" ]] && [[ "$-" == *i* ]]; then
     _pf_start=$(date +%s.%N)
   fi
@@ -80,38 +53,44 @@ if command -v ruby &>/dev/null; then
     fi
     unset _pf_start _pf_end _pf_duration
   fi
-  _prepend_path_once "${GEM_EXE_DIR}"
-
-  # Cleanup temporary variable
-  unset GEM_EXE_DIR
 fi
 
-# Bun JavaScript runtime
-if [[ -d "${HOME}/.bun/bin" ]]; then
-  _prepend_path_once "${HOME}/.bun/bin"
-fi
+# Written highest-priority-first. The loop below does a single forward
+# pass, appending each existing directory to a new prefix in this exact
+# order, then puts that prefix in front of whatever's left of the old
+# PATH. Array order above IS the resulting PATH order — read top to
+# bottom, no need to simulate anything.
+_path_tiers=(
+  "${HOME}/.local/bin"
+  "${GEM_EXE_DIR}"
+  "${HOME}/.bun/bin"
+  "${HOME}/.asdf/shims"
+  "${HOMEBREW_ROOT}/opt/ruby/bin"
+  "${HOMEBREW_ROOT}/bin"
+  "${HOMEBREW_ROOT}/sbin"
+)
 
-# asdf shims (multiple runtime version manager)
-if [[ -d "${HOME}/.asdf/shims" ]]; then
-  _prepend_path_once "${HOME}/.asdf/shims"
-fi
+_new_path=""
+for _dir in "${_path_tiers[@]}"; do
+  [[ -n "${_dir}" && -d "${_dir}" ]] || continue
+  # Strip ALL existing occurrences first so it isn't duplicated below.
+  # Looped (not a single pass) so 3+ consecutive duplicate entries are
+  # fully collapsed, not just reduced by one.
+  while [[ ":${PATH}:" == *":${_dir}:"* ]]; do
+    PATH="${PATH//:${_dir}:/:}"
+    PATH="${PATH/#${_dir}:/}"
+    PATH="${PATH/%:${_dir}/}"
+    if [[ "${PATH}" == "${_dir}" ]]; then
+      export PATH=""
+    fi
+  done
+  _new_path="${_new_path:+${_new_path}:}${_dir}"
+done
+export PATH="${_new_path}${_new_path:+:}${PATH}"
+unset _path_tiers _dir _new_path GEM_EXE_DIR
 
 # ============================================================================
-# STEP 3: Prepend User Binaries (Priority 1 - Highest)
-# ============================================================================
-
-# User local binaries (prepended LAST, so HIGHEST priority)
-# Note: Maestro is symlinked from ~/.maestro/bin/maestro to ~/.local/bin/maestro
-_prepend_path_once "${HOME}/.local/bin"
-
-# ============================================================================
-# PRIORITY 4: System Defaults
-# ============================================================================
-# Already in PATH from system login (/usr/local/bin, /usr/bin, /bin, etc.)
-# No modifications needed
-
-# ============================================================================
-# PRIORITY 5: Android SDK Tools (Append - Lowest Priority)
+# LOWEST PRIORITY — appended, not prepended
 # ============================================================================
 
 # Android SDK (only if installed)
