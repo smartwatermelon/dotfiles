@@ -33,8 +33,8 @@ _gh_wrapper_find_real_gh() {
   for dir in ${PATH}; do
     candidate="${dir}/gh"
     if [[ -x "${candidate}" ]]; then
-      candidate_real="$(realpath "${candidate}" 2>/dev/null)"
-      if [[ "${candidate_real}" != "${self}" ]]; then
+      candidate_real="$(realpath "${candidate}" 2>/dev/null || true)"
+      if [[ -n "${candidate_real}" ]] && [[ "${candidate_real}" != "${self}" ]]; then
         printf '%s\n' "${candidate}"
         return 0
       fi

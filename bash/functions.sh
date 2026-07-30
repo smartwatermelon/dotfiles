@@ -969,6 +969,19 @@ export -f git # Exported - overrides system git command globally
 if [[ -f "${HOME}/.config/bash/gh-wrapper.sh" ]]; then
   # shellcheck source=/dev/null
   source "${HOME}/.config/bash/gh-wrapper.sh"
+else
+  # Fail closed: a missing/broken symlink here (e.g. mid-install, or a
+  # symlink-forest repair gone wrong) must not silently drop the
+  # REST/GraphQL merge-bypass block and pre-merge review gate.
+  echo "[gh] WARNING: ${HOME}/.config/bash/gh-wrapper.sh not found — gh merge guard is NOT active." >&2
+  echo "[gh] Run install.sh (or install.sh --repair) to restore it." >&2
+  gh() {
+    echo "[gh] ERROR: gh-wrapper.sh is missing; refusing to run gh unguarded." >&2
+    echo "[gh] Run install.sh (or install.sh --repair) to restore ${HOME}/.config/bash/gh-wrapper.sh." >&2
+    return 1
+  }
+  export -f gh
+fi
 
 # ============================================================================
 # gpush — Push, create PR, wait for CI, merge, and clean up in one command
