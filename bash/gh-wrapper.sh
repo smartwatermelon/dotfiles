@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # ~/.config/bash/gh-wrapper.sh
 #shellcheck shell=bash
 # Canonical implementation of the `gh` PR-merge guard (pre-merge review +
@@ -136,6 +137,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     fi
   done
 
+  # Safe to skip both checks when _GH_REVIEW_DONE is set: that only happens
+  # when function mode already ran _gh_wrapper_block_bypass and
+  # _gh_wrapper_maybe_review before calling `command gh` (which lands here).
+  # If a future change ever sets _GH_REVIEW_DONE before running those checks
+  # in function mode, this skip becomes unsafe — keep the two in lockstep.
   if [[ -z "${_GH_REVIEW_DONE:-}" ]]; then
     _gh_wrapper_block_bypass "$@" || exit 1
     if [[ "${_gh_wrapper_help}" != "1" ]]; then
