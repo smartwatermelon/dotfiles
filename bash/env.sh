@@ -84,7 +84,7 @@ if command -v brew &>/dev/null; then
     echo "[ERROR] brew shellenv contains suspicious patterns, refusing to eval" >&2
     echo "[ERROR] Output: ${BREW_SHELLENV}" >&2
   else
-    eval "${BREW_SHELLENV}"
+    eval "$(grep -vE '^export (PATH|MANPATH|INFOPATH)=' <<<"${BREW_SHELLENV}")"
   fi
   if [[ $(type -t _profile_time) == "function" ]] && [[ "$-" == *i* ]]; then
     _pf_end=$(date +%s.%N)
@@ -167,5 +167,3 @@ export CLAUDE_CONFIG_DIR="${HOME}/.claude"
 
 # mas update disable
 export MAS_UPDATE_DISABLE=true
-
-export PATH="$HOME/.local/bin:$PATH"
