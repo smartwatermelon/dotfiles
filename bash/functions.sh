@@ -1003,8 +1003,13 @@ export -f _gh_sync_identity # Exported - used by the exported gh() wrapper
 gh() {
   local review_script="${HOME}/.claude/hooks/pre-merge-review.sh"
 
-  # Don't auto-switch identity while the user is managing accounts directly.
-  if [[ "$1" != "auth" ]]; then
+  # Don't auto-switch identity while the user is managing accounts directly,
+  # or for --help/-h — informational calls shouldn't mutate global auth state.
+  local _gh_is_help=0 _gh_help_arg
+  for _gh_help_arg in "$@"; do
+    [[ "${_gh_help_arg}" == "--help" || "${_gh_help_arg}" == "-h" ]] && _gh_is_help=1 && break
+  done
+  if [[ "$1" != "auth" && "${_gh_is_help}" == "0" ]]; then
     _gh_sync_identity || return 1
   fi
 
