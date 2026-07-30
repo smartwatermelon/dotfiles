@@ -971,7 +971,7 @@ export -f git # Exported - overrides system git command globally
 _gh_sync_identity() {
   local remote_url owner desired current
 
-  remote_url=$(git config --get remote.origin.url 2>/dev/null)
+  remote_url=$(command git config --get remote.origin.url 2>/dev/null)
   [[ -z "${remote_url}" ]] && return 0
 
   owner=$(printf '%s\n' "${remote_url}" | sed -E 's#^(git@[^:]+:|[a-zA-Z]+://[^/]+/)##; s#/.*##')
@@ -987,7 +987,8 @@ _gh_sync_identity() {
 
   if [[ -n "${current}" && "${current}" != "${desired}" ]]; then
     if ! command gh auth switch --hostname github.com --user "${desired}" >/dev/null 2>&1; then
-      echo "[gh] Warning: failed to switch identity to '${desired}' — commands may run as '${current}' instead" >&2
+      echo "[gh] ERROR: failed to switch identity to '${desired}' (repo owner: '${owner}') — refusing to run as '${current}' instead" >&2
+      return 1
     fi
   fi
 }
@@ -1004,7 +1005,7 @@ gh() {
 
   # Don't auto-switch identity while the user is managing accounts directly.
   if [[ "$1" != "auth" ]]; then
-    _gh_sync_identity
+    _gh_sync_identity || return 1
   fi
 
   # Block: gh api .../pulls/{number}/merge (REST API merge bypass)
