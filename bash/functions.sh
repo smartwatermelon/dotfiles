@@ -731,9 +731,10 @@ updates() {
 # Not exported - interactive command only
 
 # Update all local repos, repair local config symlinks, run software updates
-# pull-my-repos is from ~/Developer/scripts, symlinked into ~/.local/bin
+# pull-my-repos and pull-beacon-repos are from ~/Developer/scripts, symlinked into ~/.local/bin
 allup() {
-  pull-my-repos || return $?
+  if command -v pull-my-repos &>/dev/null; then pull-my-repos || return $?; fi
+  if command -v pull-beacon-repos &>/dev/null; then pull-beacon-repos || return $?; fi
   "${HOME}/Developer/dotfiles/install.sh" --repair || return $?
   "${HOME}/Developer/claude-config/install.sh" --repair || return $?
   updates "$@"
