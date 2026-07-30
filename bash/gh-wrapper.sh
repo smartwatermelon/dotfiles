@@ -1,0 +1,183 @@
+# ~/.config/bash/gh-wrapper.sh
+#shellcheck shell=bash
+# Canonical implementation of the `gh` PR-merge guard (pre-merge review +
+# REST/GraphQL merge-bypass blocking). One file, two invocation modes:
+#
+#   1. Sourced from functions.sh: defines gh() as a bash function. This wins
+#      over PATH lookup for any bash process — interactive shells (via
+#      .bash_profile -> main.sh) and non-interactive ones too, since
+#      ~/.claude/settings.json sets BASH_ENV=~/.config/bash/functions.sh so
+#      Claude Code's own Bash tool sources it as well.
+#   2. Symlinked as ~/.local/bin/gh and executed directly: acts as a
+#      standalone wrapper. This is the fallback for anything that reaches
+#      `gh` without going through a bash process that has BASH_ENV in
+#      effect — GUI apps, LaunchAgents/cron with a stripped environment,
+#      editor git integrations, other language runtimes shelling out to
+#      `gh`, etc.
+#
+# _GH_REVIEW_DONE guards against running pre-merge-review.sh twice when both
+# layers fire in the same call chain: the bash function runs first, then
+# calls `command gh`, which (since ~/.local/bin is early in PATH) finds this
+# same file again in standalone-wrapper mode.
+
+_gh_wrapper_review_script="${HOME}/.claude/hooks/pre-merge-review.sh"
+
+# Find the real `gh` binary, skipping ourselves. Only meaningful in
+# standalone-wrapper mode.
+_gh_wrapper_find_real_gh() {
+  local self
+  self="$(realpath "${BASH_SOURCE[0]}")"
+
+  local IFS=':'
+  local dir candidate candidate_real
+  for dir in ${PATH}; do
+    candidate="${dir}/gh"
+    if [[ -x "${candidate}" ]]; then
+      candidate_real="$(realpath "${candidate}" 2>/dev/null)"
+      if [[ "${candidate_real}" != "${self}" ]]; then
+        printf '%s\n' "${candidate}"
+        return 0
+      fi
+    fi
+  done
+
+  printf '[gh-wrapper] Error: Could not find real gh binary in PATH\n' >&2
+  return 1
+}
+
+# Blocks REST/GraphQL PR-merge bypass vectors that skip pre-merge-review.sh
+# and the merge-lock check entirely. Returns 1 if the call should be blocked.
+_gh_wrapper_block_bypass() {
+  if [[ "$1" == "api" ]] && printf '%s\n' "$*" | grep -qE 'pulls/[0-9]+/merge([[:space:]]|$|[^[:alnum:]_])'; then
+    echo "[gh] BLOCKED: Direct REST API PR merge bypasses pre-merge review and merge authorization." >&2
+    echo "[gh] This endpoint skips pre-merge-review.sh and the merge-lock check." >&2
+    echo "[gh] Use 'gh pr merge <number>' instead." >&2
+    echo "[gh] If gh pr merge fails, report the failure and ask the human to merge manually." >&2
+    return 1
+  fi
+
+  if [[ "$1" == "api" ]] && printf '%s\n' "$*" | grep -qE 'graphql.*mergePullRequest[[:space:]]*\('; then
+    echo "[gh] BLOCKED: GraphQL mergePullRequest mutation bypasses pre-merge review and merge authorization." >&2
+    echo "[gh] Use 'gh pr merge <number>' instead." >&2
+    echo "[gh] If gh pr merge fails, report the failure and ask the human to merge manually." >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# Runs pre-merge-review.sh if this call is `gh pr merge`. Returns 1 to block.
+# Parses args past known two-token global flags to find the actual
+# subcommand, handling both `gh pr merge NNN` and `gh -R owner/repo pr merge
+# NNN`.
+#
+# $1: "strict" or "warn" — how to react if the review script is missing.
+# "strict" (standalone-wrapper mode) fails closed, since that mode is the
+# fallback safety net for callers with no other guard layer. "warn"
+# (function mode) matches the original bash-function behavior of warning
+# and proceeding, since a bash session has other opportunities to catch a
+# misconfigured review script.
+_gh_wrapper_maybe_review() {
+  local missing_script_mode="$1"
+  shift
+
+  local sub="" subsub="" skip_next=0 arg
+  for arg in "$@"; do
+    if [[ "${skip_next}" == "1" ]]; then
+      skip_next=0
+      continue
+    fi
+    case "${arg}" in
+      -R | --repo | --hostname | --config-dir | --token) skip_next=1 ;;
+      --*=*) ;; # --flag=value: single token, no separate value to skip
+      -*) ;;    # other single-token flags: skip
+      *)
+        if [[ -z "${sub}" ]]; then
+          sub="${arg}"
+        else
+          subsub="${arg}"
+          break
+        fi
+        ;;
+    esac
+  done
+
+  if [[ "${sub}" == "pr" && "${subsub}" == "merge" ]]; then
+    if [[ -x "${_gh_wrapper_review_script}" ]]; then
+      "${_gh_wrapper_review_script}" "$@" || return 1
+    elif [[ "${missing_script_mode}" == "strict" ]]; then
+      echo "[gh] ERROR: pre-merge review script not found or not executable: ${_gh_wrapper_review_script}" >&2
+      echo "[gh] Refusing to proceed with an unguarded merge." >&2
+      return 1
+    else
+      echo "[gh] Warning: pre-merge review script not found or not executable" >&2
+      echo "[gh] Expected: ${_gh_wrapper_review_script}" >&2
+      echo "[gh] Proceeding without review..." >&2
+    fi
+  fi
+  return 0
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  # --- Standalone-wrapper mode (executed directly, e.g. via the
+  # ~/.local/bin/gh symlink) ---
+  set -euo pipefail
+
+  REAL_GH="$(_gh_wrapper_find_real_gh)"
+
+  # Note whether this is a help request, but the REST/GraphQL bypass block
+  # below must run regardless — `gh api pulls/123/merge --help` must not
+  # escape it by appending --help.
+  _gh_wrapper_help=0
+  for _gh_wrapper_arg in "$@"; do
+    if [[ "${_gh_wrapper_arg}" == "--help" || "${_gh_wrapper_arg}" == "-h" ]]; then
+      _gh_wrapper_help=1
+      break
+    fi
+  done
+
+  if [[ -z "${_GH_REVIEW_DONE:-}" ]]; then
+    _gh_wrapper_block_bypass "$@" || exit 1
+    if [[ "${_gh_wrapper_help}" != "1" ]]; then
+      _gh_wrapper_maybe_review strict "$@" || exit 1
+    fi
+  fi
+
+  # Token routing for claude-wrapper multi-org support
+  if [[ -n "${CLAUDE_GH_TOKEN_ROUTER:-}" ]] && [[ -f "${CLAUDE_GH_TOKEN_ROUTER}" ]]; then
+    # shellcheck source=/dev/null
+    source "${CLAUDE_GH_TOKEN_ROUTER}" "$@"
+  fi
+
+  exec "${REAL_GH}" "$@"
+else
+  # --- Function-definition mode (sourced from functions.sh) ---
+  gh() {
+    # Note whether this is a help request, but the REST/GraphQL bypass block
+    # below must run regardless — `gh api pulls/123/merge --help` must not
+    # escape it by appending --help.
+    local help=0 arg
+    for arg in "$@"; do
+      if [[ "${arg}" == "--help" || "${arg}" == "-h" ]]; then
+        help=1
+        break
+      fi
+    done
+
+    _gh_wrapper_block_bypass "$@" || return 1
+
+    if [[ "${help}" == "1" ]]; then
+      # Set _GH_REVIEW_DONE so the ~/.local/bin/gh wrapper also skips review.
+      _GH_REVIEW_DONE=1 command gh "$@"
+      return $?
+    fi
+
+    _gh_wrapper_maybe_review warn "$@" || return 1
+
+    # Run the real gh command. Set _GH_REVIEW_DONE so the ~/.local/bin/gh
+    # wrapper (found again via `command gh`, since ~/.local/bin is early in
+    # PATH) does not run the review a second time.
+    _GH_REVIEW_DONE=1 command gh "$@"
+  }
+  export -f gh # Exported - overrides system gh command globally
+fi
