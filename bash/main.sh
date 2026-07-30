@@ -11,15 +11,14 @@ if [[ -f "${BASH_CONFIG_DIR}/functions.sh" ]]; then
 fi
 
 # Load environment variables (depends on functions only)
-# NOTE: env.sh runs 'brew shellenv' which modifies PATH. Must load BEFORE
-# path.sh so that path.sh can apply the correct priority ordering on top.
+# NOTE: env.sh no longer touches PATH — it filters PATH/MANPATH/INFOPATH
+# out of the brew shellenv eval. path.sh is the sole PATH owner and does
+# not depend on load order relative to env.sh.
 if [[ -f "${BASH_CONFIG_DIR}/env.sh" ]]; then
   source "${BASH_CONFIG_DIR}/env.sh"
 fi
 
-# Load PATH configuration (depends on functions and env)
-# Runs AFTER env.sh to override brew shellenv's PATH ordering
-# with user-preferred priorities (~/.local/bin first)
+# Load PATH configuration (depends on functions only)
 if [[ -f "${BASH_CONFIG_DIR}/path.sh" ]]; then
   source "${BASH_CONFIG_DIR}/path.sh"
 fi
