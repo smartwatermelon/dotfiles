@@ -94,6 +94,21 @@ pre-commit/
   - MD024 siblings_only (allows duplicate headings in different sections)
   - Other rules disabled for documentation flexibility
 
+### GitHub Actions Workflows
+
+**zizmor**
+
+- **Type**: System tool
+- **Entry**: `zizmor`
+- **Purpose**: Security lints `.github/workflows/*` for dangerous triggers,
+  cache poisoning, unpinned actions, template injection, and excessive
+  permissions
+- **When**: Runs only on `.github/workflows/*.yml`/`*.yaml` files
+  (`files: ^\.github/workflows/.*\.ya?ml$`)
+- **Context**: Adopted as a Tier 3 follow-up to the 2026-04-29 GitHub Actions
+  security audit — see
+  [smartwatermelon/dev-env#19](https://github.com/smartwatermelon/dev-env/issues/19)
+
 ## Usage
 
 ### In a New Project
@@ -161,6 +176,12 @@ brew install yamllint
 
 ```bash
 brew install tidy-html5
+```
+
+**For GitHub Actions security linting**:
+
+```bash
+brew install zizmor
 ```
 
 ### Framework Installation
@@ -266,6 +287,9 @@ brew install yamllint
 
 # For tidy issues
 brew install tidy-html5
+
+# For zizmor issues
+brew install zizmor
 ```
 
 ### Hooks not running
@@ -310,3 +334,4 @@ pre-commit install --install-hooks
 - [ShellCheck Wiki](https://www.shellcheck.net/wiki/)
 - [yamllint Docs](https://yamllint.readthedocs.io/)
 - [markdownlint Rules](https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md)
+- [zizmor Docs](https://docs.zizmor.sh/)
