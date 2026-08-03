@@ -98,3 +98,19 @@ repos:
         files: \.(js|jsx|ts|tsx|json|css)$
         pass_filenames: true
         verbose: true
+
+  # GitHub Actions workflow security linting (zizmor). Catches dangerous
+  # triggers, cache poisoning, unpinned actions, template injection, and
+  # excessive permissions in .github/workflows/*. Tier 3 follow-up to the
+  # 2026-04-29 GitHub Actions security audit — see
+  # smartwatermelon/dev-env#19. Requires `brew install zizmor` once locally
+  # (language: system expects the binary already on PATH).
+  - repo: local
+    hooks:
+      - id: zizmor
+        name: "GitHub Actions Security Lint (zizmor)"
+        entry: zizmor
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        pass_filenames: true
+        verbose: true
