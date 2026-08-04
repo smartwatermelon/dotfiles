@@ -27,25 +27,53 @@ _gh_wrapper_review_script="${HOME}/.claude/hooks/pre-merge-review.sh"
 # gh has one active account per host (not per repo), unlike git+SSH which
 # already resolves the right identity per remote via ~/.ssh/config host
 # aliases. This keeps gh in sync with that same per-repo intent: repos owned
-# by smartwatermelon use the smartwatermelon account; everything else
-# (Beacon repos, etc.) falls back to andrewmrich. Local-only (reads/writes
-# gh's config file, no network), so it's cheap to run on every invocation.
+# by smartwatermelon or nightowlstudiollc (both authenticated as the
+# smartwatermelon gh account) use that account; everything else (Beacon
+# repos, etc.) falls back to andrewmrich. Local-only (reads/writes gh's
+# config file, no network), so it's cheap to run on every invocation.
 # Caveat: this mutates global gh state, so concurrent shells working in
 # different-owner repos at the same time can race each other.
+#
+# Owner is resolved from an explicit -R/--repo target on the command line
+# when present, since that's the repo the call actually acts on; only when
+# no such flag is given do we fall back to cwd's git remote. This keeps
+# behavior consistent regardless of which repo checkout the caller happens
+# to be sitting in — see smartwatermelon/dotfiles#135.
 _gh_wrapper_sync_identity() {
-  local remote_url owner desired current
+  local owner desired current repo_flag_value skip_next=0 arg remote_url
 
-  remote_url=$(command git config --get remote.origin.url 2>/dev/null)
-  [[ -z "${remote_url}" ]] && return 0
+  repo_flag_value=""
+  for arg in "$@"; do
+    if [[ "${skip_next}" == "1" ]]; then
+      repo_flag_value="${arg}"
+      skip_next=0
+      break
+    fi
+    case "${arg}" in
+      -R | --repo) skip_next=1 ;;
+      --repo=*)
+        repo_flag_value="${arg#--repo=}"
+        break
+        ;;
+      *) ;;
+    esac
+  done
 
-  owner=$(printf '%s\n' "${remote_url}" | sed -E 's#^(git@[^:]+:|[a-zA-Z]+://[^/]+/)##; s#/.*##')
+  if [[ -n "${repo_flag_value}" ]]; then
+    # -R/--repo takes OWNER/REPO or a full URL; owner is always the first
+    # path segment after stripping any host/scheme prefix.
+    owner=$(printf '%s\n' "${repo_flag_value}" | sed -E 's#^(git@[^:]+:|[a-zA-Z]+://[^/]+/)##; s#/.*##')
+  else
+    remote_url=$(command git config --get remote.origin.url 2>/dev/null)
+    [[ -z "${remote_url}" ]] && return 0
+    owner=$(printf '%s\n' "${remote_url}" | sed -E 's#^(git@[^:]+:|[a-zA-Z]+://[^/]+/)##; s#/.*##')
+  fi
   [[ -z "${owner}" ]] && return 0
 
-  if [[ "${owner}" == "smartwatermelon" ]]; then
-    desired="smartwatermelon"
-  else
-    desired="andrewmrich"
-  fi
+  case "${owner}" in
+    smartwatermelon | nightowlstudiollc) desired="smartwatermelon" ;;
+    *) desired="andrewmrich" ;;
+  esac
 
   current=$(awk '/^github\.com:/{f=1} f && /^ *user:/{print $2; exit}' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'")
 
@@ -179,7 +207,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     # directly, or for --help/-h — informational calls shouldn't mutate
     # global auth state.
     if [[ "${1:-}" != "auth" && "${_gh_wrapper_help}" != "1" ]]; then
-      _gh_wrapper_sync_identity || exit 1
+      _gh_wrapper_sync_identity "$@" || exit 1
     fi
     _gh_wrapper_block_bypass "$@" || exit 1
     if [[ "${_gh_wrapper_help}" != "1" ]]; then
@@ -226,7 +254,7 @@ else
     # directly, or for --help/-h — informational calls shouldn't mutate
     # global auth state.
     if [[ "${1:-}" != "auth" && "${help}" != "1" ]]; then
-      _gh_wrapper_sync_identity || return 1
+      _gh_wrapper_sync_identity "$@" || return 1
     fi
 
     _gh_wrapper_block_bypass "$@" || return 1
