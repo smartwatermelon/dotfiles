@@ -1,8 +1,9 @@
 name: Dependabot Auto-Merge
 
 # Safely auto-merges Dependabot PRs after CI passes. Scope is narrow:
-#  - Only runs when github.actor == 'dependabot[bot]' (not spoofable;
-#    GitHub sets this from the authenticated user).
+#  - Only runs when the PR author is dependabot[bot], checked via
+#    github.event.pull_request.user.login (not github.actor, which
+#    zizmor flags as spoofable in other trigger contexts).
 #  - Patch/minor: always auto-merged.
 #  - Major: only auto-merged when EVERY listed dependency belongs to a
 #    trusted namespace (dependabot/, actions/, smartwatermelon/). One
@@ -21,10 +22,9 @@ name: Dependabot Auto-Merge
 # status checks pass; failing CI leaves the PR open indefinitely.
 #
 # Provisioned 2026-04-18 (v2.0.1 / Phase 5). Hardened 2026-04-28 with
-# the trusted-namespace allowlist + version-comparison defense. See
-# docs/plans/2026-04-28-dependabot-auto-merge-c2.md.
+# the trusted-namespace allowlist + version-comparison defense.
 
-on:
+on: # zizmor: ignore[dangerous-triggers] required so this runs from the base branch (see line 10); no PR code is ever executed
   pull_request_target:
     types: [opened, synchronize, reopened]
 
@@ -34,7 +34,7 @@ permissions:
 
 jobs:
   auto-merge:
-    if: github.actor == 'dependabot[bot]'
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Fetch Dependabot metadata
