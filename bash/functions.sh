@@ -1080,6 +1080,9 @@ gpush() {
       pr_number=$(gh pr view --json number -q .number 2>/dev/null)
       if [[ -n "${pr_number}" ]]; then
         echo -e "${BLUE}[gpush]${NC} PR #${pr_number} already exists, continuing"
+      else
+        echo -e "${RED}[gpush]${NC} PR already exists but could not retrieve its number — check 'gh pr view' manually." >&2
+        return 1
       fi
     fi
     if [[ -z "${pr_number}" ]]; then
@@ -1131,13 +1134,18 @@ gpush() {
   while IFS=$'\t' read -r run_id run_name; do
     [[ -z "${run_id}" ]] && continue
     echo -e "${BLUE}[gpush]${NC} Watching run ${run_id} (${run_name})..."
-    gh run watch "${run_id}" >/dev/null 2>&1 || true
+    timeout 3600 gh run watch "${run_id}" >/dev/null 2>&1 || true
 
     local run_conclusion
     run_conclusion=$(gh run view "${run_id}" --json conclusion --jq '.conclusion') || {
       echo -e "${RED}[gpush]${NC} Failed to query run ${run_id} status." >&2
       return 1
     }
+
+    if [[ -z "${run_conclusion}" || "${run_conclusion}" == "null" ]]; then
+      echo -e "${RED}[gpush]${NC} CI run ${run_id} did not complete within 1 hour — check status manually: gh run view ${run_id}" >&2
+      return 1
+    fi
 
     if [[ "${run_conclusion}" == "success" ]]; then
       echo -e "${GREEN}[gpush]${NC} Passed: ${run_name}"
@@ -1213,8 +1221,8 @@ gpush() {
     echo -e "${RED}[gpush]${NC} Failed to switch to ${default_branch}." >&2
     return 1
   fi
-  if ! git pull; then
-    echo -e "${RED}[gpush]${NC} Failed to pull ${default_branch}. Run 'git pull' manually." >&2
+  if ! git pull --ff-only; then
+    echo -e "${RED}[gpush]${NC} Fast-forward pull of ${default_branch} failed — local branch has diverged from origin. Resolve manually with 'git pull' or 'git rebase'." >&2
     return 1
   fi
   git branch -D "${branch}" 2>/dev/null || true
