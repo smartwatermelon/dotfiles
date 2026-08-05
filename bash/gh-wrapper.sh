@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ~/.config/bash/gh-wrapper.sh
-#shellcheck shell=bash
+# shellcheck shell=bash
 # Canonical implementation of the `gh` identity auto-switch and PR-merge
 # guard (pre-merge review + REST/GraphQL merge-bypass blocking). One file,
 # two invocation modes:
@@ -44,6 +44,7 @@ _gh_wrapper_sync_identity() {
 
   repo_flag_value=""
   for arg in "$@"; do
+    [[ "${arg}" == "--" ]] && break
     if [[ "${skip_next}" == "1" ]]; then
       repo_flag_value="${arg}"
       skip_next=0
@@ -53,6 +54,10 @@ _gh_wrapper_sync_identity() {
       -R | --repo) skip_next=1 ;;
       --repo=*)
         repo_flag_value="${arg#--repo=}"
+        break
+        ;;
+      -R*)
+        repo_flag_value="${arg#-R}"
         break
         ;;
       *) ;;
@@ -70,6 +75,12 @@ _gh_wrapper_sync_identity() {
   fi
   [[ -z "${owner}" ]] && return 0
 
+  # NOTE: the nightowlstudiollc -> smartwatermelon mapping below is asserted,
+  # not verified — nothing here confirms the smartwatermelon gh account is
+  # actually authorized against nightowlstudiollc repos. A `gh auth status`
+  # check (cross-referencing the authorized orgs for the current account)
+  # would be the way to confirm this mapping is still correct; that's left
+  # as a future enhancement rather than added here to avoid scope creep.
   case "${owner}" in
     smartwatermelon | nightowlstudiollc) desired="smartwatermelon" ;;
     *) desired="andrewmrich" ;;
