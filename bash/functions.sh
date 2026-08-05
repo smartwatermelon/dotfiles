@@ -604,6 +604,17 @@ _mas_update() {
   _notif "Updating Mac App Store apps..."
   echo "=== mas update ${timestamp} ===" | _update_log
 
+  # In non-interactive mode, `mas upgrade` can hang waiting on a GUI App
+  # Store authentication dialog on macOS versions where mas account/auth
+  # still functions (mas account itself doesn't work on macOS 12+, but
+  # upgrade's underlying auth prompt is a separate concern). Skip the
+  # actual upgrade and defer to the next interactive `updates` run.
+  if _updates_noninteractive; then
+    _notif "Non-interactive: skipping mas upgrade (deferred to next interactive run)"
+    echo "mas upgrade deferred - non-interactive mode" | _update_log
+    return 0 # Don't fail the chain - upgrade deferred by design
+  fi
+
   # Note: mas account doesn't work on macOS 12+
   # Let mas upgrade fail naturally if not authenticated
   output=$(mas upgrade 2>&1)
