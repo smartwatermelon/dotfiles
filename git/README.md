@@ -19,6 +19,7 @@ git/
 ├── hooks/              # Custom git hooks
 │   ├── lint-shell.sh   # Shell script linting with auto-fix
 │   ├── pre-commit      # Pre-commit hook (delegates to repo or global)
+│   ├── commit-msg      # Commit-msg hook (conventional-commits validation + AI review)
 │   └── pre-push        # Pre-push hook (syncs configs to GitHub repos)
 └── README.md           # This file
 ```
@@ -77,6 +78,22 @@ All hooks are configured via `core.hooksPath` to use this directory instead of p
 3. If no: Runs global linting (fallback to `lint-shell.sh`)
 
 **Integration**: Works with [pre-commit framework](https://pre-commit.com/) configurations in individual repos
+
+### commit-msg
+
+**Purpose**: Validates Conventional Commits format and runs AI code review — this is the primary AI-review entry point
+**File**: `hooks/commit-msg`
+
+**Behavior**:
+
+1. Skips merge commits and WIP/fixup/squash commits (`fixup!`, `squash!`, `wip:`, `WIP:`)
+2. Validates the commit message subject against the Conventional Commits pattern: `<type>(<scope>)!?: <description>` (valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`, `ci`, `build`, `revert`; optional scope; trailing `!` marks a breaking change); warns (non-blocking) if the subject exceeds 72 characters
+3. If validation passes, runs AI code review via `~/.claude/hooks/run-review.sh` against the staged diff, forwarding the in-progress commit message file so the reviewer sees both the code change and the author's stated intent
+4. Blocks the commit if either validation or review fails
+
+**Why here (not pre-commit)**: Git only materializes the commit message on disk by the time `commit-msg` fires — during `pre-commit`, `COMMIT_EDITMSG` still contains the *previous* commit's message (per `man githooks`). Because this hook runs before the commit object exists, `run-review.sh` logs the parent commit hash; `post-commit` later patches the review log with the real commit hash.
+
+**Integration**: Works with `~/.claude/hooks/run-review.sh` (AI code review) and the `post-commit` hook (hash patching)
 
 ### pre-push
 

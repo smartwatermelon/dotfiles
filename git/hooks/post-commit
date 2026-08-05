@@ -5,7 +5,7 @@ set -euo pipefail
 # POST-COMMIT — Patch review log with actual commit hash
 # =========================================================
 #
-# Pre-commit review runs before the commit object exists, so
+# The commit-msg review runs before the commit object exists, so
 # run-review.sh logs the PARENT commit hash. This hook
 # overwrites the stale "commit:" line with the real hash in
 # both the per-repo and global review logs.
