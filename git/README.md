@@ -79,6 +79,26 @@ All hooks are configured via `core.hooksPath` to use this directory instead of p
 
 **Integration**: Works with [pre-commit framework](https://pre-commit.com/) configurations in individual repos
 
+#### Bypassing pre-existing zizmor findings
+
+The `zizmor` hook (GitHub Actions security lint) checks the whole workflow
+file on every run, not just your staged diff. This means a pre-existing
+finding elsewhere in the file can block a commit even when your actual
+change is unrelated and one line long — awkward in repos with strict
+no-drive-by-cleanup norms that forbid bundling unrelated fixes into your
+commit.
+
+The supported escape hatch is to skip the hook for that commit:
+
+```bash
+SKIP=zizmor git commit
+```
+
+Tradeoff: this also skips checking your own newly-staged lines for zizmor
+findings. If you want assurance your change didn't introduce a new
+finding, run `zizmor <file>` manually against the changed file afterward
+and check whether any reported findings' line ranges overlap your diff.
+
 ### commit-msg
 
 **Purpose**: Validates Conventional Commits format and runs AI code review — this is the primary AI-review entry point

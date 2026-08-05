@@ -108,6 +108,16 @@ repos:
   # 2026-04-29 GitHub Actions security audit — see
   # smartwatermelon/dev-env#19. Requires `brew install zizmor` once locally
   # (language: system expects the binary already on PATH).
+  #
+  # zizmor lints the whole file, not just your staged diff — so pre-existing
+  # findings elsewhere in a workflow file can block a commit even when your
+  # actual change is a one-line, unrelated edit. In repos with strict
+  # no-drive-by-cleanup norms (where bundling an unrelated zizmor fix into
+  # your commit isn't welcome), use `SKIP=zizmor git commit` as the
+  # supported escape hatch. Tradeoff: this also skips checking your own
+  # newly-staged lines, so if you want assurance your change didn't
+  # introduce a new finding, run `zizmor <file>` manually afterward and
+  # check whether any reported findings' line ranges overlap your diff.
   - repo: local
     hooks:
       - id: zizmor

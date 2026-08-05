@@ -12,14 +12,14 @@ permissions:
 
 jobs:
   claude-review:
-    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@v3.0.0
+    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@c30bec1e6c7b9c1634897b05f46a8703518a6c7a  # v3.0.0
     with:
       pr_number: ${{ github.event.pull_request.number }}
     secrets:
       claude_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
   claude-review-haiku:
-    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@v3.0.0
+    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@c30bec1e6c7b9c1634897b05f46a8703518a6c7a  # v3.0.0
     with:
       pr_number: ${{ github.event.pull_request.number }}
       model: "claude-haiku-4-5-20251001"
