@@ -3,6 +3,11 @@
 # Environment variable configuration
 
 # Load secret env vars
+#
+# 1Password CLI tokens (OP_SERVICE_ACCOUNT_TOKEN, GH_TOKEN) are injected
+# exclusively by claude-wrapper at CCCLI launch. Interactive shells started
+# outside claude-wrapper will have neither token set and must run `op signin`
+# (or use `opp()` from functions.sh) for 1Password CLI auth.
 #shellcheck disable=SC2154
 if [[ -f "${BASH_CONFIG_DIR}/secrets.sh" ]]; then
   #shellcheck source=/dev/null
@@ -16,11 +21,6 @@ if [[ -f "${BASH_CONFIG_DIR}/beacon.sh" ]]; then
   #shellcheck source=/dev/null
   source "${BASH_CONFIG_DIR}/beacon.sh"
 fi
-
-# 1Password CLI tokens (OP_SERVICE_ACCOUNT_TOKEN, GH_TOKEN) are injected
-# exclusively by claude-wrapper at CCCLI launch. Interactive shells started
-# outside claude-wrapper will have neither token set and must run `op signin`
-# (or use `opp` from functions.sh) for 1Password CLI auth.
 
 # Silence macOS Bash deprecation warning
 export BASH_SILENCE_DEPRECATION_WARNING=1
@@ -84,6 +84,13 @@ if command -v brew &>/dev/null; then
     echo "[ERROR] brew shellenv contains suspicious patterns, refusing to eval" >&2
     echo "[ERROR] Output: ${BREW_SHELLENV}" >&2
   else
+    # PATH is intentionally dropped here — path.sh owns PATH construction
+    # separately. MANPATH and INFOPATH are also intentionally dropped:
+    # Homebrew's installer writes /etc/manpaths.d/homebrew at install time,
+    # which macOS's man command reads automatically, so man pages for
+    # Homebrew-installed tools still resolve without MANPATH being set. If a
+    # machine was bootstrapped in a way that skipped that step, man pages
+    # could go missing silently.
     eval "$(grep -vE '^export (PATH|MANPATH|INFOPATH)=' <<<"${BREW_SHELLENV}")"
   fi
   if [[ $(type -t _profile_time) == "function" ]] && [[ "$-" == *i* ]]; then

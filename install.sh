@@ -262,6 +262,8 @@ else
   _ensure_symlink "${HOME}/.config/dig/digrc" "${HOME}/.digrc"
   _ensure_symlink "${HOME}/.config/shellcheck/.shellcheckrc" "${HOME}/.shellcheckrc"
   _ensure_symlink "${HOME}/.config/markdownlint-cli/.markdownlint.json" "${HOME}/.markdownlint.json"
+  # ~/.local/bin must exist before this symlink is created; section 5
+  # (CREATE DIRECTORIES) runs after this block, so it's created here instead.
   mkdir -p "${HOME}/.local/bin"
   _ensure_symlink "${HOME}/.config/bash/gh-wrapper.sh" "${HOME}/.local/bin/gh"
 fi
@@ -270,17 +272,16 @@ fi
 # 5. CREATE DIRECTORIES
 # ============================================================================
 
-for dir in "${HOME}/.local/bin" "${HOME}/.local/state/bash"; do
-  if [[ -d "${dir}" ]]; then
-    _skip "Directory exists: ${dir}"
-  elif [[ "${DRY_RUN}" == true ]]; then
-    _dry "Would create directory: ${dir}"
-  else
-    mkdir -p "${dir}"
-    _ok "Created directory: ${dir}"
-    installed+=("dir:${dir}")
-  fi
-done
+dir="${HOME}/.local/state/bash"
+if [[ -d "${dir}" ]]; then
+  _skip "Directory exists: ${dir}"
+elif [[ "${DRY_RUN}" == true ]]; then
+  _dry "Would create directory: ${dir}"
+else
+  mkdir -p "${dir}"
+  _ok "Created directory: ${dir}"
+  installed+=("dir:${dir}")
+fi
 
 # ============================================================================
 # 6. PIPX PACKAGES
