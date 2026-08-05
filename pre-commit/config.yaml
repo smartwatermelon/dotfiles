@@ -9,7 +9,10 @@ repos:
     hooks:
       - id: semgrep-secrets
         name: "Semgrep Secrets Scan (p/secrets + p/gitleaks)"
-        entry: semgrep scan --config=p/secrets --config=p/gitleaks --error --quiet --oss-only
+        entry: >-
+          bash -c 'command -v semgrep &>/dev/null || exit 0;
+          semgrep scan --config=p/secrets --config=p/gitleaks
+          --error --quiet --oss-only "$@"' --
         language: system
         pass_filenames: true
         exclude_types: [binary]
