@@ -99,9 +99,17 @@ unset _path_tiers _dir _new_path GEM_EXE_DIR
 # LOWEST PRIORITY — appended, not prepended
 # ============================================================================
 
-# Android SDK (only if installed)
-if [[ -d "${HOME}/Library/Android/sdk" ]]; then
-  export ANDROID_HOME="${HOME}/Library/Android/sdk"
-  _append_path_once "${ANDROID_HOME}/emulator"
-  _append_path_once "${ANDROID_HOME}/platform-tools"
-fi
+# Android SDK (only if installed) — probe Android Studio's default location
+# first, then Homebrew cmdline-tools install paths.
+for _android_candidate in \
+  "${HOME}/Library/Android/sdk" \
+  "/opt/homebrew/share/android-commandlinetools" \
+  "/usr/local/share/android-commandlinetools"; do
+  if [[ -d "${_android_candidate}" ]]; then
+    export ANDROID_HOME="${_android_candidate}"
+    _append_path_once "${ANDROID_HOME}/emulator"
+    _append_path_once "${ANDROID_HOME}/platform-tools"
+    break
+  fi
+done
+unset _android_candidate
