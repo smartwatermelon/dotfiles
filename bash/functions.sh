@@ -315,6 +315,15 @@ SHIM
 }
 # Not exported - internal helper
 
+# Cleanup helper for the sudo shim, invoked both on the normal path and via
+# a TERM/INT trap so a killed process (e.g. LaunchAgent forcibly terminated)
+# doesn't leave the temp dir behind. Takes the shim dir as $1 so it can be
+# wired into `trap` with the value baked in at trap-set time.
+_updates_shim_cleanup() {
+  rm -rf "$1"
+}
+# Not exported - internal helper
+
 # Update Homebrew packages
 # Package managers provide their own network error diagnostics, so no pre-check needed
 _homebrew_update() {
@@ -363,6 +372,22 @@ _homebrew_update() {
     shim_dir=$(_updates_sudo_shim) || shim_dir=""
     if [[ -n "${shim_dir}" ]]; then
       upgrade_path="${shim_dir}:${PATH}"
+      # Normal-path cleanup happens after `brew upgrade` returns below, but
+      # if this process is killed mid-run (e.g. LaunchAgent forcibly
+      # terminated), that line never executes and the temp dir lingers.
+      # Catch SIGTERM/SIGINT too, via the shared cleanup helper with the
+      # shim dir path quoted into the trap command at set-time. Traps are
+      # process-scoped (not function-scoped), so save whatever TERM/INT
+      # handlers the caller already had and restore them on the cleanup
+      # path below instead of unconditionally clearing to "default" —
+      # this function may run inside an interactive shell or a parent
+      # script with its own signal handling.
+      local prev_term_trap prev_int_trap
+      prev_term_trap=$(trap -p TERM)
+      prev_int_trap=$(trap -p INT)
+      local shim_trap_cmd
+      printf -v shim_trap_cmd '_updates_shim_cleanup %q' "${shim_dir}"
+      trap -- "${shim_trap_cmd}" TERM INT
     else
       _notif "Warning: sudo shim unavailable - a sudo-invoking formula may prompt"
     fi
@@ -372,7 +397,14 @@ _homebrew_update() {
   output=$(PATH="${upgrade_path}" brew upgrade "${upgrade_args[@]}" 2>&1)
   result=$?
   echo "${output}" | _update_log
-  [[ -n "${shim_dir}" ]] && rm -rf "${shim_dir}"
+  if [[ -n "${shim_dir}" ]]; then
+    _updates_shim_cleanup "${shim_dir}"
+    # Restore whatever TERM/INT handling was in place before we set ours,
+    # rather than clearing to "default" (trap -p emits a ready-to-eval
+    # `trap -- '...' SIG` command, or nothing if no handler was set).
+    eval "${prev_term_trap:-trap - TERM}"
+    eval "${prev_int_trap:-trap - INT}"
+  fi
   if [[ "${result}" -ne 0 ]]; then
     if [[ "${tolerate_upgrade_failure}" == "true" ]]; then
       _notif "brew upgrade (formulae) completed with errors (exit ${result}) - check log"
