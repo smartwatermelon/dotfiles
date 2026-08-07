@@ -635,7 +635,11 @@ _mas_update() {
 # Returns 0 (success) if claude is not installed to allow graceful degradation
 # Respects DISABLE_AUTOUPDATER=1 in ~/.claude/settings.json
 _claude_update() {
-  if ! command -v claude &>/dev/null; then
+  # Bypass claude-wrapper (aliased over `claude` in interactive shells) —
+  # `claude update` is a self-update of the binary and has no business
+  # launching a full CCCLI session (and its 1Password secrets injection).
+  local claude_bin="${HOME}/.local/bin/claude"
+  if [[ ! -x "${claude_bin}" ]]; then
     _notif "claude not found, skipping"
     return 0 # Not an error - claude is optional
   fi
@@ -663,7 +667,7 @@ _claude_update() {
   _notif "Updating Claude Code..."
   echo "=== claude update ${timestamp} ===" | _update_log
 
-  binary_output=$(claude update 2>&1)
+  binary_output=$("${claude_bin}" update 2>&1)
   binary_result=$?
   echo "${binary_output}" | _update_log
 
