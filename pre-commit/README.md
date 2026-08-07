@@ -206,14 +206,14 @@ brew install pre-commit
 
 ### Local vs Remote Hooks
 
-**Remote hooks** (Python, Markdown):
+**Remote hooks** (Python — black, flake8):
 
 - Downloaded and managed by pre-commit framework
 - Isolated in their own virtualenvs
 - Versioned via git tags
 - Automatically cached
 
-**Local/System hooks** (Shell, YAML, HTML):
+**Local/System hooks** (Secrets, Shell, YAML, HTML, Markdown, Lua, JS/TS/JSON/CSS, GitHub Actions):
 
 - Use system-installed tools
 - Faster execution (no virtual environment overhead)
