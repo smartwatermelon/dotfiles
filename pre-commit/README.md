@@ -86,7 +86,11 @@ pre-commit/
 
 - **Repo**: <https://github.com/igorshubovych/markdownlint-cli>
 - **Version**: v0.45.0
-- **Args**: `--fix`, `--config ~/.config/markdownlint-cli/.markdownlint.json`
+- **Args**: `--fix`, plus `--config ~/.config/markdownlint-cli/.markdownlint.json` — only when
+  the repo has no `.markdownlint.{json,yaml,yml,jsonc}` / `.markdownlintrc` of its own at the
+  repo root. When one is present (e.g. a fork of an external repo with its own conventions),
+  `--config` is omitted so markdownlint's native auto-discovery uses the repo-local config
+  instead (smartwatermelon/dotfiles#116).
 - **Purpose**: Lints and fixes Markdown style
 - **When**: Runs on all Markdown files
 - **Settings**:
