@@ -81,7 +81,7 @@ _gh_wrapper_sync_identity() {
   # check (cross-referencing the authorized orgs for the current account)
   # would be the way to confirm this mapping is still correct; that's left
   # as a future enhancement rather than added here to avoid scope creep.
-  case "${owner}" in
+  case "${owner,,}" in
     smartwatermelon | nightowlstudiollc) desired="smartwatermelon" ;;
     *) desired="andrewmrich" ;;
   esac
