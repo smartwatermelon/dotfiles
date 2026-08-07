@@ -256,6 +256,7 @@ if [[ "${DRY_RUN}" == true ]]; then
   _dry "Would symlink: ~/.digrc -> ~/.config/dig/digrc"
   _dry "Would symlink: ~/.shellcheckrc -> ~/.config/shellcheck/.shellcheckrc"
   _dry "Would symlink: ~/.markdownlint.json -> ~/.config/markdownlint-cli/.markdownlint.json"
+  _dry "Would create directory: ~/.local/bin"
   _dry "Would symlink: ~/.local/bin/gh -> ~/.config/bash/gh-wrapper.sh"
 else
   _ensure_symlink "${HOME}/.config/bash/.bash_profile" "${HOME}/.bash_profile"
