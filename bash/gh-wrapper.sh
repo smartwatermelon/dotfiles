@@ -157,12 +157,20 @@ _gh_wrapper_maybe_review() {
 
   local sub="" subsub="" skip_next=0 arg
   for arg in "$@"; do
+    # -- end-of-options sentinel: everything after it is positional, even if
+    # it looks like a flag. Mirrors the fix pattern from PR #146
+    # (_gh_wrapper_sync_identity) for smartwatermelon/dotfiles#153.
+    [[ "${arg}" == "--" ]] && break
     if [[ "${skip_next}" == "1" ]]; then
       skip_next=0
       continue
     fi
     case "${arg}" in
       -R | --repo | --hostname | --config-dir | --token) skip_next=1 ;;
+      # Combined short-flag form (-Rowner/repo): the value is embedded in
+      # this same token, so there's no next arg to skip — just consume this
+      # one token without treating it as `sub`. See PR #146 / issue #153.
+      -R*) ;;
       --*=*) ;; # --flag=value: single token, no separate value to skip
       -*) ;;    # other single-token flags: skip
       *)
