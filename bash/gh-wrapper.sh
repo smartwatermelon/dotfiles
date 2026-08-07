@@ -283,10 +283,20 @@ else
     # PATH) does not run the review a second time.
     _GH_REVIEW_DONE=1 command gh "$@"
   }
+  # Escape hatch to the real gh binary, bypassing identity auto-switch and
+  # the merge guard entirely — same idea as suclaude for the claude wrapper.
+  # Resolved via _gh_wrapper_find_real_gh (a PATH scan skipping this file)
+  # rather than a hardcoded path, since ~/.local/bin/gh (unlike claude) IS
+  # the wrapper itself, not a separate layer over a fixed real binary.
+  sugh() {
+    local real_gh
+    real_gh="$(_gh_wrapper_find_real_gh)" || return 1
+    "${real_gh}" "$@"
+  }
   # Export gh AND the helpers it calls: an exported function only carries
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_sync_identity
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_sync_identity _gh_wrapper_find_real_gh
   export _gh_wrapper_review_script
 fi
