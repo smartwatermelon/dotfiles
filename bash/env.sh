@@ -16,7 +16,7 @@ fi
 
 # Load work-specific (Beacon) env vars — untracked, machine-local.
 # See bash/beacon.sh.example for the template; install.sh warns if
-# ~/Developer/beacon/ exists but this file doesn't.
+# ~/Developer/beacon-biosignals/ exists but this file doesn't.
 if [[ -f "${BASH_CONFIG_DIR}/beacon.sh" ]]; then
   #shellcheck source=/dev/null
   source "${BASH_CONFIG_DIR}/beacon.sh"
