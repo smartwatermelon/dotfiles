@@ -6,12 +6,12 @@
 #
 # Referenced by an includeIf block in git/config:
 #
-#   [includeIf "gitdir:~/Developer/beacon/"]
+#   [includeIf "gitdir:~/Developer/beacon-biosignals/"]
 #       path = ~/.gitconfig-beacon
 #
 # ~/.gitconfig-beacon itself is intentionally NOT tracked by this repo —
 # only this template is. install.sh warns if it's missing while
-# ~/Developer/beacon/ exists.
+# ~/Developer/beacon-biosignals/ exists.
 
 [user]
 	email = your-work-email@example.com

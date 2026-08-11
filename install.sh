@@ -383,9 +383,10 @@ else
 fi
 
 # Check per-machine work-identity gitconfig — only relevant if a
-# ~/Developer/beacon/ (or similar) workdir exists but its includeIf target
-# is missing, which would silently fall back to the personal git identity.
-BEACON_WORKDIR="${HOME}/Developer/beacon"
+# ~/Developer/beacon-biosignals/ (or similar) workdir exists but its
+# includeIf target is missing, which would silently fall back to the
+# personal git identity.
+BEACON_WORKDIR="${HOME}/Developer/beacon-biosignals"
 BEACON_GITCONFIG="${HOME}/.gitconfig-beacon"
 if [[ -d "${BEACON_WORKDIR}" ]]; then
   if [[ -f "${BEACON_GITCONFIG}" ]]; then
@@ -398,9 +399,9 @@ if [[ -d "${BEACON_WORKDIR}" ]]; then
 fi
 
 # Check per-machine work (Beacon) bash env overrides — only relevant if a
-# ~/Developer/beacon/ workdir exists but env.sh's sourced target is missing,
-# which would silently skip work-only env vars (e.g. AWS_PROFILE) with no
-# warning.
+# ~/Developer/beacon-biosignals/ workdir exists but env.sh's sourced target
+# is missing, which would silently skip work-only env vars (e.g. AWS_PROFILE)
+# with no warning.
 BEACON_BASHENV="${HOME}/.config/bash/beacon.sh"
 if [[ -d "${BEACON_WORKDIR}" ]]; then
   if [[ -f "${BEACON_BASHENV}" ]]; then

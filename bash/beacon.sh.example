@@ -12,7 +12,7 @@
 #
 # ~/.config/bash/beacon.sh itself is intentionally NOT tracked by this repo —
 # only this template is. install.sh warns if it's missing while
-# ~/Developer/beacon/ exists.
+# ~/Developer/beacon-biosignals/ exists.
 
 #shellcheck shell=bash
 
