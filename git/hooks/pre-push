@@ -35,8 +35,13 @@ log_warning() {
 #
 # Escape hatches:
 #   POSTPUSH_LOOP=1   — post-push-loop manages review externally (pre-existing)
-#   STRICT_PREPUSH=0  — temporary opt-out during hook bake-in
-#                       Remove once the default has proven itself. Tracked.
+#   STRICT_PREPUSH=0  — human-authorized opt-out from local blocking review.
+#                       USER-ONLY: agents must never set this autonomously.
+#                       An agent may ask the user for permission to use it in
+#                       a given situation, but must not set it unilaterally
+#                       or claim prior authorization that didn't happen in
+#                       this conversation. See docs/HUMAN-BYPASS.md in
+#                       claude-config for the full explanation.
 strict_noninteractive_block() {
   [[ ! -t 0 ]] \
     && [[ "${CLAUDECODE:-}" == "1" ]] \
@@ -157,7 +162,7 @@ run_supply_chain_scan() {
       fi
     elif strict_noninteractive_block; then
       log_warning "🛑 Non-interactive strict mode — blocking push due to SCA findings"
-      log_warning "   Escape hatches: STRICT_PREPUSH=0 (temporary) or POSTPUSH_LOOP=1"
+      log_warning "   Escape hatches: STRICT_PREPUSH=0 (ask user first) or POSTPUSH_LOOP=1"
       exit 1
     else
       log_warning "Non-interactive advisory mode — continuing despite SCA findings"
@@ -242,7 +247,7 @@ run_static_analysis() {
         fi
       elif strict_noninteractive_block; then
         log_warning "🛑 Non-interactive strict mode — blocking push due to scan infra error"
-        log_warning "   Escape hatches: STRICT_PREPUSH=0 (temporary) or POSTPUSH_LOOP=1"
+        log_warning "   Escape hatches: STRICT_PREPUSH=0 (ask user first) or POSTPUSH_LOOP=1"
         exit 1
       else
         log_warning "Non-interactive advisory mode — continuing despite scan infra error"
@@ -355,7 +360,7 @@ run_reviews() {
       fi
     elif strict_noninteractive_block; then
       log_warning "🛑 Non-interactive strict mode — blocking push due to review findings"
-      log_warning "   Escape hatches: STRICT_PREPUSH=0 (temporary) or POSTPUSH_LOOP=1"
+      log_warning "   Escape hatches: STRICT_PREPUSH=0 (ask user first) or POSTPUSH_LOOP=1"
       exit 1
     else
       log_warning "Non-interactive advisory mode — continuing despite review findings"
@@ -459,7 +464,7 @@ check_pr_review_iteration() {
       elif strict_noninteractive_block; then
         log_warning "🛑 Non-interactive strict mode — blocking push; Protocol 4 checkpoint triggered"
         log_warning "   Run code-reviewer locally, address findings, then retry."
-        log_warning "   Escape hatches: STRICT_PREPUSH=0 (temporary) or POSTPUSH_LOOP=1"
+        log_warning "   Escape hatches: STRICT_PREPUSH=0 (ask user first) or POSTPUSH_LOOP=1"
         exit 1
       else
         # Non-interactive advisory (legacy CI / opt-out): skip prompt, don't block automation.
