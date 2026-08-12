@@ -147,8 +147,15 @@ else
 fi
 
 # Directory navigation
-# Set CDPATH to include Developer directory (from previous .profile)
-export CDPATH=".:${HOME}/Developer:${HOME}/Developer/clients:${HOME}/Developer/netlify"
+# Set CDPATH to include Developer directory (from previous .profile).
+# Deliberately omits "." as the first entry: when cd resolves via CDPATH
+# (even a "." entry), bash's cd builtin echoes the resolved path to
+# stdout as a side effect — this silently corrupts any script's
+# `cd -- "$dir" && pwd` idiom (a very common pattern) by duplicating the
+# captured output whenever the script is invoked with a relative path.
+# Without "." here, cd only consults CDPATH for paths that aren't already
+# resolvable relative to $PWD, which is the behavior actually wanted.
+export CDPATH="${HOME}/Developer:${HOME}/Developer/clients:${HOME}/Developer/netlify"
 
 # Set correct terminal type for SSH sessions with color support
 export TERM=xterm-256color
