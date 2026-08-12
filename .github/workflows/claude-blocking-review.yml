@@ -11,15 +11,27 @@ permissions:
   id-token: write
 
 jobs:
+  # Pinned to v3.1.0+, not a caller-level `if: github.actor !=
+  # 'dependabot[bot]'` gate — a job-level `if:` prevents this job from
+  # ever reporting on Dependabot PRs, which leaves a required status
+  # check permanently pending. v3.1.0+ skips Dependabot PRs from
+  # inside the job instead, so it still reports PASS. See
+  # smartwatermelon/github-workflows#115/#117.
   claude-review:
-    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@c30bec1e6c7b9c1634897b05f46a8703518a6c7a  # v3.0.0
+    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@a79b03b63ebbbd0d35f4f0c0e3cfe92202ee5eb7  # v3.1.0
     with:
       pr_number: ${{ github.event.pull_request.number }}
     secrets:
       claude_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
+  # Pinned to v3.1.0+, not a caller-level `if: github.actor !=
+  # 'dependabot[bot]'` gate — a job-level `if:` prevents this job from
+  # ever reporting on Dependabot PRs, which leaves a required status
+  # check permanently pending. v3.1.0+ skips Dependabot PRs from
+  # inside the job instead, so it still reports PASS. See
+  # smartwatermelon/github-workflows#115/#117.
   claude-review-haiku:
-    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@c30bec1e6c7b9c1634897b05f46a8703518a6c7a  # v3.0.0
+    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@a79b03b63ebbbd0d35f4f0c0e3cfe92202ee5eb7  # v3.1.0
     with:
       pr_number: ${{ github.event.pull_request.number }}
       model: "claude-haiku-4-5-20251001"
