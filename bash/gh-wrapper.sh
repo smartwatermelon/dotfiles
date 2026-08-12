@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # ~/.config/bash/gh-wrapper.sh
 # shellcheck shell=bash
-# Canonical implementation of the `gh` identity auto-switch and PR-merge
-# guard (pre-merge review + REST/GraphQL merge-bypass blocking). One file,
-# two invocation modes:
+# Canonical implementation of the `gh` identity auto-switch, PR-merge guard
+# (pre-merge review + REST/GraphQL merge-bypass blocking), and off-org draft
+# enforcement (`gh pr create` targeting a repo outside
+# smartwatermelon/nightowlstudiollc is forced to --draft, no opt-out). One
+# file, two invocation modes:
 #
 #   1. Sourced from functions.sh: defines gh() as a bash function. This wins
 #      over PATH lookup for any bash process — interactive shells (via
@@ -24,23 +26,18 @@
 
 _gh_wrapper_review_script="${HOME}/.claude/hooks/pre-merge-review.sh"
 
-# gh has one active account per host (not per repo), unlike git+SSH which
-# already resolves the right identity per remote via ~/.ssh/config host
-# aliases. This keeps gh in sync with that same per-repo intent: repos owned
-# by smartwatermelon or nightowlstudiollc (both authenticated as the
-# smartwatermelon gh account) use that account; everything else (Beacon
-# repos, etc.) falls back to andrewmrich. Local-only (reads/writes gh's
-# config file, no network), so it's cheap to run on every invocation.
-# Caveat: this mutates global gh state, so concurrent shells working in
-# different-owner repos at the same time can race each other.
+# Resolves the repo owner a gh invocation is acting on: an explicit -R/--repo
+# target on the command line takes precedence (that's the repo the call
+# actually acts on), falling back to cwd's git remote only when no such flag
+# is given. This keeps behavior consistent regardless of which repo checkout
+# the caller happens to be sitting in — see smartwatermelon/dotfiles#135.
 #
-# Owner is resolved from an explicit -R/--repo target on the command line
-# when present, since that's the repo the call actually acts on; only when
-# no such flag is given do we fall back to cwd's git remote. This keeps
-# behavior consistent regardless of which repo checkout the caller happens
-# to be sitting in — see smartwatermelon/dotfiles#135.
-_gh_wrapper_sync_identity() {
-  local owner desired current repo_flag_value skip_next=0 arg remote_url
+# Shared by _gh_wrapper_sync_identity (identity auto-switch) and
+# _gh_wrapper_force_draft_for_off_org (draft enforcement) so the two checks
+# can never drift on what "owner" means for a given invocation — prints the
+# resolved owner (raw case) on stdout, or nothing if it can't be resolved.
+_gh_wrapper_resolve_owner() {
+  local repo_flag_value skip_next=0 arg remote_url owner
 
   repo_flag_value=""
   for arg in "$@"; do
@@ -73,6 +70,23 @@ _gh_wrapper_sync_identity() {
     [[ -z "${remote_url}" ]] && return 0
     owner=$(printf '%s\n' "${remote_url}" | sed -E 's#^(git@[^:]+:|[a-zA-Z]+://[^/]+/)##; s#/.*##')
   fi
+  [[ -z "${owner}" ]] && return 0
+  printf '%s\n' "${owner}"
+}
+
+# gh has one active account per host (not per repo), unlike git+SSH which
+# already resolves the right identity per remote via ~/.ssh/config host
+# aliases. This keeps gh in sync with that same per-repo intent: repos owned
+# by smartwatermelon or nightowlstudiollc (both authenticated as the
+# smartwatermelon gh account) use that account; everything else (Beacon
+# repos, etc.) falls back to andrewmrich. Local-only (reads/writes gh's
+# config file, no network), so it's cheap to run on every invocation.
+# Caveat: this mutates global gh state, so concurrent shells working in
+# different-owner repos at the same time can race each other.
+_gh_wrapper_sync_identity() {
+  local owner desired current
+
+  owner="$(_gh_wrapper_resolve_owner "$@")"
   [[ -z "${owner}" ]] && return 0
 
   # NOTE: the nightowlstudiollc -> smartwatermelon mapping below is asserted,
@@ -200,6 +214,68 @@ _gh_wrapper_maybe_review() {
   return 0
 }
 
+# Hard, mechanical guard: a PR created against a repo outside the two orgs
+# this environment is scoped to (smartwatermelon/nightowlstudiollc) must
+# land as a draft, unconditionally — no AI judgement call, no opt-out flag,
+# no environment-variable escape hatch. Later promotion out of draft is a
+# manual, human-only action via the GitHub UI; this function only concerns
+# itself with creation time. See smartwatermelon/dotfiles#174.
+#
+# Bash can't let a function reassign the caller's positional params, so this
+# prints the (possibly modified) argument list, one arg per line, on stdout;
+# the caller rebuilds its array with `mapfile`/`readarray`. Always prints
+# something — even when no change is needed — so callers can unconditionally
+# replace their arg array from the output.
+#
+# Parses args with the same sub/subsub walk as _gh_wrapper_maybe_review, so
+# `pr create` detection can't drift between the two.
+_gh_wrapper_force_draft_for_off_org() {
+  local sub="" subsub="" skip_next=0 arg owner
+
+  for arg in "$@"; do
+    [[ "${arg}" == "--" ]] && break
+    if [[ "${skip_next}" == "1" ]]; then
+      skip_next=0
+      continue
+    fi
+    case "${arg}" in
+      -R | --repo | --hostname | --config-dir | --token) skip_next=1 ;;
+      -R*) ;;
+      --*=*) ;;
+      -*) ;;
+      *)
+        if [[ -z "${sub}" ]]; then
+          sub="${arg}"
+        else
+          subsub="${arg}"
+          break
+        fi
+        ;;
+    esac
+  done
+
+  if [[ "${sub}" == "pr" && "${subsub}" == "create" ]]; then
+    owner="$(_gh_wrapper_resolve_owner "$@")"
+    if [[ -n "${owner}" ]]; then
+      case "${owner,,}" in
+        smartwatermelon | nightowlstudiollc) ;; # in-org: no change
+        *)
+          # Off-org target: force --draft. Don't bother deduplicating if the
+          # caller already passed --draft (or --draft=false, which gh doesn't
+          # support as a real flag) — an extra --draft is harmless, and the
+          # point is nothing the caller does can produce a non-draft PR here.
+          printf '%s\n' "$@"
+          printf -- '--draft\n'
+          return 0
+          ;;
+      esac
+    fi
+  fi
+
+  printf '%s\n' "$@"
+  return 0
+}
+
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   # --- Standalone-wrapper mode (executed directly, e.g. via the
   # ~/.local/bin/gh symlink) ---
@@ -216,7 +292,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     fi
   done
 
-  # Safe to skip all three checks when _GH_REVIEW_DONE is set: that only
+  # Safe to skip all four checks when _GH_REVIEW_DONE is set: that only
   # happens when function mode already ran them before calling `command gh`
   # (which lands here). If a future change ever sets _GH_REVIEW_DONE before
   # running those checks in function mode, this skip becomes unsafe — keep
@@ -231,6 +307,19 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     _gh_wrapper_block_bypass "$@" || exit 1
     if [[ "${_gh_wrapper_help}" != "1" ]]; then
       _gh_wrapper_maybe_review strict "$@" || exit 1
+      # Off-org `gh pr create` must land as a draft — hard, mechanical,
+      # no opt-out. Rebuild the positional params from the (possibly
+      # --draft-appended) output; a function can't reassign "$@" directly.
+      # Captured via command substitution (not process substitution) so the
+      # function's own exit status isn't masked from `set -e`. Only rebuild
+      # when there's at least one original arg — with zero args, `mapfile
+      # <<<""` would otherwise produce a single empty-string element instead
+      # of an empty array, turning bare `gh` into `gh ""`.
+      if [[ "$#" -gt 0 ]]; then
+        _gh_wrapper_new_args_raw="$(_gh_wrapper_force_draft_for_off_org "$@")"
+        mapfile -t _gh_wrapper_new_args <<<"${_gh_wrapper_new_args_raw}"
+        set -- "${_gh_wrapper_new_args[@]}"
+      fi
     fi
   fi
 
@@ -286,6 +375,19 @@ else
 
     _gh_wrapper_maybe_review warn "$@" || return 1
 
+    # Off-org `gh pr create` must land as a draft — hard, mechanical, no
+    # opt-out. Rebuild the positional params from the (possibly
+    # --draft-appended) output; a function can't reassign "$@" directly.
+    # Only rebuild when there's at least one original arg — with zero args,
+    # `mapfile <<<""` would otherwise produce a single empty-string element
+    # instead of an empty array, turning bare `gh` into `gh ""`.
+    if [[ "$#" -gt 0 ]]; then
+      local _gh_wrapper_new_args _gh_wrapper_new_args_raw
+      _gh_wrapper_new_args_raw="$(_gh_wrapper_force_draft_for_off_org "$@")"
+      mapfile -t _gh_wrapper_new_args <<<"${_gh_wrapper_new_args_raw}"
+      set -- "${_gh_wrapper_new_args[@]}"
+    fi
+
     # Run the real gh command. Set _GH_REVIEW_DONE so the ~/.local/bin/gh
     # wrapper (found again via `command gh`, since ~/.local/bin is early in
     # PATH) does not run the review a second time.
@@ -305,6 +407,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_sync_identity _gh_wrapper_find_real_gh
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org
   export _gh_wrapper_review_script
 fi
