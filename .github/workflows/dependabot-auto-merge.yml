@@ -28,6 +28,6 @@ jobs:
   # yields an effective allowlist of dependabot|actions|smartwatermelon
   # — identical coverage to the inline logic this replaces.
   dependabot-auto-merge:
-    uses: smartwatermelon/github-workflows/.github/workflows/dependabot-auto-merge.yml@02c4e4965387f718d8a0e0b04900547423196210  # dependabot-auto-merge-v2
+    uses: smartwatermelon/github-workflows/.github/workflows/dependabot-auto-merge.yml@cd83f054fe1129b5d3a1cf22dc6598e5b1524224  # dependabot-auto-merge-v2
     with:
       trusted_namespaces: 'smartwatermelon'
