@@ -15,6 +15,18 @@
 # git binary directly creates a correctness or safety gap worth solving by
 # shadowing the system git binary for every tool on the machine.
 
+# Restore the shell's working directory without letting cd consult CDPATH
+# (a non-empty CDPATH would make cd echo the resolved path to stdout on a
+# CDPATH-resolved match, corrupting this wrapper's output-transparency
+# guarantee). No-ops silently if dir is empty or no longer exists — this
+# runs from an EXIT/RETURN-style trap where the original directory may have
+# been removed out from under us. See smartwatermelon/dotfiles#176.
+_git_wrapper_restore_dir() {
+  local dir="${1:-}"
+  [[ -z "${dir}" ]] && return 0
+  CDPATH='' cd "${dir}" 2>/dev/null || true
+}
+
 git() {
   # Guard against recursive calls
   if [[ -n "${_GIT_WRAPPER_ACTIVE:-}" ]]; then
@@ -96,12 +108,17 @@ git() {
 
   # Trap to cleanup guard and restore directory
   # Use ${var:-} for set -u safety — locals may be out of scope in inherited contexts
-  trap 'unset _GIT_WRAPPER_ACTIVE; [[ -n "${original_dir:-}" ]] && cd "${original_dir:-}" 2>/dev/null || true' RETURN
+  # _git_wrapper_restore_dir (defined above) scopes out CDPATH for its cd so
+  # it can never resolve via CDPATH search and echo the resolved path to
+  # stdout, which would corrupt this wrapper's transparency guarantee (its
+  # whole purpose is to pass git's own output through unmodified). See
+  # smartwatermelon/dotfiles#176.
+  trap 'unset _GIT_WRAPPER_ACTIVE; _git_wrapper_restore_dir "${original_dir:-}"' RETURN
 
   # If init created a repo in a different directory, cd there first
   # This makes git rev-parse work from inside the new repo
   if [[ -n "${target_dir}" ]]; then
-    if ! cd "${target_dir}" 2>/dev/null; then
+    if ! CDPATH='' cd "${target_dir}" 2>/dev/null; then
       echo "Error: Cannot cd to ${target_dir}" >&2
       return 1 # Return failure, not git_result
     fi

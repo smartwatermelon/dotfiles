@@ -155,6 +155,19 @@ fi
 # captured output whenever the script is invoked with a relative path.
 # Without "." here, cd only consults CDPATH for paths that aren't already
 # resolvable relative to $PWD, which is the behavior actually wanted.
+#
+# IMPORTANT — this only protects the "$PWD-relative" case. If a script
+# invoked with this file already sourced does `cd somename` where
+# "somename" happens to match one of the CDPATH entries above by bare
+# name (not the current directory), bash's cd builtin still resolves it
+# via CDPATH search and still echoes the resolved absolute path to
+# stdout — "." being absent from CDPATH does not prevent this. CDPATH is
+# meant purely as an interactive-shell convenience; any script or
+# function in this repo (or elsewhere) that does a `cd` and cares about
+# stdout being clean — e.g. `x=$(cd "$dir" && pwd)` — MUST NOT rely on
+# CDPATH being unset by the caller. Instead, either `unset CDPATH` at the
+# top of the script (see bash/tests/*.sh for the established pattern) or
+# scope it out per-invocation with `CDPATH='' cd -- "$dir"`.
 export CDPATH="${HOME}/Developer:${HOME}/Developer/clients:${HOME}/Developer/netlify"
 
 # Set correct terminal type for SSH sessions with color support
