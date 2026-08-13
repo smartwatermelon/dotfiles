@@ -63,12 +63,13 @@ fi
 # --- Case 2: real `git clone` fires the delegate via core.hooksPath -------
 HOOKS_DIR="${WORKDIR}/hookspath"
 mkdir -p "${HOOKS_DIR}"
-ln -sf "${DELEGATE}" "${HOOKS_DIR}/post-checkout"
 
-# Point the delegate's REPO_DIR at REPO_ROOT for this case (real canonical
-# hook), but redirect its TEMPLATE_DIR lookup to a scratch template so it
-# doesn't touch the real ~/.config/git/template or create .claude/ from
-# the real template contents.
+# Both REPO_DIR and the canonical hook path get sed-redirected to WORKDIR
+# stubs below (DELEGATE_FOR_CLONE) so this case only proves the *delegate
+# fires* on a real `git clone` through core.hooksPath — it doesn't exercise
+# git/template/hooks/post-checkout's actual .claude scaffolding logic
+# (already covered by test-git-wrapper-init-hook.sh), and it doesn't touch
+# the real ~/.config/git/template or ~/Developer/dotfiles.
 SRC="${WORKDIR}/src"
 mkdir -p "${SRC}"
 git -c init.templateDir="" -C "${SRC}" init -q -b main
