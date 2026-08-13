@@ -69,6 +69,46 @@ if [[ ${main_exit} -ne 0 ]]; then
 fi
 rm -f "/tmp/gpush-test-main-$$"
 
+# Case 4: refuses to run on detached HEAD — test using git mock via PATH
+# Since creating a real detached HEAD is complex with git wrappers, we use
+# PATH-based mocking to intercept both bare git and command git calls.
+detached_test_output=$(/bin/bash -c '
+  tmpdir=$(mktemp -d)
+  cat > "${tmpdir}/git" << '"'"'EOF'"'"'
+#!/bin/bash
+if [[ "$1" == "symbolic-ref" ]] && [[ "$2" == "--short" ]]; then
+  exit 1  # Simulates detached HEAD detection failure
+fi
+exec /usr/bin/git "$@"
+EOF
+  chmod +x "${tmpdir}/git"
+  export PATH="${tmpdir}:${PATH}"
+
+  source "'"${BASH_CONFIG_DIR}"'/gpush-wrapper.sh"
+
+  gpush_output=$(gpush 2>&1)
+  gpush_exit=$?
+  rm -rf "${tmpdir}"
+
+  if [[ ${gpush_exit} -eq 0 ]]; then
+    echo "FAIL: gpush on detached HEAD — expected non-zero exit, got 0"
+    exit 1
+  elif echo "${gpush_output}" | grep -q "Refusing to run on.*detached HEAD"; then
+    echo "PASS: gpush on detached HEAD refuses with expected message"
+    exit 0
+  else
+    echo "FAIL: gpush on detached HEAD — wrong error message"
+    echo "${gpush_output}"
+    exit 1
+  fi
+' 2>&1)
+
+detached_exit=$?
+echo "${detached_test_output}"
+if [[ ${detached_exit} -ne 0 ]]; then
+  fail=1
+fi
+
 if [[ "${fail}" -eq 1 ]]; then
   echo "FAILED"
   exit 1
