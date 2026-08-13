@@ -67,13 +67,29 @@ _read_semgrep_token() {
 # =========================================================
 # BRANCH PROTECTION - Do not push directly to main/master
 # =========================================================
+# Populated as a side effect of draining stdin below: the local SHA about to
+# be pushed for the ref matching the currently checked-out branch. stdin can
+# only be read once per hook invocation, so this is the one place we see it;
+# check_pr_review_iteration() (Protocol 4, later in this file) reads this
+# global to detect stale statusCheckRollup data (see #169).
+PUSHED_LOCAL_SHA=""
+
 protected_branch_check() {
+  local current_branch
+  current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+
   # Read push data from stdin
   # Format: <local ref> <local sha1> <remote ref> <remote sha1>
-  while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  while read -r local_ref local_sha remote_ref _remote_sha; do
     # Allow tag pushes - tags don't modify branch history
     if [[ "${remote_ref}" =~ ^refs/tags/ ]]; then
       continue
+    fi
+
+    # Capture the local SHA for the ref matching the current branch, so
+    # later checks (Protocol 4) know exactly which commit is being pushed.
+    if [[ -n "${current_branch}" && "${local_ref}" == "refs/heads/${current_branch}" ]]; then
+      PUSHED_LOCAL_SHA="${local_sha}"
     fi
 
     # Block direct pushes to main/master branches
@@ -383,8 +399,13 @@ check_pr_review_iteration() {
 
   # Fetch PR state once. statusCheckRollup needs Checks permission on the PAT;
   # fall back gracefully if not granted (reviewDecision alone is still useful).
+  # headRefOid identifies which commit statusCheckRollup is reporting against
+  # — GitHub hasn't seen the commit this hook is about to push yet, so
+  # statusCheckRollup necessarily reflects the PR's CURRENT remote head, not
+  # the new commit (see #169). We fetch it in the same call so we can detect
+  # that staleness below rather than presenting old CI results as current.
   local pr_json
-  pr_json=$(gh pr view --json number,reviewDecision,reviews,statusCheckRollup 2>/dev/null || echo "")
+  pr_json=$(gh pr view --json number,reviewDecision,reviews,statusCheckRollup,headRefOid 2>/dev/null || echo "")
   if [[ -z "${pr_json}" ]]; then
     pr_json=$(gh pr view --json number,reviewDecision,reviews 2>/dev/null || echo "")
   fi
@@ -396,6 +417,23 @@ check_pr_review_iteration() {
   if [[ -n "${pr_number}" ]]; then
     echo ""
     log "Pushing to existing PR #${pr_number}"
+
+    # Determine which commit statusCheckRollup reports against (the PR's
+    # current remote head) vs. which commit is about to be pushed. If they
+    # differ, GitHub has not run CI against the new commit yet — any
+    # statusCheckRollup failures are necessarily against the OLD commit and
+    # must not be presented as if they belong to the push in flight (#169).
+    local head_ref_oid pushed_sha ci_is_stale=false
+    head_ref_oid=$(echo "${pr_json}" | jq -r '.headRefOid // empty' 2>/dev/null || echo "")
+    pushed_sha="${PUSHED_LOCAL_SHA:-}"
+    if [[ -z "${pushed_sha}" ]]; then
+      # Fallback: stdin didn't yield a match (e.g. unexpected ref shape) —
+      # the commit about to be pushed for a normal single-branch push is HEAD.
+      pushed_sha=$(git rev-parse HEAD 2>/dev/null || echo "")
+    fi
+    if [[ -n "${head_ref_oid}" && -n "${pushed_sha}" && "${head_ref_oid}" != "${pushed_sha}" ]]; then
+      ci_is_stale=true
+    fi
 
     local has_issues=false
 
@@ -433,8 +471,19 @@ check_pr_review_iteration() {
       | length' 2>/dev/null || echo "0")
 
     if [[ "${ci_failures}" -gt 0 ]]; then
-      has_issues=true
-      log_warning "⚠️  PR has ${ci_failures} failing CI check(s)"
+      if [[ "${ci_is_stale}" == true ]]; then
+        # Known-stale by construction: GitHub hasn't run CI against the
+        # commit we're about to push, so these failures are against the
+        # commit CURRENTLY on the remote (${head_ref_oid:0:7}), not the one
+        # in flight (${pushed_sha:0:7}). Informational only — not blocking.
+        log_warning "ℹ️  PR has ${ci_failures} failing CI check(s) — but against the commit"
+        log_warning "   currently on the remote (${head_ref_oid:0:7}), NOT the commit you're"
+        log_warning "   about to push (${pushed_sha:0:7}). GitHub hasn't run CI on your new"
+        log_warning "   commit yet, so this is not evidence your fix is broken."
+      else
+        has_issues=true
+        log_warning "⚠️  PR has ${ci_failures} failing CI check(s)"
+      fi
     fi
 
     if [[ "${has_issues}" == true ]]; then
