@@ -4,10 +4,12 @@
 # Run directly: bash bash/tests/test-git-wrapper-init-hook.sh
 #
 # Regression coverage for the git()->git-wrapper.sh extraction: git init
-# (bare and with a trailing directory arg) must still invoke the
-# newly-created repo's post-checkout hook with null-SHA init parameters.
-# Note: -C flag support is included in the wrapper for future git versions;
-# current git versions don't support `git init -C`.
+# (bare, with a trailing directory arg, and with git's global -C flag) must
+# still invoke the newly-created repo's post-checkout hook with null-SHA init
+# parameters.
+# Note: -C is git's global pre-subcommand flag (`git -C <dir> init`), not an
+# init-specific flag. The wrapper's target_dir resolution logic handles this
+# and is tested below in Case 3.
 set -euo pipefail
 
 unset CDPATH
@@ -70,6 +72,17 @@ repo2="${WORKDIR}/repo2"
 install_hook "${repo2}"
 (cd "${WORKDIR}" && git init -q repo2)
 assert_hook_ran "git init <dir> triggers post-checkout hook" "${repo2}"
+
+# Case 3: `git -C <dir> init <name>` (git's global -C flag before subcommand)
+# This exercises the wrapper's c_flag_dir-only branch of target_dir resolution.
+repo3_parent="${WORKDIR}/parent3"
+repo3_name="repo3"
+repo3="${repo3_parent}/${repo3_name}"
+mkdir -p "${repo3_parent}"
+(cd "${repo3_parent}" && command git init -q "${repo3_name}")
+install_hook "${repo3}"
+(cd "${repo3_parent}" && git -C "${repo3_name}" init -q)
+assert_hook_ran "git -C <dir> init triggers post-checkout hook" "${repo3}"
 
 if [[ "${fail}" -eq 1 ]]; then
   echo "FAILED"

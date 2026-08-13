@@ -887,16 +887,6 @@ lp_mode() {
 # Not exported - interactive command only
 
 # ============================================================================
-# Git CLI Wrapper
-# ============================================================================
-# Intercepts `git init` to trigger automatic .claude/ infrastructure creation
-# All other git commands pass through unchanged
-#
-# SIMPLIFIED: Uses git rev-parse to find repo location, eliminating complex
-# argument parsing. The init.templateDir already copies hooks, we just need
-# to trigger post-checkout.
-
-# ============================================================================
 # Git Wrapper (post-init hook trigger)
 # ============================================================================
 # Canonical implementation lives in git-wrapper.sh (sourced below). See that
