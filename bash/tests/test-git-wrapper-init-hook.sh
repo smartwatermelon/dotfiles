@@ -26,6 +26,21 @@ unset _GIT_WRAPPER_ACTIVE
 # Isolate test repos from any ambient git context
 export GIT_CEILING_DIRECTORIES="${WORKDIR}"
 
+# Disable the global init.templateDir for every `git init` this test runs.
+# On a machine with init.templateDir configured (this repo's own install.sh
+# sets it to ~/.config/git/template), git's template-copy step preserves
+# symlinks rather than dereferencing them — and ~/.config/git/template's own
+# hooks/post-checkout is a symlink straight into this repo's
+# git/template/hooks/post-checkout. Without this override, `command git
+# init` below would populate each scratch repo's .git/hooks/post-checkout
+# as a symlink to the real file, and install_hook()'s `cat >` would then
+# write through that symlink and clobber the real repo file instead of the
+# scratch fixture. Confirmed by direct reproduction: prior to this fix,
+# every run of this test corrupted git/template/hooks/post-checkout.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0="init.templateDir"
+export GIT_CONFIG_VALUE_0=""
+
 #shellcheck source=/dev/null
 source "${BASH_CONFIG_DIR}/git-wrapper.sh"
 
