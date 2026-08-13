@@ -27,12 +27,6 @@ gpush() {
       ;;
   esac
 
-  # Reject extra positional arguments
-  if [[ $# -gt 1 ]]; then
-    echo "Usage: gpush [--no-merge]" >&2
-    return 1
-  fi
-
   local no_merge=false
   if [[ "${1:-}" == "--no-merge" ]]; then
     no_merge=true

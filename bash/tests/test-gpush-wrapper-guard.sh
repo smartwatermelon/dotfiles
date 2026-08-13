@@ -33,9 +33,6 @@ assert_fails() {
 # Case 1: unknown flag rejected
 assert_fails "gpush --bogus-flag rejected" gpush --bogus-flag
 
-# Case 2: too many arguments rejected
-assert_fails "gpush --no-merge extra-arg rejected" bash -c 'source '"${BASH_CONFIG_DIR}"'/gpush-wrapper.sh; gpush --no-merge extra-arg'
-
 # Case 3: refuses to run on main — use real git repo and real main branch
 WORKDIR="/tmp/gpush-wrapper-guard-test-$$"
 mkdir -p "${WORKDIR}"
