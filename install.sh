@@ -258,6 +258,7 @@ if [[ "${DRY_RUN}" == true ]]; then
   _dry "Would symlink: ~/.markdownlint.json -> ~/.config/markdownlint-cli/.markdownlint.json"
   _dry "Would create directory: ~/.local/bin"
   _dry "Would symlink: ~/.local/bin/gh -> ~/.config/bash/gh-wrapper.sh"
+  _dry "Would symlink: ~/.local/bin/gpush -> ~/.config/bash/gpush-wrapper.sh"
 else
   _ensure_symlink "${HOME}/.config/bash/.bash_profile" "${HOME}/.bash_profile"
   _ensure_symlink "${HOME}/.config/dig/digrc" "${HOME}/.digrc"
@@ -267,6 +268,7 @@ else
   # (CREATE DIRECTORIES) runs after this block, so it's created here instead.
   mkdir -p "${HOME}/.local/bin"
   _ensure_symlink "${HOME}/.config/bash/gh-wrapper.sh" "${HOME}/.local/bin/gh"
+  _ensure_symlink "${HOME}/.config/bash/gpush-wrapper.sh" "${HOME}/.local/bin/gpush"
 fi
 
 # ============================================================================

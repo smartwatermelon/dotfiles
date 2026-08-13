@@ -887,130 +887,19 @@ lp_mode() {
 # Not exported - interactive command only
 
 # ============================================================================
-# Git CLI Wrapper
+# Git Wrapper (post-init hook trigger)
 # ============================================================================
-# Intercepts `git init` to trigger automatic .claude/ infrastructure creation
-# All other git commands pass through unchanged
-#
-# SIMPLIFIED: Uses git rev-parse to find repo location, eliminating complex
-# argument parsing. The init.templateDir already copies hooks, we just need
-# to trigger post-checkout.
+# Canonical implementation lives in git-wrapper.sh (sourced below). See that
+# file for why git, unlike gh, doesn't also get a standalone ~/.local/bin
+# executable mode.
 
-git() {
-  # Guard against recursive calls
-  if [[ -n "${_GIT_WRAPPER_ACTIVE:-}" ]]; then
-    command git "$@"
-    return $?
-  fi
-
-  # Run the real git command first
-  command git "$@"
-  local git_result=$?
-
-  # Only proceed if command succeeded and was "git init"
-  # Find subcommand, -C flag, and optional directory argument
-  local is_init=false
-  local init_dir=""
-  local c_flag_dir=""
-  local found_subcommand=false
-  local next_is_c_arg=false
-
-  for arg in "$@"; do
-    # Capture argument after -C flag
-    if [[ "${next_is_c_arg}" == "true" ]]; then
-      c_flag_dir="${arg}"
-      next_is_c_arg=false
-      continue
-    fi
-
-    # Check for -C flag (git only supports "-C <path>" with space, not "-C<path>")
-    if [[ "${arg}" == "-C" ]]; then
-      next_is_c_arg=true
-      continue
-    fi
-
-    # Skip other flags
-    if [[ "${arg}" == -* ]]; then
-      continue
-    fi
-
-    # First non-flag is the subcommand
-    if [[ "${found_subcommand}" == "false" ]]; then
-      [[ "${arg}" == "init" ]] && is_init=true
-      found_subcommand=true
-      continue
-    fi
-
-    # Second non-flag (after "init") is the directory
-    if [[ "${is_init}" == "true" && -z "${init_dir}" ]]; then
-      init_dir="${arg}"
-      break
-    fi
-  done
-
-  # Determine the target directory: -C flag takes precedence, then init_dir
-  local target_dir=""
-  if [[ -n "${c_flag_dir}" && -n "${init_dir}" ]]; then
-    # Both -C and directory arg: combine them
-    target_dir="${c_flag_dir}/${init_dir}"
-  elif [[ -n "${c_flag_dir}" ]]; then
-    # Just -C flag
-    target_dir="${c_flag_dir}"
-  elif [[ -n "${init_dir}" ]]; then
-    # Just directory arg
-    target_dir="${init_dir}"
-  fi
-
-  if ((git_result != 0)) || [[ "${is_init}" != "true" ]]; then
-    return "${git_result}"
-  fi
-
-  # Set guard to prevent recursion in hooks
-  # Exported so child processes (hooks) also bypass wrapper
-  export _GIT_WRAPPER_ACTIVE=1
-
-  # Save current directory if we need to change it
-  local original_dir=""
-  if [[ -n "${target_dir}" ]]; then
-    original_dir=$(pwd)
-  fi
-
-  # Trap to cleanup guard and restore directory
-  # Use ${var:-} for set -u safety — locals may be out of scope in inherited contexts
-  trap 'unset _GIT_WRAPPER_ACTIVE; [[ -n "${original_dir:-}" ]] && cd "${original_dir:-}" 2>/dev/null || true' RETURN
-
-  # If init created a repo in a different directory, cd there first
-  # This makes git rev-parse work from inside the new repo
-  if [[ -n "${target_dir}" ]]; then
-    if ! cd "${target_dir}" 2>/dev/null; then
-      echo "Error: Cannot cd to ${target_dir}" >&2
-      return 1 # Return failure, not git_result
-    fi
-  fi
-
-  # Let git tell us where the .git directory is
-  # We're now inside the repo, so this returns ".git" (relative path)
-  local git_dir
-  git_dir=$(command git rev-parse --git-dir 2>/dev/null)
-
-  if [[ -n "${git_dir}" ]]; then
-    local post_checkout="${git_dir}/hooks/post-checkout"
-
-    if [[ -x "${post_checkout}" ]]; then
-      # Run hook with init parameters
-      # Parameters: <prev-head> <new-head> <branch-checkout-flag>
-      # Both SHAs are null since there are no commits yet after git init
-      # Note: We're already in repo root, no need to cd again
-      local null_sha="0000000000000000000000000000000000000000"
-      if ! "${post_checkout}" "${null_sha}" "${null_sha}" 1; then
-        echo "Warning: post-checkout hook execution failed" >&2
-      fi
-    fi
-  fi
-
-  return "${git_result}"
-}
-export -f git # Exported - overrides system git command globally
+if [[ -f "${HOME}/.config/bash/git-wrapper.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${HOME}/.config/bash/git-wrapper.sh"
+else
+  echo "[git] WARNING: ${HOME}/.config/bash/git-wrapper.sh not found — git init post-checkout hook trigger is NOT active." >&2
+  echo "[git] Run install.sh to restore it." >&2
+fi
 
 # ============================================================================
 # GitHub CLI Wrapper
@@ -1042,217 +931,19 @@ else
 fi
 
 # ============================================================================
-# gpush — Push, create PR, wait for CI, merge, and clean up in one command
+# gpush — push, PR, watch CI, confirm+merge
 # ============================================================================
-# Usage: gpush [--no-merge]
-#   --no-merge  Stop after CI passes (don't authorize or merge)
-#
-# Not exported — user-facing convenience function only
+# Canonical implementation lives in gpush-wrapper.sh (sourced below), which
+# also doubles as the standalone ~/.local/bin/gpush executable when
+# symlinked and run directly. See that file for how the two modes work.
 
-gpush() {
-  # Validate arguments
-  case "${1:-}" in
-    --no-merge) ;;
-    "") ;;
-    *)
-      echo "Usage: gpush [--no-merge]" >&2
-      return 1
-      ;;
-  esac
-
-  local no_merge=false
-  if [[ "${1:-}" == "--no-merge" ]]; then
-    no_merge=true
-  fi
-
-  local GREEN='\033[0;32m'
-  local RED='\033[0;31m'
-  local BLUE='\033[0;34m'
-  local NC='\033[0m'
-
-  # Step 1: Guard — refuse to run on main/master
-  local branch
-  branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
-  if [[ -z "${branch}" || "${branch}" == "main" || "${branch}" == "master" ]]; then
-    echo -e "${RED}[gpush]${NC} Refusing to run on ${branch:-detached HEAD}. Create a branch first." >&2
-    return 1
-  fi
-  echo -e "${BLUE}[gpush]${NC} Branch: ${branch}"
-
-  # Step 2: Push
-  echo -e "${BLUE}[gpush]${NC} Pushing to origin..."
-  if ! git push -u origin HEAD; then
-    echo -e "${RED}[gpush]${NC} Push failed." >&2
-    return 1
-  fi
-
-  # Step 3: Create PR (or detect existing one)
-  local pr_number=""
-  local pr_output
-  echo -e "${BLUE}[gpush]${NC} Creating PR..."
-  if pr_output=$(gh pr create --fill 2>&1); then
-    # Extract PR number from URL in output (last line is typically the URL)
-    pr_number=$(echo "${pr_output}" | grep -oE '/pull/[0-9]+' | tail -1 | grep -oE '[0-9]+')
-    if [[ -z "${pr_number}" ]]; then
-      echo -e "${RED}[gpush]${NC} Could not parse PR number from create output." >&2
-      echo "${pr_output}" >&2
-      return 1
-    fi
-    echo -e "${GREEN}[gpush]${NC} Created PR #${pr_number}"
-  else
-    # PR may already exist
-    if echo "${pr_output}" | grep -qi "already exists"; then
-      pr_number=$(gh pr view --json number -q .number 2>/dev/null)
-      if [[ -n "${pr_number}" ]]; then
-        echo -e "${BLUE}[gpush]${NC} PR #${pr_number} already exists, continuing"
-      else
-        echo -e "${RED}[gpush]${NC} PR already exists but could not retrieve its number — check 'gh pr view' manually." >&2
-        return 1
-      fi
-    fi
-    if [[ -z "${pr_number}" ]]; then
-      echo -e "${RED}[gpush]${NC} Failed to create PR:" >&2
-      echo "${pr_output}" >&2
-      return 1
-    fi
-  fi
-
-  # Step 4: Watch CI (use gh run watch — gh pr checks fails with PAT errors)
-  # Anchor on the pushed commit SHA to avoid watching a stale run from a prior push.
-  # A push can trigger multiple workflow runs (e.g. "Claude Blocking Review" +
-  # "Dependabot Auto-Merge"). We fetch all runs for the commit, watch each one,
-  # and skip runs whose workflow name matches ignorable_when_skipped when their
-  # conclusion is "skipped" (e.g. Dependabot workflows on non-Dependabot branches).
-  local head_sha
-  head_sha=$(git rev-parse HEAD)
-  echo -e "${BLUE}[gpush]${NC} Waiting for CI runs on ${head_sha:0:7}..."
-
-  local ignorable_when_skipped=("Dependabot")
-  local all_runs=""
-  local attempts=0
-  while [[ -z "${all_runs}" && ${attempts} -lt 15 ]]; do
-    all_runs=$(gh run list --branch "${branch}" --commit "${head_sha}" --json databaseId,name -q '.[] | (.databaseId | tostring) + "\t" + .name' 2>/dev/null || true)
-    if [[ -z "${all_runs}" ]]; then
-      ((attempts += 1))
-      sleep 2
-    fi
-  done
-  if [[ -z "${all_runs}" ]]; then
-    echo -e "${RED}[gpush]${NC} No CI runs found for ${head_sha:0:7} after 30s. Check GitHub Actions." >&2
-    return 1
-  fi
-
-  # Re-poll after a short delay to catch late-registering workflows.
-  # Only adopt the result if non-empty — a transient API failure must not
-  # discard the known-good first poll.
-  sleep 3
-  local repoll
-  repoll=$(gh run list --branch "${branch}" --commit "${head_sha}" --json databaseId,name -q '.[] | (.databaseId | tostring) + "\t" + .name' 2>/dev/null || true)
-  if [[ -n "${repoll}" ]]; then
-    all_runs=$(printf '%s\n%s\n' "${all_runs}" "${repoll}" | sort -u -t$'\t' -k1,1)
-  fi
-
-  local ci_passed=false
-  local ci_failed=false
-  local fail_detail=""
-  local run_id run_name pattern
-  while IFS=$'\t' read -r run_id run_name; do
-    [[ -z "${run_id}" ]] && continue
-    echo -e "${BLUE}[gpush]${NC} Watching run ${run_id} (${run_name})..."
-    timeout 3600 gh run watch "${run_id}" >/dev/null 2>&1 || true
-
-    local run_conclusion
-    run_conclusion=$(gh run view "${run_id}" --json conclusion --jq '.conclusion') || {
-      echo -e "${RED}[gpush]${NC} Failed to query run ${run_id} status." >&2
-      return 1
-    }
-
-    if [[ -z "${run_conclusion}" || "${run_conclusion}" == "null" ]]; then
-      echo -e "${RED}[gpush]${NC} CI run ${run_id} did not complete within 1 hour — check status manually: gh run view ${run_id}" >&2
-      return 1
-    fi
-
-    if [[ "${run_conclusion}" == "success" ]]; then
-      echo -e "${GREEN}[gpush]${NC} Passed: ${run_name}"
-      ci_passed=true
-    elif [[ "${run_conclusion}" == "skipped" ]]; then
-      local ignorable=false
-      for pattern in "${ignorable_when_skipped[@]}"; do
-        if [[ "${run_name}" == *"${pattern}"* ]]; then
-          ignorable=true
-          break
-        fi
-      done
-      if [[ "${ignorable}" == true ]]; then
-        echo -e "${BLUE}[gpush]${NC} Ignoring skipped run: ${run_name}"
-      else
-        ci_failed=true
-        fail_detail+="${run_name}: ${run_conclusion}; "
-      fi
-    else
-      ci_failed=true
-      fail_detail+="${run_name}: ${run_conclusion}; "
-    fi
-  done <<<"${all_runs}"
-
-  if [[ "${ci_failed}" == true ]]; then
-    fail_detail="${fail_detail%; }"
-    echo -e "${RED}[gpush]${NC} CI failed (${fail_detail}). Fix and re-run gpush." >&2
-    return 1
-  fi
-  if [[ "${ci_passed}" == false ]]; then
-    echo -e "${RED}[gpush]${NC} No CI runs succeeded (all were skipped). Check GitHub Actions." >&2
-    return 1
-  fi
-  echo -e "${GREEN}[gpush]${NC} CI passed"
-
-  if [[ "${no_merge}" == true ]]; then
-    echo -e "${GREEN}[gpush]${NC} --no-merge: stopping after CI. PR #${pr_number} is ready."
-    return 0
-  fi
-
-  # Step 5: Confirm and authorize merge
-  local confirm
-  echo ""
-  read -r -p "[gpush] Merge PR #${pr_number}? [y/N] " confirm
-  if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
-    echo -e "${BLUE}[gpush]${NC} Merge cancelled. PR #${pr_number} is ready for manual merge."
-    return 0
-  fi
-
-  if ! command -v merge-lock &>/dev/null; then
-    echo -e "${RED}[gpush]${NC} merge-lock not found on PATH." >&2
-    return 1
-  fi
-  if ! merge-lock auth "${pr_number}" "gpush"; then
-    echo -e "${RED}[gpush]${NC} merge-lock authorization failed." >&2
-    return 1
-  fi
-
-  # Step 6: Merge (goes through gh wrapper → pre-merge-review.sh)
-  echo -e "${BLUE}[gpush]${NC} Merging PR #${pr_number}..."
-  if ! gh pr merge "${pr_number}" --squash --delete-branch; then
-    echo -e "${RED}[gpush]${NC} Merge failed. Check pre-merge review output above." >&2
-    return 1
-  fi
-  echo -e "${GREEN}[gpush]${NC} PR #${pr_number} merged"
-
-  # Step 7: Cleanup — handle each step independently
-  local default_branch
-  default_branch=$(git remote show origin 2>/dev/null | awk '/HEAD branch/ {print $NF}')
-  default_branch="${default_branch:-main}"
-  echo -e "${BLUE}[gpush]${NC} Cleaning up..."
-  if ! git switch "${default_branch}"; then
-    echo -e "${RED}[gpush]${NC} Failed to switch to ${default_branch}." >&2
-    return 1
-  fi
-  if ! git pull --ff-only; then
-    echo -e "${RED}[gpush]${NC} Fast-forward pull of ${default_branch} failed — local branch has diverged from origin. Resolve manually with 'git pull' or 'git rebase'." >&2
-    return 1
-  fi
-  git branch -D "${branch}" 2>/dev/null || true
-  echo -e "${GREEN}[gpush]${NC} Done. Back on ${default_branch}."
-}
+if [[ -f "${HOME}/.config/bash/gpush-wrapper.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${HOME}/.config/bash/gpush-wrapper.sh"
+else
+  echo "[gpush] WARNING: ${HOME}/.config/bash/gpush-wrapper.sh not found — gpush is unavailable." >&2
+  echo "[gpush] Run install.sh to restore it." >&2
+fi
 
 # ============================================================================
 # 1Password Helper
