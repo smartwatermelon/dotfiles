@@ -8,6 +8,9 @@
 # logic to duplicate, since gpush already goes through the git and gh
 # wrappers for anything security-relevant):
 #
+# Usage: gpush [--no-merge]
+#   --no-merge  Stop after CI passes (don't authorize or merge)
+#
 #   1. Sourced from functions.sh: defines gpush() as a bash function.
 #   2. Symlinked as ~/.local/bin/gpush and executed directly: runs gpush
 #      with the script's own arguments. This exists purely so gpush can be
@@ -228,5 +231,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   gpush "$@"
 else
   # --- Function-definition mode (sourced from functions.sh) ---
-  export -f gpush
+  # Deliberately NOT exported — user-facing interactive command only.
+  # Subshell/non-bash access is served by the ~/.local/bin/gpush symlink.
+  :
 fi

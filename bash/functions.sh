@@ -931,14 +931,6 @@ else
 fi
 
 # ============================================================================
-# gpush — Push, create PR, wait for CI, merge, and clean up in one command
-# ============================================================================
-# Usage: gpush [--no-merge]
-#   --no-merge  Stop after CI passes (don't authorize or merge)
-#
-# Not exported — user-facing convenience function only
-
-# ============================================================================
 # gpush — push, PR, watch CI, confirm+merge
 # ============================================================================
 # Canonical implementation lives in gpush-wrapper.sh (sourced below), which
