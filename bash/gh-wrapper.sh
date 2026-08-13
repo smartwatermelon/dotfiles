@@ -222,10 +222,14 @@ _gh_wrapper_maybe_review() {
 # itself with creation time. See smartwatermelon/dotfiles#174.
 #
 # Bash can't let a function reassign the caller's positional params, so this
-# prints the (possibly modified) argument list, one arg per line, on stdout;
-# the caller rebuilds its array with `mapfile`/`readarray`. Always prints
-# something — even when no change is needed — so callers can unconditionally
-# replace their arg array from the output.
+# prints the (possibly modified) argument list, NUL-separated, on stdout; the
+# caller rebuilds its array with `mapfile -d ''`. NUL (not newline) because
+# argument values themselves may contain embedded newlines (e.g. a multi-line
+# --body) — a newline delimiter can't be told apart from one inside a value,
+# which shreds such args into multiple positional params downstream. NUL
+# cannot appear in a shell argument, so it's an unambiguous separator. Always
+# prints something — even when no change is needed — so callers can
+# unconditionally replace their arg array from the output.
 #
 # Parses args with the same sub/subsub walk as _gh_wrapper_maybe_review, so
 # `pr create` detection can't drift between the two.
@@ -264,15 +268,18 @@ _gh_wrapper_force_draft_for_off_org() {
           # caller already passed --draft (or --draft=false, which gh doesn't
           # support as a real flag) — an extra --draft is harmless, and the
           # point is nothing the caller does can produce a non-draft PR here.
-          printf '%s\n' "$@"
-          printf -- '--draft\n'
+          printf '%s\0' "$@"
+          printf -- '--draft\0'
           return 0
           ;;
       esac
     fi
   fi
 
-  printf '%s\n' "$@"
+  # printf with zero operands still runs its format string once, emitting a
+  # single stray NUL for `"$@"` empty — guard so zero args truly produces
+  # zero bytes of output, matching `mapfile -d ''`'s empty-array behavior.
+  [[ "$#" -gt 0 ]] && printf '%s\0' "$@"
   return 0
 }
 
@@ -310,14 +317,24 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
       # Off-org `gh pr create` must land as a draft — hard, mechanical,
       # no opt-out. Rebuild the positional params from the (possibly
       # --draft-appended) output; a function can't reassign "$@" directly.
-      # Captured via command substitution (not process substitution) so the
-      # function's own exit status isn't masked from `set -e`. Only rebuild
-      # when there's at least one original arg — with zero args, `mapfile
-      # <<<""` would otherwise produce a single empty-string element instead
-      # of an empty array, turning bare `gh` into `gh ""`.
+      # NUL-delimited via process substitution (mapfile -d '' requires it —
+      # command substitution can't carry NUL bytes at all; bash discards
+      # them outright, so the NUL contract is structurally impossible
+      # through `$(...)`). `|| true` is just to satisfy shellcheck SC2312
+      # (don't mask a pipeline component's exit status): the function
+      # always returns 0, so there's no real status being discarded. Only
+      # rebuild when there's at least one original arg.
       if [[ "$#" -gt 0 ]]; then
-        _gh_wrapper_new_args_raw="$(_gh_wrapper_force_draft_for_off_org "$@")"
-        mapfile -t _gh_wrapper_new_args <<<"${_gh_wrapper_new_args_raw}"
+        mapfile -t -d '' _gh_wrapper_new_args < <(_gh_wrapper_force_draft_for_off_org "$@" || true)
+        # The function is contractually guaranteed to emit at least as many
+        # elements as it received (it only ever appends --draft, never
+        # drops args). A short rebuild means the producer failed partway
+        # through — trust nothing and refuse rather than silently exec'ing
+        # gh with a truncated command line (which could drop --draft itself).
+        if [[ "${#_gh_wrapper_new_args[@]}" -lt "$#" ]]; then
+          echo "[gh] ERROR: internal arg rebuild truncated; refusing to proceed" >&2
+          exit 1
+        fi
         set -- "${_gh_wrapper_new_args[@]}"
       fi
     fi
@@ -378,13 +395,19 @@ else
     # Off-org `gh pr create` must land as a draft — hard, mechanical, no
     # opt-out. Rebuild the positional params from the (possibly
     # --draft-appended) output; a function can't reassign "$@" directly.
-    # Only rebuild when there's at least one original arg — with zero args,
-    # `mapfile <<<""` would otherwise produce a single empty-string element
-    # instead of an empty array, turning bare `gh` into `gh ""`.
+    # NUL-delimited via process substitution — see the standalone-mode call
+    # site above for why (embedded newlines in arg values, e.g. --body).
+    # Only rebuild when there's at least one original arg.
     if [[ "$#" -gt 0 ]]; then
-      local _gh_wrapper_new_args _gh_wrapper_new_args_raw
-      _gh_wrapper_new_args_raw="$(_gh_wrapper_force_draft_for_off_org "$@")"
-      mapfile -t _gh_wrapper_new_args <<<"${_gh_wrapper_new_args_raw}"
+      local _gh_wrapper_new_args
+      mapfile -t -d '' _gh_wrapper_new_args < <(_gh_wrapper_force_draft_for_off_org "$@" || true)
+      # See the standalone-mode call site above: a short rebuild means the
+      # producer failed partway through — refuse rather than silently
+      # exec'ing gh with a truncated command line.
+      if [[ "${#_gh_wrapper_new_args[@]}" -lt "$#" ]]; then
+        echo "[gh] ERROR: internal arg rebuild truncated; refusing to proceed" >&2
+        return 1
+      fi
       set -- "${_gh_wrapper_new_args[@]}"
     fi
 

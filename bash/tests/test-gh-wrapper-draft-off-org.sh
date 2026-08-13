@@ -27,9 +27,7 @@ assert_args() {
   local expected_has_draft="$1"
   shift
   local -a got=()
-  local out
-  out="$(_gh_wrapper_force_draft_for_off_org "$@")"
-  mapfile -t got <<<"${out}"
+  mapfile -t -d '' got < <(_gh_wrapper_force_draft_for_off_org "$@" || true)
 
   local has_draft=0 a
   for a in "${got[@]}"; do
@@ -70,11 +68,22 @@ assert_args "off-org pr create --help (function itself is harmless)" 1 pr create
 # once more isn't required to be deduped, just confirm it's present.
 assert_args "off-org pr create with explicit --draft already present" 1 pr create --repo someoutsideorg/foo --draft --title x
 
+# Regression for smartwatermelon/dotfiles#186: a --body value containing
+# embedded newlines must survive the arg-list rebuild intact as a single
+# argument, not get shredded into multiple positional params at each \n.
+multiline_body="$(printf 'line one\nline two\nline three')"
+mapfile -t -d '' multiline_got < <(_gh_wrapper_force_draft_for_off_org pr create --repo smartwatermelon/dotfiles --title x --body "${multiline_body}" || true)
+if [[ "${#multiline_got[@]}" == "8" && "${multiline_got[7]}" == "${multiline_body}" ]]; then
+  echo "PASS: multi-line --body value survives arg rebuild intact"
+else
+  echo "FAIL: multi-line --body value was shredded (count=${#multiline_got[@]}): ${multiline_got[*]@Q}"
+  fail=1
+fi
+
 # Zero args: must not error and must not fabricate an argument.
-out="$(_gh_wrapper_force_draft_for_off_org)"
-mapfile -t zero_args <<<"${out}"
-if [[ "${#zero_args[@]}" == "1" && -z "${zero_args[0]}" ]]; then
-  echo "PASS: zero-arg call produces a single empty line (caller guards against rebuilding \$@ from this)"
+mapfile -t -d '' zero_args < <(_gh_wrapper_force_draft_for_off_org || true)
+if [[ "${#zero_args[@]}" == "0" ]]; then
+  echo "PASS: zero-arg call produces an empty array"
 else
   echo "FAIL: zero-arg call produced unexpected output: ${zero_args[*]}"
   fail=1
