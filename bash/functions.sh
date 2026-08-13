@@ -786,6 +786,16 @@ allup() {
 }
 # Not exported - interactive command only
 
+# Where is a particular shell function declared?
+# "where-func"
+wf() {
+  (
+    shopt -s extdebug
+    declare -F "$@"
+  )
+}
+# Not exported
+
 # Extract compressed files (handles multiple formats)
 extract() {
   if [[ -f "$1" ]]; then
