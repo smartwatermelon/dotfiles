@@ -33,14 +33,14 @@ assert_fails() {
 # Case 1: unknown flag rejected
 assert_fails "gpush --bogus-flag rejected" gpush --bogus-flag
 
-# Case 2: other invalid first argument rejected
-assert_fails "gpush --invalid-flag rejected" bash -c 'source '"${BASH_CONFIG_DIR}"'/gpush-wrapper.sh; gpush --invalid-flag'
+# Case 2: too many arguments rejected
+assert_fails "gpush --no-merge extra-arg rejected" bash -c 'source '"${BASH_CONFIG_DIR}"'/gpush-wrapper.sh; gpush --no-merge extra-arg'
 
-# Case 3: refuses to run on main — stub `git symbolic-ref` to report main
+# Case 3: refuses to run on main — use real git repo and real main branch
 WORKDIR="/tmp/gpush-wrapper-guard-test-$$"
 mkdir -p "${WORKDIR}"
 trap 'rm -rf "${WORKDIR}"' EXIT
-(cd "${WORKDIR}" && command git init -q -b main && command git commit -q --allow-empty -m init)
+(cd "${WORKDIR}" && /usr/bin/git init -q -b main && /usr/bin/git commit -q --allow-empty -m init)
 
 main_test_output=$(/bin/bash -c '
   cd "'"${WORKDIR}"'" || exit 1
@@ -69,26 +69,31 @@ if [[ ${main_exit} -ne 0 ]]; then
 fi
 rm -f "/tmp/gpush-test-main-$$"
 
-# Case 4: refuses to run on detached HEAD — test using git mock via PATH
-# Since creating a real detached HEAD is complex with git wrappers, we use
-# PATH-based mocking to intercept both bare git and command git calls.
+# Case 4: refuses to run on detached HEAD — use real git repo and real detached HEAD
+# Use a separate temp directory to avoid interference from main repo's git wrappers
 detached_test_output=$(/bin/bash -c '
-  tmpdir=$(mktemp -d)
-  cat > "${tmpdir}/git" << '"'"'EOF'"'"'
-#!/bin/bash
-if [[ "$1" == "symbolic-ref" ]] && [[ "$2" == "--short" ]]; then
-  exit 1  # Simulates detached HEAD detection failure
-fi
-exec /usr/bin/git "$@"
-EOF
-  chmod +x "${tmpdir}/git"
-  export PATH="${tmpdir}:${PATH}"
+  tmpwork=$(mktemp -d)
+  cd "${tmpwork}" || exit 1
+  trap "rm -rf ${tmpwork}" RETURN
 
+  # Use /usr/bin/git to bypass any wrapper functions
+  /usr/bin/git init -q -b main
+  /usr/bin/git commit -q --allow-empty -m "init"
+
+  # Get the SHA of the first commit
+  first_commit=$(/usr/bin/git rev-list --max-parents=0 HEAD)
+
+  # Create a second commit
+  /usr/bin/git commit -q --allow-empty -m "second"
+
+  # Checkout the first commit to create real detached HEAD
+  /usr/bin/git checkout -q --detach "${first_commit}"
+
+  #shellcheck source=/dev/null
   source "'"${BASH_CONFIG_DIR}"'/gpush-wrapper.sh"
 
   gpush_output=$(gpush 2>&1)
   gpush_exit=$?
-  rm -rf "${tmpdir}"
 
   if [[ ${gpush_exit} -eq 0 ]]; then
     echo "FAIL: gpush on detached HEAD — expected non-zero exit, got 0"
