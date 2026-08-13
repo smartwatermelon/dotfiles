@@ -227,9 +227,11 @@ _gh_wrapper_maybe_review() {
 # argument values themselves may contain embedded newlines (e.g. a multi-line
 # --body) — a newline delimiter can't be told apart from one inside a value,
 # which shreds such args into multiple positional params downstream. NUL
-# cannot appear in a shell argument, so it's an unambiguous separator. Always
-# prints something — even when no change is needed — so callers can
-# unconditionally replace their arg array from the output.
+# cannot appear in a shell argument, so it's an unambiguous separator. Prints
+# nothing for zero args (callers already guard with `[[ "$#" -gt 0 ]]`
+# accordingly); otherwise always prints at least the original args,
+# NUL-separated, so callers can unconditionally replace their arg array
+# from the output.
 #
 # Parses args with the same sub/subsub walk as _gh_wrapper_maybe_review, so
 # `pr create` detection can't drift between the two.
