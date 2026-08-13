@@ -100,7 +100,10 @@ for f in "$@"; do
     # .editorconfig and defer to it when present; otherwise fall back to our
     # own defaults so repos without one keep prior behavior.
     shfmt_flags=()
-    editorconfig_dir="$(cd "$(dirname "${f}")" && pwd)"
+    # CDPATH='' scopes out CDPATH for this cd so it can't resolve via CDPATH
+    # search and echo the resolved path into this command substitution
+    # (see smartwatermelon/dotfiles#176).
+    editorconfig_dir="$(CDPATH='' cd "$(dirname "${f}")" && pwd)"
     has_editorconfig=false
     while true; do
       if [[ -f "${editorconfig_dir}/.editorconfig" ]]; then

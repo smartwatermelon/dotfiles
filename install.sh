@@ -50,7 +50,12 @@ if [[ "${detected_os}" != "Darwin" ]]; then
   exit 1
 fi
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# CDPATH='' scopes out CDPATH for this one invocation so `cd` can never
+# resolve via CDPATH search and echo the resolved path to stdout, which
+# would otherwise corrupt this command substitution if the caller's shell
+# has CDPATH exported and dirname's output happens to match a CDPATH
+# entry by bare name (see smartwatermelon/dotfiles#176).
+REPO_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -d "${REPO_DIR}/.git" ]]; then
   _err "Not a git repository: ${REPO_DIR}"
