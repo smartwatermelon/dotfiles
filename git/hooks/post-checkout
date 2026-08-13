@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Deployed via core.hooksPath (~/.config/git/hooks/post-checkout) so it
+# fires on `git clone` and real branch-switch `git checkout` — cases
+# git resolves through core.hooksPath, not a repo's own .git/hooks/ or
+# init.templateDir. `git init` doesn't need this delegate: bash/git-wrapper.sh
+# invokes git/template/hooks/post-checkout directly by path after init,
+# bypassing hook resolution entirely.
+set -euo pipefail
+
+REPO_DIR="${HOME}/Developer/dotfiles"
+exec "${REPO_DIR}/git/template/hooks/post-checkout" "$@"
