@@ -21,21 +21,28 @@ pre-commit/
 
 ### Python
 
-**Black** (Formatter)
-
-- **Repo**: <https://github.com/psf/black>
-- **Version**: 25.1.0
-- **Args**: `--quiet`
-- **Purpose**: Opinionated Python code formatter
-- **When**: Runs on all Python files
+**No global formatter** — by design (see
+[#190](https://github.com/smartwatermelon/dotfiles/issues/190)). `black` used
+to run here and rewrote source in place at its 88-column default, which
+reformatted untouched lines in repos pinning a different width and produced
+commits that failed those repos' own format checks. Formatting is now each
+repo's own call: declare `black`, `ruff format`, or nothing in that repo's
+`.pre-commit-config.yaml`, where the repo's line length and layout are known.
 
 **Flake8** (Linter)
 
 - **Repo**: <https://github.com/PyCQA/flake8>
 - **Version**: 7.3.0
 - **Extensions**: flake8-bugbear (additional checks for common bugs)
-- **Purpose**: Style guide enforcement (PEP 8)
+- **Args**: `--max-line-length=88 --extend-ignore=E501,E402`
+- **Purpose**: Bug detection (pyflakes `F` codes + bugbear `B` codes)
 - **When**: Runs on all Python files
+- **Note**: reports only, never rewrites. `E501` (line length) is a
+  formatter's job and varies per repo; `E402` misfires on the legitimate
+  `sys.path.insert(...)`-before-import idiom. Both are left to repo-local
+  tooling, which has the context to judge them. With `E501` off,
+  `--max-line-length` is inert — it is set only to keep the 79-column
+  default from applying — so no line-length rule is imposed globally.
 
 ### Shell Scripts
 
@@ -140,7 +147,7 @@ pre-commit run --all-files
 Run specific hook:
 
 ```bash
-pre-commit run black --all-files
+pre-commit run flake8 --all-files
 pre-commit run shell-lint-fix --all-files
 ```
 
@@ -206,7 +213,7 @@ brew install pre-commit
 
 ### Local vs Remote Hooks
 
-**Remote hooks** (Python — black, flake8):
+**Remote hooks** (Python — flake8):
 
 - Downloaded and managed by pre-commit framework
 - Isolated in their own virtualenvs
@@ -272,7 +279,7 @@ Example of adding a new hook:
 Use `exclude` to skip specific files:
 
 ```yaml
-- id: black
+- id: flake8
   exclude: ^migrations/
 ```
 
@@ -309,7 +316,7 @@ pre-commit install
 Skip expensive hooks temporarily:
 
 ```bash
-SKIP=black,flake8 git commit -m "message"
+SKIP=flake8,semgrep-secrets git commit -m "message"
 ```
 
 ### Hook auto-fix conflicts

@@ -101,7 +101,7 @@ All 11 original repositories were archived on GitHub after the merge.
 
 This repo uses global git hooks from `~/.config/git/hooks/`. See `git/README.md` for details on the hook system, which includes:
 
-- **Pre-commit**: Linting (shell, YAML, markdown, HTML), formatting (black, prettier), and automated code review
+- **Pre-commit**: Linting (shell, YAML, markdown, HTML, Python), formatting (prettier), and automated code review
 - **Pre-push**: Push-target validation (blocks direct pushes to `main`)
 - **Commit-msg**: Conventional commit format enforcement
 
