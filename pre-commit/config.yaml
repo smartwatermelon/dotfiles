@@ -17,21 +17,62 @@ repos:
         pass_filenames: true
         exclude_types: [binary]
 
-  # Python formatting and linting (installed via GitHub repos)
-  - repo: https://github.com/psf/black
-    rev: 25.1.0
-    hooks:
-      - id: black
-        name: "Python Formatter (black)"
-        args: [--quiet]
-        verbose: true
-
+  # Python linting
+  #
+  # There is deliberately NO global Python *formatter* here — see
+  # smartwatermelon/dotfiles#190. `black` used to run globally with `--quiet`
+  # (i.e. its 88-column default) and rewrote source in place. In any repo that
+  # pins a different line length, or that uses `ruff format` instead of black,
+  # that produced two failures at once: it reformatted lines the author never
+  # touched, and the resulting commit failed that repo's own format check.
+  #
+  # Measured on smartwatermelon/claude-code-workflows-agents (ruff, line-length
+  # 100): a one-line comment-only edit to tools/doc_gardener.py caused black to
+  # rewrite 19 additional lines, after which `ruff format --check` reported
+  # "1 file would be reformatted" — the commit would have failed CI.
+  #
+  # Detecting "does this repo have its own opinion?" and skipping — the pattern
+  # used by the markdownlint hook below (#116) — was evaluated and rejected for
+  # formatters. It relies on a config file at the repo root, and that repo has
+  # none: no root pyproject.toml and no .pre-commit-config.yaml. Its ruff
+  # settings live in plugins/plugin-eval/pyproject.toml, and CI runs ruff from
+  # that directory against files outside it. A root-level probe finds nothing
+  # and concludes "safe to format" — failing on the exact repo that prompted
+  # this. Which nested config governs a given file is not knowable from a
+  # global hook, so formatting is left to each repo's own
+  # .pre-commit-config.yaml, where that context exists.
+  #
+  # Linting stays global: flake8 reports, it does not rewrite, so the
+  # worst case is a message rather than a broken commit.
   - repo: https://github.com/PyCQA/flake8
     rev: 7.3.0
     hooks:
       - id: flake8
         name: "Python Lint (flake8)"
         additional_dependencies: [flake8-bugbear]
+        # flake8 defaults to max-line-length 79, which is stricter than every
+        # formatter in use here (black 88, ruff commonly 88-100) — so an
+        # unconfigured flake8 flags correctly-formatted code, including
+        # black's own output. Line length is a formatter's job and varies per
+        # repo, so E501 is disabled outright. This leaves flake8 doing what it
+        # is uniquely good at globally: real bug detection (pyflakes F-codes +
+        # bugbear B-codes).
+        #
+        # --max-line-length=88 is therefore inert today and kept only so that
+        # nothing silently falls back to the 79 default: with E501 off, the
+        # sole other consumer is bugbear's B950, which is opt-in via
+        # extend-select and not enabled here. Verified: a 126-char line
+        # passes. No global line-length opinion is imposed on any repo.
+        #
+        # E402 (import not at top of file) is also ignored: it fires on the
+        # standard `sys.path.insert(...)` -before- import idiom that scripts
+        # outside an installed package need, which is legitimate rather than a
+        # defect. Repos that care about import ordering enforce it locally
+        # (ruff's I-rules) with the context to tell the cases apart.
+        # NOTE: the ignore list must be quoted — unquoted, YAML flow-sequence
+        # syntax splits it at the comma and flake8 receives "E402" as a
+        # filename (E902 FileNotFoundError) instead of a rule code.
+        args: ["--max-line-length=88", "--extend-ignore=E501,E402"]
 
   # Shell linting and formatting using global script
   - repo: local
