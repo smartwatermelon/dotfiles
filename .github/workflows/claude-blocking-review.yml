@@ -18,7 +18,7 @@ jobs:
   # inside the job instead, so it still reports PASS. See
   # smartwatermelon/github-workflows#115/#117.
   claude-review:
-    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@v3.1.0
+    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@v3
     with:
       pr_number: ${{ github.event.pull_request.number }}
     secrets:
@@ -31,7 +31,7 @@ jobs:
   # inside the job instead, so it still reports PASS. See
   # smartwatermelon/github-workflows#115/#117.
   claude-review-haiku:
-    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@v3.1.0
+    uses: smartwatermelon/github-workflows/.github/workflows/claude-blocking-review.yml@v3
     with:
       pr_number: ${{ github.event.pull_request.number }}
       model: "claude-haiku-4-5-20251001"
