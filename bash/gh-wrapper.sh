@@ -74,15 +74,107 @@ _gh_wrapper_resolve_owner() {
   printf '%s\n' "${owner}"
 }
 
+# Directory whose subtree marks a checkout as Beacon work. Built from ${HOME}
+# so it resolves on any machine regardless of username (the work machine's
+# home is /Users/arich, this one's is /Users/andrewrich — same layout, so the
+# same default is correct for both). No trailing slash —
+# _gh_wrapper_is_beacon_context appends its own when matching.
+#
+# Whether a missing beacon dir is worth warning about depends on whether the
+# caller set it explicitly: an explicitly-configured path that doesn't exist is
+# a misconfiguration, while an unset default that doesn't exist is just a
+# machine with no Beacon work on it (the normal personal-machine state).
+#
+# That distinction is evaluated lazily, at check time, rather than being cached
+# in a variable here. A cached flag would be exported into subshells and go
+# stale the moment anything set GH_WRAPPER_BEACON_DIR after this file was
+# sourced — the stale value then silently decides whether the warning fires.
+# _gh_wrapper_beacon_dir_is_explicit re-derives it from the live environment on
+# every call, so setting the variable at any point behaves identically.
+_gh_wrapper_beacon_dir_is_explicit() {
+  [[ "${GH_WRAPPER_BEACON_DIR:-}" != "${_GH_WRAPPER_BEACON_DIR_DEFAULT}" ]]
+}
+
+_GH_WRAPPER_BEACON_DIR_DEFAULT="${HOME}/Developer/beacon-biosignals"
+: "${GH_WRAPPER_BEACON_DIR:=${_GH_WRAPPER_BEACON_DIR_DEFAULT}}"
+
+# Second-tier signal for the "Beacon work, but not under the beacon-biosignals
+# org" case: repos created/forked during Beacon work that live under a
+# personal or third-party owner (e.g. andrewmrich/git-pkgs-proxy, a fork of an
+# unrelated upstream). Owner name alone can't classify those, so fall back to
+# where the checkout lives and what it was forked from.
+#
+# Two signals, checked in order:
+#   1. The repo's toplevel is inside ${GH_WRAPPER_BEACON_DIR}.
+#   2. An `upstream` remote pointing at the beacon-biosignals org.
+#
+# Both are cwd-relative by nature, so this is only consulted for owners that
+# aren't explicitly claimed by either identity (see _gh_wrapper_sync_identity).
+# Returns 0 (true) if this looks like Beacon work.
+_gh_wrapper_is_beacon_context() {
+  local toplevel upstream_url upstream_owner
+
+  # Signal 1: checkout location. Compare canonicalized paths so symlinked
+  # checkouts and trailing-slash differences don't produce false negatives.
+  # An explicitly-configured beacon dir that doesn't exist means the path
+  # signal can never fire — warn rather than silently falling through to the
+  # default identity, which is the same class of wrong-identity bug this
+  # mapping exists to prevent. Warn once per process so it stays a signal
+  # rather than noise on every unclaimed-owner invocation.
+  if [[ ! -d "${GH_WRAPPER_BEACON_DIR}" && -z "${_GH_WRAPPER_BEACON_DIR_WARNED:-}" ]] \
+    && _gh_wrapper_beacon_dir_is_explicit; then
+    # Deliberately not exported: the latch is per-process, so a subshell that
+    # inherits the exported gh() gets one warning of its own rather than
+    # inheriting a "already warned" state it never saw output for.
+    _GH_WRAPPER_BEACON_DIR_WARNED=1
+    echo "[gh] WARNING: GH_WRAPPER_BEACON_DIR is set to '${GH_WRAPPER_BEACON_DIR}' but that directory does not exist." >&2
+    echo "[gh] The Beacon checkout-path signal cannot fire; identity may fall back to the default." >&2
+  fi
+
+  toplevel=$(command git rev-parse --show-toplevel 2>/dev/null)
+  if [[ -n "${toplevel}" && -d "${GH_WRAPPER_BEACON_DIR}" ]]; then
+    local real_top real_beacon
+    real_top=$(realpath "${toplevel}" 2>/dev/null || printf '%s' "${toplevel}")
+    real_beacon=$(realpath "${GH_WRAPPER_BEACON_DIR}" 2>/dev/null || printf '%s' "${GH_WRAPPER_BEACON_DIR}")
+    # Match the dir itself or anything beneath it, but not a sibling whose
+    # name merely shares the prefix (…/beacon-biosignals-scratch).
+    if [[ "${real_top}" == "${real_beacon}" || "${real_top}" == "${real_beacon}/"* ]]; then
+      return 0
+    fi
+  fi
+
+  # Signal 2: forked from the beacon-biosignals org. Uses the same
+  # host/scheme-stripping shape as _gh_wrapper_resolve_owner.
+  upstream_url=$(command git config --get remote.upstream.url 2>/dev/null)
+  if [[ -n "${upstream_url}" ]]; then
+    upstream_owner=$(printf '%s\n' "${upstream_url}" | sed -E 's#^(git@[^:]+:|[a-zA-Z]+://[^/]+/)##; s#/.*##')
+    [[ "${upstream_owner,,}" == "beacon-biosignals" ]] && return 0
+  fi
+
+  return 1
+}
+
 # gh has one active account per host (not per repo), unlike git+SSH which
 # already resolves the right identity per remote via ~/.ssh/config host
-# aliases. This keeps gh in sync with that same per-repo intent: repos owned
-# by smartwatermelon or nightowlstudiollc (both authenticated as the
-# smartwatermelon gh account) use that account; everything else (Beacon
-# repos, etc.) falls back to andrewmrich. Local-only (reads/writes gh's
-# config file, no network), so it's cheap to run on every invocation.
-# Caveat: this mutates global gh state, so concurrent shells working in
-# different-owner repos at the same time can race each other.
+# aliases. This keeps gh in sync with that same per-repo intent.
+#
+# Mapping, in precedence order:
+#   1. Owners explicitly claimed by an identity win outright, in BOTH
+#      directions — smartwatermelon/nightowlstudiollc -> smartwatermelon,
+#      beacon-biosignals/andrewmrich -> andrewmrich. An explicitly-owned repo
+#      means the same thing no matter which directory you invoke gh from,
+#      preserving the cwd-independence established in
+#      smartwatermelon/dotfiles#135.
+#   2. Otherwise (an owner claimed by neither — a third-party org, an
+#      upstream you've been added to), consult the Beacon-context heuristic:
+#      checkout under the beacon dir, or forked from beacon-biosignals.
+#   3. Otherwise, default to smartwatermelon. This is the personal-default
+#      environment; Beacon work is the specifically-marked exception.
+#
+# Local-only (reads/writes gh's config file, no network), so it's cheap to
+# run on every invocation. Caveat: this mutates global gh state, so
+# concurrent shells working in different-owner repos at the same time can
+# race each other.
 _gh_wrapper_sync_identity() {
   local owner desired current
 
@@ -97,7 +189,14 @@ _gh_wrapper_sync_identity() {
   # as a future enhancement rather than added here to avoid scope creep.
   case "${owner,,}" in
     smartwatermelon | nightowlstudiollc) desired="smartwatermelon" ;;
-    *) desired="andrewmrich" ;;
+    beacon-biosignals | andrewmrich) desired="andrewmrich" ;;
+    *)
+      if _gh_wrapper_is_beacon_context; then
+        desired="andrewmrich"
+      else
+        desired="smartwatermelon"
+      fi
+      ;;
   esac
 
   current=$(awk '/^github\.com:/{f=1} f && /^ *user:/{print $2; exit}' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'")
@@ -105,6 +204,8 @@ _gh_wrapper_sync_identity() {
   if [[ -n "${current}" && "${current}" != "${desired}" ]]; then
     if ! command gh auth switch --hostname github.com --user "${desired}" >/dev/null 2>&1; then
       echo "[gh] ERROR: failed to switch identity to '${desired}' (repo owner: '${owner}') — refusing to run as '${current}' instead" >&2
+      echo "[gh] If '${desired}' is not authenticated on this machine, run: gh auth login --hostname github.com" >&2
+      echo "[gh] Failing closed rather than acting on '${owner}' as the wrong identity." >&2
       return 1
     fi
   fi
@@ -432,6 +533,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org
-  export _gh_wrapper_review_script
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit
+  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
 fi
