@@ -678,6 +678,52 @@ _claude_update() {
     return "${binary_result}"
   fi
 
+  # Update configured plugin marketplaces and enabled plugins.
+  # Best-effort — failure here does not affect the binary update result.
+  # Only enabled plugins are updated; disabled plugins are dead weight and
+  # skipped to avoid churn on things that aren't in use.
+  _notif "Updating Claude Code marketplaces..."
+  local marketplace_output marketplace_result
+  marketplace_output=$("${claude_bin}" plugin marketplace update 2>&1)
+  marketplace_result=$?
+  echo "${marketplace_output}" | _update_log
+  if [[ "${marketplace_result}" -eq 0 ]]; then
+    _notif "claude marketplace update completed"
+  else
+    _notif "claude marketplace update failed (exit ${marketplace_result})"
+  fi
+
+  if command -v jq &>/dev/null; then
+    local plugin_list_json enabled_plugins
+    plugin_list_json=$("${claude_bin}" plugin list --json 2>/dev/null)
+    if [[ -n "${plugin_list_json}" ]]; then
+      local enabled_plugins_raw
+      enabled_plugins_raw=$(jq -r '.[] | select(.enabled == true) | .id' <<<"${plugin_list_json}" 2>/dev/null)
+      enabled_plugins=()
+      if [[ -n "${enabled_plugins_raw}" ]]; then
+        mapfile -t enabled_plugins <<<"${enabled_plugins_raw}"
+      fi
+      if [[ "${#enabled_plugins[@]}" -gt 0 ]]; then
+        _notif "Updating ${#enabled_plugins[@]} enabled Claude Code plugin(s)..."
+        local plugin plugin_output plugin_result
+        for plugin in "${enabled_plugins[@]}"; do
+          plugin_output=$("${claude_bin}" plugin update "${plugin}" --yes 2>&1)
+          plugin_result=$?
+          echo "${plugin_output}" | _update_log
+          if [[ "${plugin_result}" -eq 0 ]]; then
+            _notif "  ${plugin} updated"
+          else
+            _notif "  ${plugin} update failed (exit ${plugin_result})"
+          fi
+        done
+      fi
+    else
+      _notif "Warning: could not list Claude Code plugins, skipping plugin updates"
+    fi
+  else
+    _notif "Warning: jq not installed, cannot enumerate enabled plugins to update"
+  fi
+
   # Update git-sourced Claude Code components (skills, hooks, etc.)
   # Best-effort — failure here does not affect the binary update result.
   local tools_script="${HOME}/.claude/scripts/update-tools.sh"
