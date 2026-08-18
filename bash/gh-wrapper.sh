@@ -74,10 +74,29 @@ _gh_wrapper_resolve_owner() {
   printf '%s\n' "${owner}"
 }
 
-# Directory whose subtree marks a checkout as Beacon work. Overridable for
-# tests; defaults to the standard work checkout root. No trailing slash —
+# Directory whose subtree marks a checkout as Beacon work. Built from ${HOME}
+# so it resolves on any machine regardless of username (the work machine's
+# home is /Users/arich, this one's is /Users/andrewrich — same layout, so the
+# same default is correct for both). No trailing slash —
 # _gh_wrapper_is_beacon_context appends its own when matching.
-: "${GH_WRAPPER_BEACON_DIR:=${HOME}/Developer/beacon-biosignals}"
+#
+# Whether a missing beacon dir is worth warning about depends on whether the
+# caller set it explicitly: an explicitly-configured path that doesn't exist is
+# a misconfiguration, while an unset default that doesn't exist is just a
+# machine with no Beacon work on it (the normal personal-machine state).
+#
+# That distinction is evaluated lazily, at check time, rather than being cached
+# in a variable here. A cached flag would be exported into subshells and go
+# stale the moment anything set GH_WRAPPER_BEACON_DIR after this file was
+# sourced — the stale value then silently decides whether the warning fires.
+# _gh_wrapper_beacon_dir_is_explicit re-derives it from the live environment on
+# every call, so setting the variable at any point behaves identically.
+_gh_wrapper_beacon_dir_is_explicit() {
+  [[ "${GH_WRAPPER_BEACON_DIR:-}" != "${_GH_WRAPPER_BEACON_DIR_DEFAULT}" ]]
+}
+
+_GH_WRAPPER_BEACON_DIR_DEFAULT="${HOME}/Developer/beacon-biosignals"
+: "${GH_WRAPPER_BEACON_DIR:=${_GH_WRAPPER_BEACON_DIR_DEFAULT}}"
 
 # Second-tier signal for the "Beacon work, but not under the beacon-biosignals
 # org" case: repos created/forked during Beacon work that live under a
@@ -97,6 +116,21 @@ _gh_wrapper_is_beacon_context() {
 
   # Signal 1: checkout location. Compare canonicalized paths so symlinked
   # checkouts and trailing-slash differences don't produce false negatives.
+  # An explicitly-configured beacon dir that doesn't exist means the path
+  # signal can never fire — warn rather than silently falling through to the
+  # default identity, which is the same class of wrong-identity bug this
+  # mapping exists to prevent. Warn once per process so it stays a signal
+  # rather than noise on every unclaimed-owner invocation.
+  if [[ ! -d "${GH_WRAPPER_BEACON_DIR}" && -z "${_GH_WRAPPER_BEACON_DIR_WARNED:-}" ]] \
+    && _gh_wrapper_beacon_dir_is_explicit; then
+    # Deliberately not exported: the latch is per-process, so a subshell that
+    # inherits the exported gh() gets one warning of its own rather than
+    # inheriting a "already warned" state it never saw output for.
+    _GH_WRAPPER_BEACON_DIR_WARNED=1
+    echo "[gh] WARNING: GH_WRAPPER_BEACON_DIR is set to '${GH_WRAPPER_BEACON_DIR}' but that directory does not exist." >&2
+    echo "[gh] The Beacon checkout-path signal cannot fire; identity may fall back to the default." >&2
+  fi
+
   toplevel=$(command git rev-parse --show-toplevel 2>/dev/null)
   if [[ -n "${toplevel}" && -d "${GH_WRAPPER_BEACON_DIR}" ]]; then
     local real_top real_beacon
@@ -499,6 +533,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context
-  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit
+  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
 fi

@@ -179,4 +179,64 @@ assert_desired_in "${beacon_repo}" "claimed owner beats beacon cwd" \
 
 cd "${HOME}/neutral-cwd"
 
+# --- Missing-beacon-dir warning ----------------------------------------------
+# An explicitly-configured beacon dir that doesn't exist must warn on stderr;
+# an unset default that doesn't exist must stay silent (the normal state on a
+# personal machine with no Beacon work).
+assert_warns() {
+  local label="$1" expect_warn="$2" explicit="$3" dir="$4"
+  local out
+  cat >"${HOME}/.config/gh/hosts.yml" <<EOF
+github.com:
+    user: smartwatermelon
+EOF
+  # A separate `bash -c` process per case, not a subshell: the warning latches
+  # via _GH_WRAPPER_BEACON_DIR_WARNED and the explicit-vs-default decision is
+  # made at source time, so each case needs a genuinely fresh shell to be a
+  # real test rather than an artifact of ordering.
+  if [[ "${explicit}" == "1" ]]; then
+    out=$(GH_WRAPPER_BEACON_DIR="${dir}" bash -c '
+      source "$1/gh-wrapper.sh"
+      _gh_wrapper_is_beacon_context 2>&1 >/dev/null || true
+    ' _ "${BASH_CONFIG_DIR}" 2>&1)
+  else
+    # Unset override, and point HOME at a pristine dir so the default path
+    # resolves to something absent.
+    # `unset` in the child rather than `env -u`, so the linter can still see
+    # the positional hand-off into `bash -c`.
+    out=$(HOME="${dir}" bash -c '
+      unset GH_WRAPPER_BEACON_DIR
+      source "$1/gh-wrapper.sh"
+      _gh_wrapper_is_beacon_context 2>&1 >/dev/null || true
+    ' _ "${BASH_CONFIG_DIR}" 2>&1)
+  fi
+  if [[ "${expect_warn}" == "1" ]]; then
+    if [[ "${out}" == *"GH_WRAPPER_BEACON_DIR is set to"* ]]; then
+      echo "PASS: ${label} (warned)"
+    else
+      echo "FAIL: ${label} — expected a warning, got: '${out}'"
+      fail=1
+    fi
+  else
+    if [[ -z "${out}" ]]; then
+      echo "PASS: ${label} (silent)"
+    else
+      echo "FAIL: ${label} — expected silence, got: '${out}'"
+      fail=1
+    fi
+  fi
+}
+
+# A directory this test creates itself. Deriving it from the ambient
+# GH_WRAPPER_BEACON_DIR would mean an empty/unset value silently collapses
+# this case into a duplicate of the unset-default case below — still passing,
+# but no longer testing explicit+present at all.
+beacon_dir_present="${HOME}/explicit-beacon-present"
+mkdir -p "${beacon_dir_present}"
+mkdir -p "${HOME}/pristine-home"
+assert_warns "explicit beacon dir missing warns" 1 1 "${HOME}/no-such-beacon-dir"
+assert_warns "explicit beacon dir present is silent" 0 1 "${beacon_dir_present}"
+# The personal-machine case: no override set, default path absent -> silent.
+assert_warns "unset default missing stays silent" 0 0 "${HOME}/pristine-home"
+
 exit "${fail}"
