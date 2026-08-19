@@ -749,9 +749,28 @@ _claude_update() {
 # Records the failing step to a state file so `updates --continue` can resume
 # after the user fixes the underlying problem, instead of re-running steps
 # that already succeeded (e.g. brew update/upgrade before a broken gem dir).
+# State file format: "<failed_step> <entrypoint>" where entrypoint is the
+# command the user actually ran ("updates" or "allup"). The tag lets
+# `allup --continue` tell whether the recorded failure came from its own run —
+# without it, a bare `updates` failure would make the next `allup --continue`
+# silently skip its repo pulls based on state it never wrote.
 _UPDATES_STATE_FILE="${HOME}/.local/state/updates.progress"
 
+# Echo the entrypoint recorded in the state file, or nothing if absent.
+# Legacy state files (step only, no tag) yield an empty entrypoint, which
+# callers treat as "not mine" — the conservative direction.
+_updates_state_entrypoint() {
+  [[ -f "${_UPDATES_STATE_FILE}" ]] || return 1
+  local entrypoint
+  entrypoint="$(awk 'NR==1{print $2}' "${_UPDATES_STATE_FILE}")"
+  [[ -n "${entrypoint}" ]] || return 1
+  printf '%s\n' "${entrypoint}"
+}
+
+# _UPDATES_ENTRYPOINT is set by allup so a failure is tagged with the command
+# the user ran, not the inner function. Defaults to "updates".
 updates() {
+  local entrypoint="${_UPDATES_ENTRYPOINT:-updates}"
   local -a steps=(
     _homebrew_update
     _softwareupdate
@@ -771,7 +790,8 @@ updates() {
 
     if [[ -f "${_UPDATES_STATE_FILE}" ]]; then
       local last_failed i found=false
-      last_failed=$(<"${_UPDATES_STATE_FILE}")
+      # Field 1 is the step; field 2 (if present) is the entrypoint tag.
+      last_failed="$(awk 'NR==1{print $1}' "${_UPDATES_STATE_FILE}")"
       for i in "${!steps[@]}"; do
         if [[ "${steps[i]}" == "${last_failed}" ]]; then
           start_index="${i}"
@@ -807,10 +827,10 @@ updates() {
     "${step}"
     result=$?
     if [[ "${result}" -ne 0 ]]; then
-      if ! mkdir -p "${HOME}/.local/state" || ! echo "${step}" >"${_UPDATES_STATE_FILE}"; then
-        _notif "Warning: could not save resume state; 'updates --continue' will run from the start"
+      if ! mkdir -p "${HOME}/.local/state" || ! echo "${step} ${entrypoint}" >"${_UPDATES_STATE_FILE}"; then
+        _notif "Warning: could not save resume state; '${entrypoint} --continue' will run from the start"
       fi
-      _notif "updates stopped at ${step} (exit ${result}); fix the issue and run 'updates --continue'"
+      _notif "updates stopped at ${step} (exit ${result}); fix the issue and run '${entrypoint} --continue'"
       return "${result}"
     fi
   done
@@ -823,12 +843,48 @@ updates() {
 
 # Update all local repos, repair local config symlinks, run software updates
 # pull-my-repos and pull-beacon-repos are from ~/Developer/scripts, symlinked into ~/.local/bin
+# `allup --continue` resumes after a failed step without re-running the
+# network-bound repo pulls, which are the slow part. The two install.sh
+# --sync calls always run: they are fast, idempotent, and are what installs
+# files that the pulls brought in, so skipping them could leave the deployed
+# tree stale for exactly the run that needed it.
+#
+# Pulls are skipped only when the recorded failure was tagged by allup. A
+# state file left by a bare `updates` run is not ours to resume from, so we
+# fall back to a full run rather than silently dropping the pulls.
 allup() {
-  if command -v pull-my-repos &>/dev/null; then pull-my-repos || return $?; fi
-  if command -v pull-beacon-repos &>/dev/null; then pull-beacon-repos || return $?; fi
-  "${HOME}/Developer/dotfiles/install.sh" --repair || return $?
-  "${HOME}/Developer/claude-config/install.sh" --repair || return $?
-  updates "$@"
+  local skip_pulls=false state_entrypoint
+
+  if [[ -n "${1:-}" ]]; then
+    if [[ "${1}" != "--continue" ]]; then
+      _notif "Unknown option '${1}'; only --continue is supported"
+      return 1
+    fi
+
+    state_entrypoint="$(_updates_state_entrypoint)" || state_entrypoint=""
+    case "${state_entrypoint}" in
+      allup)
+        skip_pulls=true
+        _notif "Resuming allup — skipping repo pulls (already done this cycle)"
+        ;;
+      "")
+        _notif "No allup failure recorded; running full allup including pulls"
+        ;;
+      *)
+        _notif "Recorded failure came from '${state_entrypoint}', not allup; running full allup including pulls"
+        ;;
+    esac
+  fi
+
+  if [[ "${skip_pulls}" != true ]]; then
+    if command -v pull-my-repos &>/dev/null; then pull-my-repos || return $?; fi
+    if command -v pull-beacon-repos &>/dev/null; then pull-beacon-repos || return $?; fi
+  fi
+
+  "${HOME}/Developer/dotfiles/install.sh" --sync || return $?
+  "${HOME}/Developer/claude-config/install.sh" --sync || return $?
+
+  _UPDATES_ENTRYPOINT=allup updates "$@"
 }
 # Not exported - interactive command only
 
