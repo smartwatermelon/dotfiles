@@ -31,6 +31,15 @@ _UPDATES_STATE_FILE="${WORKDIR}/updates.progress"
 _fn_src="$(sed -n '/^_updates_state_entrypoint() {/,/^}/p' "${REPO_ROOT}/bash/functions.sh")"
 if [[ -z "${_fn_src}" ]]; then
   echo "FAIL: could not extract _updates_state_entrypoint from functions.sh" >&2
+  echo "      (the function may have been renamed, indented, or reformatted)" >&2
+  exit 1
+fi
+# Guard against a partial match that would silently under-test: the extracted
+# body must contain the awk field-2 read the whole tag scheme depends on.
+# Match on "NR==1" plus the awk call rather than the literal field
+# reference, so the check does not embed a dollar sign of its own.
+if [[ "${_fn_src}" != *"awk"* || "${_fn_src}" != *"NR==1"* ]]; then
+  echo "FAIL: extracted _updates_state_entrypoint does not read the tag field" >&2
   exit 1
 fi
 eval "${_fn_src}"
@@ -99,10 +108,12 @@ for repo in "${REPO_ROOT}" "${HOME}/Developer/claude-config"; do
   script="${repo}/install.sh"
   [[ -f "${script}" ]] || continue
   name="$(basename "${repo}")"
-  if grep -q -- '--sync) SYNC_ONLY=true ;;\|--sync)    SYNC_ONLY=true ;;' "${script}"; then
+  # Behavioral, not source-text: --sync must be accepted, and --dry-run
+  # keeps it side-effect free so the check is safe to run here.
+  if "${script}" --sync --dry-run >/dev/null 2>&1; then
     echo "  PASS: ${name}/install.sh accepts --sync"
   else
-    echo "  FAIL: ${name}/install.sh does not accept --sync"
+    echo "  FAIL: ${name}/install.sh rejected --sync"
     fail=1
   fi
   if "${script}" --repair --sync >/dev/null 2>&1; then
