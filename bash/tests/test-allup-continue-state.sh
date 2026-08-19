@@ -25,13 +25,30 @@ fail=0
 WORKDIR="$(mktemp -d "/tmp/allup-continue-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
-# Pull the function under test out of functions.sh by name rather than
-# sourcing the whole file, which would run interactive-shell setup.
+# Pull the function under test out of functions.sh by name. Extraction goes
+# through bash's own parser -- source the file in a clean subshell, then let
+# `declare -f` print the parsed function -- rather than slicing the file with
+# a text pattern.
+#
+# The previous approach, `sed -n '/^_updates_state_entrypoint() {/,/^}/p'`,
+# matched `^}` at column 0 to find the end of the function. That is correct
+# only while the closing brace is unindented AND no line of the body is itself
+# a bare `}` -- a `case` arm or a nested block closing at column 0 would
+# truncate the extraction mid-function (smartwatermelon/dotfiles#208). Brace
+# counting does not fix that case either, since the stray `}` is
+# indistinguishable from a real one by counting alone. Asking bash is the only
+# approach immune to how the source happens to be formatted.
+#
+# The subshell uses --norc --noprofile so no interactive-shell setup runs, and
+# functions.sh is side-effect-free at source time (it only defines functions).
 _UPDATES_STATE_FILE="${WORKDIR}/updates.progress"
-_fn_src="$(sed -n '/^_updates_state_entrypoint() {/,/^}/p' "${REPO_ROOT}/bash/functions.sh")"
+_fn_src="$(bash --norc --noprofile -c '
+  source "$1" >/dev/null 2>&1 || exit 1
+  declare -f _updates_state_entrypoint
+' _ "${REPO_ROOT}/bash/functions.sh")"
 if [[ -z "${_fn_src}" ]]; then
   echo "FAIL: could not extract _updates_state_entrypoint from functions.sh" >&2
-  echo "      (the function may have been renamed, indented, or reformatted)" >&2
+  echo "      (the function may have been renamed or removed)" >&2
   exit 1
 fi
 # Guard against a partial match that would silently under-test: the extracted

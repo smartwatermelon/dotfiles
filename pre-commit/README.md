@@ -340,7 +340,6 @@ pre-commit install --install-hooks
 
 - [Pre-commit Documentation](https://pre-commit.com/)
 - [Supported Hooks](https://pre-commit.com/hooks.html)
-- [Black Formatter](https://black.readthedocs.io/)
 - [Flake8 Docs](https://flake8.pycqa.org/)
 - [ShellCheck Wiki](https://www.shellcheck.net/wiki/)
 - [yamllint Docs](https://yamllint.readthedocs.io/)
