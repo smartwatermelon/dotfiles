@@ -24,17 +24,24 @@ failures=()
 # ── Parse arguments ──────────────────────────────────────
 DRY_RUN=false
 REPAIR_ONLY=false
+SYNC_ONLY=false
 for arg in "$@"; do
   case "${arg}" in
     --dry-run) DRY_RUN=true ;;
     --repair) REPAIR_ONLY=true ;;
+    --sync) SYNC_ONLY=true ;;
     *)
       _err "Unknown argument: ${arg}"
-      echo "Usage: install.sh [--dry-run] [--repair]"
+      echo "Usage: install.sh [--dry-run] [--repair] [--sync]"
       exit 1
       ;;
   esac
 done
+
+if [[ "${REPAIR_ONLY}" == true && "${SYNC_ONLY}" == true ]]; then
+  _err "--repair and --sync are mutually exclusive (--sync already repairs)"
+  exit 1
+fi
 
 if [[ "${DRY_RUN}" == true ]]; then
   _info "Dry-run mode — no changes will be made"
@@ -97,8 +104,13 @@ fi
 # ============================================================================
 # 2. HOMEBREW
 # ============================================================================
+# Skipped in --sync mode: sync reconciles the deployed tree with the repo
+# (sections 3-4) and must stay fast enough to run on every `allup`. Package
+# installation is bootstrap-only.
 
-if command -v brew &>/dev/null; then
+if ${SYNC_ONLY}; then
+  _info "Sync mode — reconciling symlinks only (skipping package installation)"
+elif command -v brew &>/dev/null; then
   _skip "Homebrew already installed"
 else
   if [[ "${DRY_RUN}" == true ]]; then
@@ -115,7 +127,9 @@ else
   fi
 fi
 
-if [[ "${DRY_RUN}" == true ]]; then
+if ${SYNC_ONLY}; then
+  :
+elif [[ "${DRY_RUN}" == true ]]; then
   if ! command -v brew &>/dev/null; then
     _dry "Would verify Homebrew is on PATH (not currently available)"
   fi
@@ -124,14 +138,16 @@ elif ! command -v brew &>/dev/null; then
   exit 1
 fi
 
-_info "Running brew bundle..."
-if [[ "${DRY_RUN}" == true ]]; then
-  _dry "Would run: brew bundle --file=${REPO_DIR}/Brewfile"
-elif brew bundle check --file="${REPO_DIR}/Brewfile" &>/dev/null; then
-  _skip "All Brewfile packages already installed"
-else
-  brew bundle --file="${REPO_DIR}/Brewfile"
-  installed+=("Brewfile packages")
+if ! ${SYNC_ONLY}; then
+  _info "Running brew bundle..."
+  if [[ "${DRY_RUN}" == true ]]; then
+    _dry "Would run: brew bundle --file=${REPO_DIR}/Brewfile"
+  elif brew bundle check --file="${REPO_DIR}/Brewfile" &>/dev/null; then
+    _skip "All Brewfile packages already installed"
+  else
+    brew bundle --file="${REPO_DIR}/Brewfile"
+    installed+=("Brewfile packages")
+  fi
 fi
 
 # ============================================================================
@@ -223,6 +239,19 @@ _is_known_config_path() {
   return 1
 }
 
+# In sync mode, run the repair pass first. _ensure_symlink would replace a
+# clobbered regular file by backing it up, but repair_config_symlinks copies
+# changed content back to the repo before restoring the link — preserving
+# edits that atomic writes landed in ~/.config. Repair must therefore win.
+if ${SYNC_ONLY} && [[ "${DRY_RUN}" != true ]]; then
+  # shellcheck source=git/hooks/lib-symlink-repair.sh
+  source "${REPO_DIR}/git/hooks/lib-symlink-repair.sh"
+  repair_config_symlinks false
+  if [[ ${#SYMLINK_REPAIRS[@]} -gt 0 ]]; then
+    _ok "Repaired ${#SYMLINK_REPAIRS[@]} clobbered symlink(s)"
+  fi
+fi
+
 _info "Creating config symlinks from repo to ~/.config..."
 
 while IFS= read -r file; do
@@ -274,6 +303,37 @@ else
   mkdir -p "${HOME}/.local/bin"
   _ensure_symlink "${HOME}/.config/bash/gh-wrapper.sh" "${HOME}/.local/bin/gh"
   _ensure_symlink "${HOME}/.config/bash/gpush-wrapper.sh" "${HOME}/.local/bin/gpush"
+fi
+
+# ── Sync-mode exit ───────────────────────────────────────
+# Sections 3-4 above reconcile the deployed tree with the repo: they create
+# symlinks for newly-pulled files (which --repair deliberately skips, since it
+# only restores links clobbered into regular files) and repair existing ones.
+# Everything below is bootstrap-only, so --sync stops here.
+#
+# Unlike the bootstrap summary, this exits non-zero on failures so that
+# `allup`'s `|| return $?` actually surfaces an unrecognized config path.
+if ${SYNC_ONLY}; then
+  echo ""
+  if [[ ${#installed[@]} -gt 0 ]]; then
+    _info "Sync created:"
+    for item in "${installed[@]}"; do
+      echo "  + ${item}"
+    done
+  fi
+  if [[ ${#failures[@]} -gt 0 ]]; then
+    _warn "Sync completed with ${#failures[@]} issue(s):"
+    for item in "${failures[@]}"; do
+      echo "  ! ${item}"
+    done
+    exit 1
+  fi
+  if [[ ${#installed[@]} -eq 0 ]]; then
+    _ok "Sync complete — deployed tree already matches repo"
+  else
+    _ok "Sync complete — ${#installed[@]} item(s) created"
+  fi
+  exit 0
 fi
 
 # ============================================================================
