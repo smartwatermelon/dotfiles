@@ -11,8 +11,14 @@
 #   fi
 #
 # ~/.config/bash/beacon.sh itself is intentionally NOT tracked by this repo —
-# only this template is. install.sh warns if it's missing while
-# ~/Developer/beacon-biosignals/ exists.
+# only this template is. install.sh warns if it's missing while the work
+# checkout root (${BEACON_WORKDIR}, defined in bash/env.sh) exists.
+
+# NOTE: if you override BEACON_WORKDIR (see bash/env.sh) to point somewhere
+# other than ~/Developer/beacon-biosignals, you must also hand-edit the
+# includeIf gitdir path in git/config — git config cannot interpolate
+# variables, so it will not follow the override and work repos would
+# silently use your personal git identity.
 
 #shellcheck shell=bash
 

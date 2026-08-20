@@ -449,11 +449,14 @@ else
   failures+=("git-hooksPath")
 fi
 
-# Check per-machine work-identity gitconfig — only relevant if a
-# ~/Developer/beacon-biosignals/ (or similar) workdir exists but its
-# includeIf target is missing, which would silently fall back to the
-# personal git identity.
-BEACON_WORKDIR="${HOME}/Developer/beacon-biosignals"
+# Check per-machine work-identity gitconfig — only relevant if the work
+# (Beacon) workdir exists but its includeIf target is missing, which would
+# silently fall back to the personal git identity.
+#
+# bash/env.sh is the canonical definition of BEACON_WORKDIR, but install.sh
+# never sources it (it configures the shell rather than running under it), so
+# the default is spelled out here as a fallback. Keep the two in sync.
+BEACON_WORKDIR="${BEACON_WORKDIR:-${HOME}/Developer/beacon-biosignals}"
 BEACON_GITCONFIG="${HOME}/.gitconfig-beacon"
 if [[ -d "${BEACON_WORKDIR}" ]]; then
   if [[ -f "${BEACON_GITCONFIG}" ]]; then
@@ -465,10 +468,9 @@ if [[ -d "${BEACON_WORKDIR}" ]]; then
   fi
 fi
 
-# Check per-machine work (Beacon) bash env overrides — only relevant if a
-# ~/Developer/beacon-biosignals/ workdir exists but env.sh's sourced target
-# is missing, which would silently skip work-only env vars (e.g. AWS_PROFILE)
-# with no warning.
+# Check per-machine work (Beacon) bash env overrides — only relevant if the
+# work workdir exists but env.sh's sourced target is missing, which would
+# silently skip work-only env vars (e.g. AWS_PROFILE) with no warning.
 BEACON_BASHENV="${HOME}/.config/bash/beacon.sh"
 if [[ -d "${BEACON_WORKDIR}" ]]; then
   if [[ -f "${BEACON_BASHENV}" ]]; then

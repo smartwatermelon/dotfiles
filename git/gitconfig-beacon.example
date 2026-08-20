@@ -10,8 +10,12 @@
 #       path = ~/.gitconfig-beacon
 #
 # ~/.gitconfig-beacon itself is intentionally NOT tracked by this repo —
-# only this template is. install.sh warns if it's missing while
-# ~/Developer/beacon-biosignals/ exists.
+# only this template is. install.sh warns if it's missing while the work
+# checkout root (${BEACON_WORKDIR}, defined in bash/env.sh) exists.
+#
+# NOTE: git config has no variable interpolation, so the includeIf gitdir
+# above must stay a literal path. If BEACON_WORKDIR ever changes, git/config
+# must be updated by hand to match.
 
 [user]
 	email = your-work-email@example.com
