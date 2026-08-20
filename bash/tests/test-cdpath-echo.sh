@@ -105,7 +105,10 @@ fi
 # the result does not depend on whether this particular machine happens to
 # be the work machine — a test that only ever sees the absent case would
 # pass identically if the gate were broken open or wired shut.
-beacon_home="$(mktemp -d)/home"
+# Created inside WORKDIR rather than its own mktemp tree so the EXIT trap
+# established above already covers it. A second, separately-rooted temp dir
+# would leak on any early exit between its creation and an explicit rm.
+beacon_home="${WORKDIR}/beacon-home"
 mkdir -p "${beacon_home}/Developer"
 
 # Sources env.sh under a synthetic HOME and prints the resulting CDPATH.
@@ -115,6 +118,13 @@ mkdir -p "${beacon_home}/Developer"
 # must be expanded by the inner shell, not this one, and a heredoc-written
 # script says that unambiguously without relying on quoting subtleties.
 beacon_probe="${beacon_home}/probe.sh"
+# The _get_homebrew_root stub only needs to EXIST, not to be accurate:
+# env.sh calls it (lines ~139/152) while building HOMEBREW_ROOT, which feeds
+# Ruby's LDFLAGS/CPPFLAGS only. BEACON_WORKDIR and CDPATH derive purely from
+# $HOME, so the stub's value cannot change this test's outcome — verified by
+# running it with /opt/homebrew, /usr/local/homebrew, and a bogus path and
+# getting identical results. Without the stub, HOMEBREW_ROOT comes out empty
+# (functions.sh, which defines it, is deliberately not sourced here).
 cat >"${beacon_probe}" <<'PROBE'
 _get_homebrew_root() { echo /opt/homebrew; }
 #shellcheck source=/dev/null
@@ -149,6 +159,69 @@ else
   fail=1
 fi
 
-rm -rf "$(dirname "${beacon_home}")"
+# No explicit cleanup needed: beacon_home lives under WORKDIR, which the
+# EXIT trap removes.
+
+# --- Case 6: the BEACON_WORKDIR default does not drift between its three
+# sites. bash/env.sh is canonical, but install.sh (which never sources
+# env.sh) and bash/gh-wrapper.sh (which also runs standalone, under
+# LaunchAgents/cron with a stripped environment) each spell the same default
+# as a fallback. That duplication is deliberate — see the comments at each
+# site — but nothing mechanically caught a drifting edit until this check.
+#
+# Each value is resolved by executing its own file under a scrubbed
+# environment with a synthetic HOME, not by grepping for a literal: a grep
+# would pass on two textually-identical strings that expand differently, and
+# would break on any harmless reformatting.
+drift_home="${WORKDIR}/drift-home"
+mkdir -p "${drift_home}"
+
+# env.sh: source it and read the exported value.
+cat >"${WORKDIR}/drift-env.sh" <<'DRIFT'
+_get_homebrew_root() { echo /opt/homebrew; }
+#shellcheck source=/dev/null
+source "${BASH_CONFIG_DIR}/env.sh" >/dev/null 2>&1
+printf '%s' "${BEACON_WORKDIR:-}"
+DRIFT
+drift_envsh="$(env -i HOME="${drift_home}" BASH_CONFIG_DIR="${REPO_ROOT}/bash" \
+  PATH="/usr/bin:/bin" bash --norc "${WORKDIR}/drift-env.sh")"
+
+# gh-wrapper.sh: source it standalone (BEACON_WORKDIR deliberately unset, so
+# its own fallback is what gets exercised) and read the default it derived.
+cat >"${WORKDIR}/drift-gh.sh" <<'DRIFT'
+#shellcheck source=/dev/null
+source "${REPO_ROOT}/bash/gh-wrapper.sh" >/dev/null 2>&1
+printf '%s' "${_GH_WRAPPER_BEACON_DIR_DEFAULT:-}"
+DRIFT
+drift_gh="$(env -i HOME="${drift_home}" REPO_ROOT="${REPO_ROOT}" \
+  PATH="/usr/bin:/bin" bash --norc "${WORKDIR}/drift-gh.sh")"
+
+# install.sh: extract its BEACON_WORKDIR assignment and evaluate that single
+# line, rather than running the installer (which would mutate the machine).
+drift_install_line="$(grep -m1 '^BEACON_WORKDIR=' "${REPO_ROOT}/install.sh")"
+if [[ -n "${drift_install_line}" ]]; then
+  cat >"${WORKDIR}/drift-install.sh" <<DRIFT
+${drift_install_line}
+printf '%s' "\${BEACON_WORKDIR:-}"
+DRIFT
+  drift_install="$(env -i HOME="${drift_home}" PATH="/usr/bin:/bin" \
+    bash --norc "${WORKDIR}/drift-install.sh")"
+else
+  drift_install="<no BEACON_WORKDIR= assignment found in install.sh>"
+fi
+
+expected_default="${drift_home}/Developer/beacon-biosignals"
+if [[ "${drift_envsh}" == "${expected_default}" &&
+  "${drift_gh}" == "${expected_default}" &&
+  "${drift_install}" == "${expected_default}" ]]; then
+  echo "PASS: BEACON_WORKDIR default identical across env.sh, gh-wrapper.sh, install.sh"
+else
+  echo "FAIL: BEACON_WORKDIR default drifted between its three sites"
+  echo "  expected:      '${expected_default}'"
+  echo "  env.sh:        '${drift_envsh}'"
+  echo "  gh-wrapper.sh: '${drift_gh}'"
+  echo "  install.sh:    '${drift_install}'"
+  fail=1
+fi
 
 exit "${fail}"
