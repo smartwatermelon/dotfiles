@@ -14,9 +14,25 @@ if [[ -f "${BASH_CONFIG_DIR}/secrets.sh" ]]; then
   source "${BASH_CONFIG_DIR}/secrets.sh"
 fi
 
+# Canonical location of the work (Beacon) checkout root. Single source of
+# truth for every consumer that needs to know where work repos live:
+# gh-wrapper.sh's identity auto-switch (GH_WRAPPER_BEACON_DIR), install.sh's
+# beacon-config warnings, and the CDPATH entry below.
+#
+# Exported so non-interactive shells and standalone scripts inherit it.
+# Consumers that can run WITHOUT this file having been sourced — install.sh
+# (which never sources env.sh) and gh-wrapper.sh in standalone-wrapper mode
+# (LaunchAgents/cron/GUI apps with a stripped environment) — must still spell
+# the fallback default themselves via ${BEACON_WORKDIR:-...}, so the value is
+# defined in one place but never depends on load order to be correct.
+#
+# Assigned with := so an explicit override from the environment wins.
+: "${BEACON_WORKDIR:=${HOME}/Developer/beacon-biosignals}"
+export BEACON_WORKDIR
+
 # Load work-specific (Beacon) env vars — untracked, machine-local.
 # See bash/beacon.sh.example for the template; install.sh warns if
-# ~/Developer/beacon-biosignals/ exists but this file doesn't.
+# ${BEACON_WORKDIR} exists but this file doesn't.
 if [[ -f "${BASH_CONFIG_DIR}/beacon.sh" ]]; then
   #shellcheck source=/dev/null
   source "${BASH_CONFIG_DIR}/beacon.sh"
@@ -169,6 +185,14 @@ fi
 # top of the script (see bash/tests/*.sh for the established pattern) or
 # scope it out per-invocation with `CDPATH='' cd -- "$dir"`.
 export CDPATH="${HOME}/Developer:${HOME}/Developer/clients:${HOME}/Developer/netlify"
+
+# Append the work (Beacon) checkout root, but only on machines where it
+# actually exists — a CDPATH entry pointing at a missing directory is dead
+# weight that bash stats on every CDPATH-resolved cd. Appended last so work
+# repos never shadow a same-named personal repo under ~/Developer.
+if [[ -d "${BEACON_WORKDIR}" ]]; then
+  export CDPATH="${CDPATH}:${BEACON_WORKDIR}"
+fi
 
 # Set correct terminal type for SSH sessions with color support
 export TERM=xterm-256color

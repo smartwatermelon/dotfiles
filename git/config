@@ -50,6 +50,8 @@
 	conflictstyle = zdiff3
 [pull]
 	rebase = true
+# Literal path required: git config has no variable interpolation, so this
+# cannot reference ${BEACON_WORKDIR} (bash/env.sh). Keep in sync by hand.
 [includeIf "gitdir:~/Developer/beacon-biosignals/"]
 	path = ~/.gitconfig-beacon
 [review]

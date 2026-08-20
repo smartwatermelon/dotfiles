@@ -100,4 +100,55 @@ else
   fail=1
 fi
 
+# --- Case 5: BEACON_WORKDIR is appended to CDPATH only when the directory
+# actually exists. Both branches are exercised against a synthetic HOME so
+# the result does not depend on whether this particular machine happens to
+# be the work machine — a test that only ever sees the absent case would
+# pass identically if the gate were broken open or wired shut.
+beacon_home="$(mktemp -d)/home"
+mkdir -p "${beacon_home}/Developer"
+
+# Sources env.sh under a synthetic HOME and prints the resulting CDPATH.
+# Runs in a fully scrubbed environment (env -i) so the caller's real HOME,
+# CDPATH, or BEACON_WORKDIR cannot leak in and decide the outcome.
+# The probe body lives in its own file rather than an inline -c string: it
+# must be expanded by the inner shell, not this one, and a heredoc-written
+# script says that unambiguously without relying on quoting subtleties.
+beacon_probe="${beacon_home}/probe.sh"
+cat >"${beacon_probe}" <<'PROBE'
+_get_homebrew_root() { echo /opt/homebrew; }
+#shellcheck source=/dev/null
+source "${BASH_CONFIG_DIR}/env.sh" >/dev/null 2>&1
+printf '%s' "${CDPATH:-}"
+PROBE
+
+_cdpath_under_home() {
+  env -i HOME="${beacon_home}" BASH_CONFIG_DIR="${REPO_ROOT}/bash" \
+    PATH="/usr/bin:/bin" bash --norc "${beacon_probe}"
+}
+
+beacon_dir="${beacon_home}/Developer/beacon-biosignals"
+
+# 5a: directory absent — must NOT appear in CDPATH.
+absent_cdpath="$(_cdpath_under_home)"
+if [[ ":${absent_cdpath}:" != *":${beacon_dir}:"* ]]; then
+  echo "PASS: beacon dir absent — not added to CDPATH"
+else
+  echo "FAIL: beacon dir absent but present in CDPATH: '${absent_cdpath}'"
+  fail=1
+fi
+
+# 5b: directory present — must appear, and must be LAST so work repos never
+# shadow a same-named personal repo earlier in CDPATH.
+mkdir -p "${beacon_dir}"
+present_cdpath="$(_cdpath_under_home)"
+if [[ "${present_cdpath}" == *":${beacon_dir}" ]]; then
+  echo "PASS: beacon dir present — appended as the last CDPATH entry"
+else
+  echo "FAIL: expected CDPATH to end with '${beacon_dir}', got: '${present_cdpath}'"
+  fail=1
+fi
+
+rm -rf "$(dirname "${beacon_home}")"
+
 exit "${fail}"

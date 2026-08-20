@@ -95,7 +95,11 @@ _gh_wrapper_beacon_dir_is_explicit() {
   [[ "${GH_WRAPPER_BEACON_DIR:-}" != "${_GH_WRAPPER_BEACON_DIR_DEFAULT}" ]]
 }
 
-_GH_WRAPPER_BEACON_DIR_DEFAULT="${HOME}/Developer/beacon-biosignals"
+# bash/env.sh is the canonical definition of BEACON_WORKDIR, but this file
+# also runs in standalone-wrapper mode (LaunchAgents/cron/GUI apps with a
+# stripped environment) where env.sh was never sourced, so the default is
+# spelled out here as a fallback. Keep the two in sync.
+_GH_WRAPPER_BEACON_DIR_DEFAULT="${BEACON_WORKDIR:-${HOME}/Developer/beacon-biosignals}"
 : "${GH_WRAPPER_BEACON_DIR:=${_GH_WRAPPER_BEACON_DIR_DEFAULT}}"
 
 # Second-tier signal for the "Beacon work, but not under the beacon-biosignals

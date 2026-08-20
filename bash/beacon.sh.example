@@ -11,8 +11,8 @@
 #   fi
 #
 # ~/.config/bash/beacon.sh itself is intentionally NOT tracked by this repo —
-# only this template is. install.sh warns if it's missing while
-# ~/Developer/beacon-biosignals/ exists.
+# only this template is. install.sh warns if it's missing while the work
+# checkout root (${BEACON_WORKDIR}, defined in bash/env.sh) exists.
 
 #shellcheck shell=bash
 
