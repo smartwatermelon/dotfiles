@@ -24,7 +24,12 @@
 
 # AWS defaults (Beacon). Leave AWS_PROFILE unset when aws-vault is managing
 # the session so it doesn't fight with AWS_VAULT-scoped credentials.
-if [[ -z "${AWS_VAULT}" ]]; then
+#
+# ${AWS_VAULT:-} rather than ${AWS_VAULT}: aws-vault only sets this inside a
+# session, so it is normally unset, and a bare reference aborts any caller
+# running under `set -u`. env.sh sources this file, so that would take the
+# whole shell config down, not just this line.
+if [[ -z "${AWS_VAULT:-}" ]]; then
   export AWS_PROFILE=arich
 fi
 export AWS_DEFAULT_REGION="us-east-2"
