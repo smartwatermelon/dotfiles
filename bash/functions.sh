@@ -842,7 +842,7 @@ updates() {
 # Not exported - interactive command only
 
 # Update all local repos, repair local config symlinks, run software updates
-# pull-my-repos and pull-beacon-repos are from ~/Developer/scripts, symlinked into ~/.local/bin
+# my-repos and beacon-repos are from ~/Developer/scripts, symlinked into ~/.local/bin
 # `allup --continue` resumes after a failed step without re-running the
 # network-bound repo pulls, which are the slow part. The two install.sh
 # --sync calls always run: they are fast, idempotent, and are what installs
@@ -877,8 +877,8 @@ allup() {
   fi
 
   if [[ "${skip_pulls}" != true ]]; then
-    if command -v pull-my-repos &>/dev/null; then pull-my-repos || return $?; fi
-    if command -v pull-beacon-repos &>/dev/null; then pull-beacon-repos || return $?; fi
+    if command -v my-repos &>/dev/null; then my-repos || return $?; fi
+    if command -v beacon-repos &>/dev/null; then beacon-repos || return $?; fi
   fi
 
   "${HOME}/Developer/dotfiles/install.sh" --sync || return $?
