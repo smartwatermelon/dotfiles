@@ -27,6 +27,13 @@ fi
 # defined in one place but never depends on load order to be correct.
 #
 # Assigned with := so an explicit override from the environment wins.
+#
+# IMPORTANT — overriding this does NOT fully relocate the work root. git
+# config has no variable interpolation, so the includeIf that selects the
+# work git identity (git/config, "gitdir:~/Developer/beacon-biosignals/")
+# is a literal path and will NOT follow an override. Change it there too,
+# or work repos silently keep using the personal git identity. See
+# smartwatermelon/dotfiles#213.
 : "${BEACON_WORKDIR:=${HOME}/Developer/beacon-biosignals}"
 export BEACON_WORKDIR
 
