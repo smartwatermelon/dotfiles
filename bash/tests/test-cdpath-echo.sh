@@ -118,6 +118,13 @@ mkdir -p "${beacon_home}/Developer"
 # must be expanded by the inner shell, not this one, and a heredoc-written
 # script says that unambiguously without relying on quoting subtleties.
 beacon_probe="${beacon_home}/probe.sh"
+# The _get_homebrew_root stub only needs to EXIST, not to be accurate:
+# env.sh calls it (lines ~139/152) while building HOMEBREW_ROOT, which feeds
+# Ruby's LDFLAGS/CPPFLAGS only. BEACON_WORKDIR and CDPATH derive purely from
+# $HOME, so the stub's value cannot change this test's outcome — verified by
+# running it with /opt/homebrew, /usr/local/homebrew, and a bogus path and
+# getting identical results. Without the stub, HOMEBREW_ROOT comes out empty
+# (functions.sh, which defines it, is deliberately not sourced here).
 cat >"${beacon_probe}" <<'PROBE'
 _get_homebrew_root() { echo /opt/homebrew; }
 #shellcheck source=/dev/null
