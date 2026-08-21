@@ -883,6 +883,16 @@ allup() {
 
   "${HOME}/Developer/dotfiles/install.sh" --sync || return $?
   "${HOME}/Developer/claude-config/install.sh" --sync || return $?
+  # Refresh the calling shell's environment with whatever the two --sync
+  # runs just deployed. allup is a function, not a script, so this affects
+  # the interactive shell that invoked it rather than a subshell.
+  #
+  # Deliberately not `|| return $?`: .bash_profile's exit status is just
+  # that of its last command (an nvm bash_completion probe), not a signal
+  # that the environment loaded correctly. Gating on it would risk
+  # skipping `updates` below after the pulls and installs had already run.
+  #shellcheck source=/dev/null
+  source "${HOME}/.bash_profile"
 
   _UPDATES_ENTRYPOINT=allup updates "$@"
 }
