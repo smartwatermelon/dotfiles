@@ -104,6 +104,27 @@ actual="$(resolve_in_clean_shell "${SANDBOX}/inherited.sh" before)" || actual="<
 check "override wins regardless of when HOME was set" \
   "${SANDBOX}/inherited.sh" "${actual}"
 
+# Case 5: the helper must survive export -f inheritance. _gh_wrapper_maybe_review
+# is exported and calls this function, but an exported function carries only its
+# own body into a subshell -- so a helper left out of the export list fails with
+# "command not found" in any subshell that inherited gh() without re-sourcing
+# this file. That is the documented reason the export list exists, and it is
+# exactly the kind of omission a new helper invites.
+#
+# The check reads the BASH_FUNC_* environment entry directly rather than asking
+# a child shell with `type -t`. A child started from the ambient environment
+# inherits whatever the developer's own shell already exported, so `type -t`
+# reports "function" even when the export list is wrong -- the assertion passes
+# for the wrong reason. Counting the marshalled env entry cannot be fooled that
+# way.
+marker_d="$(printf '%s' '$')"
+marker_script=". \"${marker_d}WRAP\" >/dev/null 2>&1 || true; env | grep -c \"^BASH_FUNC__gh_wrapper_review_script_path\""
+exported_marker="$(
+  env -i PATH="${PATH}" HOME="${HOME}" WRAP="${WRAPPER}" \
+    bash --noprofile --norc -c "${marker_script}" 2>/dev/null
+)" || exported_marker="0"
+check "helper is marshalled into the environment by export -f" "1" "${exported_marker}"
+
 echo ""
 if ((fail == 0)); then
   echo "All review-script-path checks passed."
