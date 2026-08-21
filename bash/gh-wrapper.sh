@@ -24,7 +24,28 @@
 # calls `command gh`, which (since ~/.local/bin is early in PATH) finds this
 # same file again in standalone-wrapper mode.
 
-_gh_wrapper_review_script="${HOME}/.claude/hooks/pre-merge-review.sh"
+# Deliberately NOT defaulted from ${HOME} here. This file is sourced once, but
+# ${HOME} at source time is not necessarily ${HOME} at call time: anything that
+# reassigns HOME afterwards -- test harnesses above all -- would still get the
+# sourcing user's path and silently run the REAL hook instead of the mock under
+# test. The variable is also exported below, so a stale value propagates into
+# every child process, including test runners started from an interactive
+# shell. Resolved per call by _gh_wrapper_review_script_path instead; set this
+# variable explicitly to override the location.
+: "${_gh_wrapper_review_script:=}"
+
+# Resolve the pre-merge review script at call time.
+#
+# An explicit non-empty ${_gh_wrapper_review_script} wins, so callers (and
+# tests) can point this anywhere. Otherwise the location is derived from the
+# CURRENT ${HOME}, which is what makes a sandboxed HOME work.
+_gh_wrapper_review_script_path() {
+  if [[ -n "${_gh_wrapper_review_script}" ]]; then
+    printf '%s\n' "${_gh_wrapper_review_script}"
+  else
+    printf '%s\n' "${HOME}/.claude/hooks/pre-merge-review.sh"
+  fi
+}
 
 # Resolves the repo owner a gh invocation is acting on: an explicit -R/--repo
 # target on the command line takes precedence (that's the repo the call
@@ -304,15 +325,17 @@ _gh_wrapper_maybe_review() {
   done
 
   if [[ "${sub}" == "pr" && "${subsub}" == "merge" ]]; then
-    if [[ -x "${_gh_wrapper_review_script}" ]]; then
-      "${_gh_wrapper_review_script}" "$@" || return 1
+    local _review_script
+    _review_script="$(_gh_wrapper_review_script_path)"
+    if [[ -x "${_review_script}" ]]; then
+      "${_review_script}" "$@" || return 1
     elif [[ "${missing_script_mode}" == "strict" ]]; then
-      echo "[gh] ERROR: pre-merge review script not found or not executable: ${_gh_wrapper_review_script}" >&2
+      echo "[gh] ERROR: pre-merge review script not found or not executable: ${_review_script}" >&2
       echo "[gh] Refusing to proceed with an unguarded merge." >&2
       return 1
     else
       echo "[gh] Warning: pre-merge review script not found or not executable" >&2
-      echo "[gh] Expected: ${_gh_wrapper_review_script}" >&2
+      echo "[gh] Expected: ${_review_script}" >&2
       echo "[gh] Proceeding without review..." >&2
     fi
   fi
@@ -537,6 +560,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
 fi
