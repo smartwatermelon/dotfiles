@@ -66,7 +66,20 @@ fi
 # order, then puts that prefix in front of whatever's left of the old
 # PATH. Array order above IS the resulting PATH order — read top to
 # bottom, no need to simulate anything.
+#
+# NVM_BIN leads the list so re-sourcing .bash_profile is idempotent for
+# node. On a fresh login NVM_BIN is unset here (nvm.sh runs later, from
+# .bash_profile) so the tier is empty and nvm's own prepend puts the
+# active version in front — correct. On a RE-source into an already
+# initialized shell, nvm.sh short-circuits (NVM_DIR is already set) and
+# does NOT re-prepend, so without this tier the rebuild below would strip
+# nvm's directory from the front and leave Homebrew's node shadowing it —
+# silently swapping the active node version mid-session. NVM_BIN is
+# exported by nvm and survives the re-source, so reading it here restores
+# the same priority nvm would have set itself.
+# Regression covered by bash/tests/test-path-order.sh.
 _path_tiers=(
+  "${NVM_BIN:-}"
   "${HOME}/.local/bin"
   "${GEM_EXE_DIR}"
   "${HOME}/.bun/bin"
