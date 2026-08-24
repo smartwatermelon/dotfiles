@@ -20,7 +20,12 @@ git/
 │   ├── lint-shell.sh   # Shell script linting with auto-fix
 │   ├── pre-commit      # Pre-commit hook (delegates to repo or global)
 │   ├── commit-msg      # Commit-msg hook (conventional-commits validation + AI review)
+│   ├── post-checkout   # Post-checkout hook (delegates to the template hook)
 │   └── pre-push        # Pre-push hook (syncs configs to GitHub repos)
+├── template/           # init.templateDir contents
+│   ├── .claude-template/  # .claude/ scaffold copied into new repos
+│   └── hooks/
+│       └── post-checkout  # Canonical .claude/ scaffolder + gitignore policy
 └── README.md           # This file
 ```
 
@@ -133,6 +138,48 @@ and check whether any reported findings' line ranges overlap your diff.
 **Why**: Ensures CI workflows use same linting rules as local development
 
 **Also runs AI review**: on non-main branches with a diff against `main`, the hook runs `~/.claude/hooks/run-review.sh` in `--mode=full-diff` and `--mode=codebase`. The codebase pass **files its non-blocking findings as GitHub issues in whatever repo you are pushing from** — this hook is global via `core.hooksPath`, so that is not limited to claude-config. To read those findings before they are filed, dry-run the same script with `gh` stubbed: see `claude-config/docs/CHECKLISTS.md` -> "Pre-Push Review Dry-Run" (also reachable as `~/.claude/docs/CHECKLISTS.md`). The reviewer and its procedure live in claude-config; if `run-review.sh` moves, the docs move with it.
+
+### post-checkout
+
+**Purpose**: Scaffolds `.claude/` infrastructure into newly created repos, and records a tracking policy for what it created
+**Files**: `hooks/post-checkout` (thin delegate resolved via `core.hooksPath`) -> `template/hooks/post-checkout` (the canonical hook)
+
+**Behavior**:
+
+1. Exits unless git reports a branch checkout (`$3 == 1`)
+2. Exits if `.claude/` already exists
+3. Copies `template/.claude-template/` to `.claude/`, creates `hooks/extensions/`, disables the example extension
+4. Records `.claude/` as ignored, subject to the guards below
+
+**Why ignore by default**: the scaffold is generated content the hook can reproduce on demand, and the other common inhabitant of `.claude/` (`settings.local.json`) is machine-local by Claude Code's own `.local.` naming convention. Without a recorded decision, each repo's `.claude/` ended up tracked or ignored by whoever touched it next — a survey of 27 repos found 14 tracking it, 12 ignoring it, and 1 doing neither, all holding byte-identical content (smartwatermelon/dotfiles#220).
+
+**Where the entry goes**:
+
+- **`.gitignore`** normally — the shared, committed policy.
+- **`.git/info/exclude`** when `.gitignore` is already tracked. Rewriting a committed `.gitignore` would leave every fresh clone holding a *modified tracked file*, which breaks `git diff --exit-code` checks, `git describe --dirty`, and any `git commit -a` that would sweep the line into an unrelated commit. Writing to `info/exclude` has the same effect on `.claude/`, stays local to that clone, and leaves the tree clean.
+
+**Guards — the hook writes only into a genuinely fresh repo that hasn't already decided**:
+
+- **Fresh clone/init only.** `post-checkout` also fires with `$3 == 1` on `git checkout -b` and on `git worktree add`. Two signals separate those from a real clone or init:
+  - `prev_head` (`$1`) is the null SHA on clone and init, but the commit you moved away from on a branch switch — that rules out `git checkout -b`.
+  - A *linked worktree* also reports the null SHA, so `prev_head` alone is not enough. A linked worktree's `--git-dir` (`<repo>/.git/worktrees/<name>`) differs from its `--git-common-dir`, whereas a main work tree's two agree. This matters because a new worktree's `.claude/` is absent — the parent repo ignores it, so it never materializes — which means the "does `.claude/` exist" no-op does *not* fire, and without this check the hook would write into an established repo.
+- **Already tracked.** If any path under `.claude/` is in the index, the hook writes nothing. `.gitignore` has no effect on already-tracked files, so adding the line would leave the repo claiming a policy it isn't following.
+- **Already ignored.** Checked with `git check-ignore -q .claude/`, which consults `.gitignore`, `.git/info/exclude`, and any global `core.excludesFile` in one call. Grepping `.gitignore` alone would miss the `info/exclude` case and promote someone's deliberate private hold to a shared committed policy.
+- **Non-regular target.** A `.gitignore` that is a symlink or directory is skipped. `-e` follows symlinks, so a dangling link reports neither `-e` nor `-w`; the hook tests `-L` explicitly rather than walking into a failing write.
+
+**Failure tolerance**: every write is `|| return 0`, and the whole step is called with `|| true`. A `post-checkout` that exits non-zero makes `git clone` itself exit 1 *after* the files have already landed — a far worse outcome than skipping the ignore line. Because this hook is global via `core.hooksPath` and fires on every clone, init, and branch switch on this machine, it does nothing rather than write whenever the state is ambiguous.
+
+**Sharing part of `.claude/`**: negate the specific paths.
+
+```gitignore
+.claude/
+!.claude/skills/
+!.claude/pre-launch.sh
+```
+
+**Diagnosing an existing repo**: `git check-ignore -v .claude/` prints the source file and line, which distinguishes a `.gitignore` entry from a `.git/info/exclude` one.
+
+**Tests**: `bash/tests/test-post-checkout-gitignore.sh` drives real `git clone`, `git checkout -b`, and worktree creation through the hook and asserts each guard plus the exit code; `bash/tests/test-post-checkout-hookspath.sh` covers delegate resolution via `core.hooksPath`.
 
 ### lint-shell.sh
 
