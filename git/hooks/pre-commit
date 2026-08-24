@@ -8,7 +8,7 @@ set -euo pipefail
 # anywhere on disk (per `man githooks`), so it cannot pass the message
 # to the AI reviewer. Keep deterministic, message-independent checks
 # here: branch protection, symlink repair, linters via the pre-commit
-# framework, and project-local .ralph/pre-commit extensions.
+# framework, and project-local .project-hooks/pre-commit extensions.
 #
 # AI code review now lives in the commit-msg hook, which receives the
 # in-progress commit message file as $1 and forwards it to the reviewer
@@ -72,10 +72,10 @@ fi
 # =========================================================
 # PROJECT-LOCAL PRE-COMMIT EXTENSIONS
 # =========================================================
-# Repos can add a .ralph/pre-commit script for project-specific checks
+# Repos can add a .project-hooks/pre-commit script for project-specific checks
 # (e.g. typecheck-affected, test-affected, custom lints) that run after
 # the global lint pass but before the expensive AI review. Symmetric
-# with .ralph/pre-push — same trust model (if you cloned the repo and
+# with .project-hooks/pre-push — same trust model (if you cloned the repo and
 # are committing to it, you trust its build tooling) and same +x
 # activation requirement.
 #
@@ -89,7 +89,7 @@ run_project_extensions() {
     return 0
   fi
 
-  local ext="${repo_root}/.ralph/pre-commit"
+  local ext="${repo_root}/.project-hooks/pre-commit"
   if [[ -x "${ext}" ]]; then
     echo "[pre-commit] Running project-local pre-commit extension: ${ext}"
     if ! "${ext}"; then

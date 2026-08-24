@@ -89,7 +89,7 @@ floor.
 
 ### When these run automatically
 
-- **On push** — `.ralph/pre-push` runs the suite via the pre-push hook's
+- **On push** — `.project-hooks/pre-push` runs the suite via the pre-push hook's
   project-extension seam (see `git/hooks/pre-push`). A failure blocks the push.
 - **In CI** — `.github/workflows/bash-tests.yml` runs it on every pull request
   and on pushes to `main`. It uses a **macOS** runner: the tests assert against

@@ -20,7 +20,7 @@
 # default-ignore rule), which meant a NEW workflow file was silently ignored.
 !.github/
 # Project-local pre-push extension (runs the bash test suite before push).
-!.ralph/
+!.project-hooks/
 
 # Within gh/, only track preferences (not auth)
 gh/*

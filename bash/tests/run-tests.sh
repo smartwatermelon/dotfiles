@@ -92,7 +92,7 @@ for test in "${tests[@]}"; do
   #
   # rather than a bare `bash run-tests.sh`, whose PATH lookup could land on any
   # 4.4+ bash that happens to come first. Both current callers do this:
-  # `.ralph/pre-push` resolves a Homebrew bash before exec'ing the runner, and
+  # `.project-hooks/pre-push` resolves a Homebrew bash before exec'ing the runner, and
   # `.github/workflows/bash-tests.yml` installs bash 5 and invokes it by path.
   if "${BASH}" "${test}"; then
     passed+=("${name}")
