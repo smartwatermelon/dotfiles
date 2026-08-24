@@ -3,23 +3,35 @@
 # Creates .claude/ infrastructure in new repositories
 #
 # This hook runs after:
-# - git init (if template configured)
-# - git clone (always)
-# - git checkout (when switching branches)
+# - git clone (always — during clone's internal initial checkout)
+# - git checkout / git checkout -b (when switching branches)
+# - git init, but ONLY via bash/git-wrapper.sh (see below)
+#
+# On `git init`, git itself never fires post-checkout: init performs no
+# checkout, and init.templateDir only COPIES this file into .git/hooks/. Under
+# a bare `/usr/bin/git init` the hook is installed but never runs. This repo
+# closes that gap in bash/git-wrapper.sh, which — after a successful `git
+# init` — invokes .git/hooks/post-checkout directly by path with synthesized
+# arguments: null prev/new SHAs and branch_checkout=1.
+#
+# So an init-time code path here is reachable, but only through the wrapper,
+# and only with those synthesized values. It is NOT reachable when git is
+# called by absolute path or from a shell without the wrapper.
 #
 # We only want to run on initial checkout, not on every branch switch.
 
 set -euo pipefail
 
 # Hook parameters from git
-_prev_head=$1 # Null SHA on clone/init; a real commit on a branch switch
-_new_head=$2  # Unused - we only care about branch_checkout
+# _prev_head: null SHA on clone's initial checkout and on the wrapper's
+# synthesized init call; a real commit on a branch switch.
+_prev_head=$1
+_new_head=$2 # Unused - we only care about branch_checkout
 branch_checkout=$3
 
-# Only run on initial checkout (git init or git clone)
-# branch_checkout == 1 means checking out a branch (not just updating files)
-# For git init, prev_head is all zeros (0000000...)
-# For git clone, this runs on the initial checkout
+# Only run on a branch checkout: clone's initial checkout, a branch switch, or
+# the init call synthesized by bash/git-wrapper.sh.
+# branch_checkout == 1 means checking out a branch (not just updating files).
 if [[ "${branch_checkout}" != "1" ]]; then
   exit 0
 fi

@@ -42,30 +42,35 @@ assert_fails() {
 # Case 1: unknown flag rejected
 assert_fails "gpush --bogus-flag rejected" gpush --bogus-flag
 
-# Case 3: refuses to run on main — use real git repo and real main branch
+# Case 2: refuses to run on main — use real git repo and real main branch
 WORKDIR="/tmp/gpush-wrapper-guard-test-$$"
 mkdir -p "${WORKDIR}"
 trap 'rm -rf "${WORKDIR}"' EXIT
 (cd "${WORKDIR}" && /usr/bin/git init -q -b main && /usr/bin/git commit -q --allow-empty -m init)
 
+# The capture file lives INSIDE WORKDIR rather than in /tmp under its own
+# "$$". The subshell below expands "$$" to the SUBSHELL's pid, so a /tmp path
+# built there could never be named by the outer shell's cleanup — that
+# mismatch leaked a file per run. Keeping it under WORKDIR means the existing
+# EXIT trap removes it, whatever pid produced it.
+main_out_file="${WORKDIR}/gpush-main-output"
+
 main_test_output=$(/bin/bash -c '
   cd "'"${WORKDIR}"'" || exit 1
+  out_file="'"${main_out_file}"'"
   #shellcheck source=/dev/null
   source "'"${BASH_CONFIG_DIR}"'/gpush-wrapper.sh"
-  if gpush >/tmp/gpush-test-main-$$ 2>&1; then
+  if gpush >"${out_file}" 2>&1; then
     echo "FAIL: gpush on main branch — expected non-zero exit, got 0"
     exit 1
-  else
-    if grep -q "Refusing to run on main" /tmp/gpush-test-main-$$; then
-      echo "PASS: gpush on main branch refuses with expected message"
-      exit 0
-    else
-      echo "FAIL: gpush on main branch — wrong error message"
-      cat /tmp/gpush-test-main-$$
-      exit 1
-    fi
   fi
-  rm -f "/tmp/gpush-test-main-$$"
+  if grep -q "Refusing to run on main" "${out_file}"; then
+    echo "PASS: gpush on main branch refuses with expected message"
+    exit 0
+  fi
+  echo "FAIL: gpush on main branch — wrong error message"
+  cat "${out_file}"
+  exit 1
 ' 2>&1)
 
 main_exit=$?
@@ -73,9 +78,8 @@ echo "${main_test_output}"
 if [[ ${main_exit} -ne 0 ]]; then
   fail=1
 fi
-rm -f "/tmp/gpush-test-main-$$"
 
-# Case 4: refuses to run on detached HEAD — use real git repo and real detached HEAD
+# Case 3: refuses to run on detached HEAD — use real git repo and real detached HEAD
 # Use a separate temp directory to avoid interference from main repo's git wrappers
 detached_test_output=$(/bin/bash -c '
   tmpwork=$(mktemp -d)
