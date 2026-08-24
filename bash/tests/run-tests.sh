@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Discover and run every test in bash/tests/.
+#
+# Each test file is a standalone executable that communicates purely through
+# its exit code (0 = pass), printing its own PASS/FAIL lines as it goes. This
+# runner therefore does not need to know anything about an individual test's
+# internals: it invokes each one, streams its output, and aggregates the exit
+# codes into a single verdict.
+#
+# Usage:
+#   bash bash/tests/run-tests.sh              # run everything
+#   bash bash/tests/run-tests.sh path-order   # run tests matching a substring
+#
+# Exits non-zero if any test fails, so it is usable as a CI step or a hook.
+#
+# Bash 4.4+ is required (some tests use `mapfile -d`, which does not exist in
+# the bash 3.2 that macOS ships at /bin/bash). The check below fails loudly
+# rather than letting those tests silently produce empty results and
+# "pass" — see smartwatermelon/dotfiles#221.
+set -uo pipefail
+
+# CDPATH makes `cd` echo its resolved path to stdout, which would corrupt the
+# command substitution below.
+unset CDPATH
+
+TESTS_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+  echo "ERROR: bash 4.4+ required, running ${BASH_VERSION}." >&2
+  echo "       macOS ships bash 3.2 at /bin/bash; install bash 5 via Homebrew" >&2
+  echo "       and run this with that interpreter." >&2
+  exit 1
+fi
+
+# Optional substring filter, so a single test can be run without retyping its
+# full path: `run-tests.sh path-order` runs test-path-order.sh.
+filter="${1:-}"
+
+# Bash expands a glob in sorted order already, so the run order is
+# deterministic and reproducible without piping through `sort`. Nullglob so an
+# empty tests directory yields an empty array rather than a literal glob
+# pattern that would then be "run" as a nonexistent file.
+shopt -s nullglob
+all_tests=("${TESTS_DIR}"/test-*.sh)
+shopt -u nullglob
+
+tests=()
+for t in "${all_tests[@]}"; do
+  [[ -f "${t}" ]] || continue
+  if [[ -n "${filter}" && "$(basename "${t}")" != *"${filter}"* ]]; then
+    continue
+  fi
+  tests+=("${t}")
+done
+
+if ((${#tests[@]} == 0)); then
+  if [[ -n "${filter}" ]]; then
+    echo "ERROR: no tests in ${TESTS_DIR} match '${filter}'." >&2
+  else
+    echo "ERROR: no test-*.sh files found in ${TESTS_DIR}." >&2
+  fi
+  # An empty run must not look like success — a glob that silently matches
+  # nothing is exactly how a test suite stops testing without anyone noticing.
+  exit 1
+fi
+
+passed=()
+failed=()
+
+for test in "${tests[@]}"; do
+  name="$(basename "${test}")"
+  echo "=============================================================="
+  echo "RUN  ${name}"
+  echo "=============================================================="
+
+  # Run each test in its own process so `set -e`, traps, exported variables
+  # and cwd changes inside one test cannot leak into the next.
+  #
+  # "${BASH}", not a bare `bash`: the version check above only vets the
+  # interpreter running THIS script. A bare `bash` resolves through PATH, which
+  # on macOS can still find 3.2 — and a test using `mapfile -d` would then die
+  # with "mapfile: command not found" despite the guard having passed. $BASH is
+  # set by bash to the full path of the running interpreter, so the vetted one
+  # propagates to every child.
+  if "${BASH}" "${test}"; then
+    passed+=("${name}")
+    echo "--> PASS ${name}"
+  else
+    status=$?
+    failed+=("${name}")
+    echo "--> FAIL ${name} (exit ${status})"
+  fi
+  echo
+done
+
+echo "=============================================================="
+echo "SUMMARY: ${#passed[@]} passed, ${#failed[@]} failed, ${#tests[@]} total"
+echo "=============================================================="
+
+for name in "${passed[@]}"; do
+  echo "  PASS  ${name}"
+done
+for name in "${failed[@]}"; do
+  echo "  FAIL  ${name}"
+done
+
+if ((${#failed[@]} > 0)); then
+  exit 1
+fi
+exit 0

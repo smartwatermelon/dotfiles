@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Project-local pre-push extension (see git/hooks/pre-push,
+# run_project_extensions). Runs the bash test suite so a regression is caught
+# before it reaches CI rather than after — the gap smartwatermelon/dotfiles#221
+# was filed about.
+#
+# Pre-push rather than pre-commit deliberately: the suite spawns real git
+# repos, clones, and subprocesses (a few seconds), which is fine once per push
+# but a tax on every commit in a multi-commit branch. Pre-push is also the
+# boundary that matters here, since it is the last point before the code
+# becomes someone else's problem.
+set -uo pipefail
+unset CDPATH
+
+REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# macOS ships bash 3.2, which cannot run these tests (`mapfile -d`). Prefer a
+# Homebrew bash 5 if the interpreter running this hook is too old; run-tests.sh
+# will refuse loudly if nothing suitable is found.
+# "${BASH}", not a bare `bash`: the latter resolves through PATH, which on
+# macOS can find 3.2 even when this hook is running under 5.
+runner_bash="${BASH}"
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+  for candidate in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "${candidate}" ]]; then
+      runner_bash="${candidate}"
+      break
+    fi
+  done
+fi
+
+echo "Running bash test suite (bash/tests/run-tests.sh)..."
+exec "${runner_bash}" "${REPO_ROOT}/bash/tests/run-tests.sh"

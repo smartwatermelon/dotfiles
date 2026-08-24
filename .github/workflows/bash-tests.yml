@@ -1,0 +1,55 @@
+name: Bash Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # macos-latest, not ubuntu-latest, and this is load-bearing rather than a
+  # default carried over from habit. These tests exercise a macOS bash
+  # configuration and assert against macOS assumptions:
+  #
+  #   1. bash/tests/test-path-order.sh asserts the PATH tier order built by
+  #      bash/path.sh. _get_homebrew_root() (bash/functions.sh) returns
+  #      /opt/homebrew if it exists and /usr/local otherwise. On a Linux
+  #      runner it therefore resolves to /usr/local — which exists on
+  #      ubuntu-latest, so the test's "Homebrew not installed" skip branch
+  #      does NOT fire. Ruby's Gem.bindir is also /usr/local/bin there, so the
+  #      GEM_EXE_DIR tier hoists /usr/local/bin ahead of ~/.bun/bin and the
+  #      `assert_before "${HOME}/.bun/bin" "${homebrew_root}/bin"` assertion
+  #      fails. That failure is an artifact of modelling Homebrew on Linux,
+  #      not a real regression — verified by direct reproduction.
+  #   2. bash/env.sh probes macOS-only paths (/Library/Java/...).
+  #
+  # Running on Linux would produce a red check that says nothing about the
+  # code, which is worse than no check at all.
+  bash-tests:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing here pushes, and the checked-out credential would
+          # otherwise persist in .git/config for later steps to reach.
+          persist-credentials: false
+
+      # macOS ships bash 3.2 at /bin/bash (GPLv3 licensing), but several
+      # tests use bash 4.4+ features — notably `mapfile -d` in
+      # test-gh-wrapper-draft-off-org.sh, which on 3.2 is simply "command not
+      # found", leaving the result array empty and letting the test report a
+      # misleading verdict instead of erroring. run-tests.sh refuses to run on
+      # <4.4 for exactly that reason, so install bash 5 and invoke it
+      # explicitly rather than relying on whatever `bash` resolves to.
+      - name: Install bash 5
+        run: brew install bash
+
+      - name: Show bash version
+        run: $(brew --prefix)/bin/bash --version
+
+      - name: Run bash test suite
+        run: $(brew --prefix)/bin/bash bash/tests/run-tests.sh

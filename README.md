@@ -132,8 +132,22 @@ All 11 original repositories were archived on GitHub after the merge.
 This repo uses global git hooks from `~/.config/git/hooks/`. See `git/README.md` for details on the hook system, which includes:
 
 - **Pre-commit**: Linting (shell, YAML, markdown, HTML, Python), formatting (prettier), and automated code review
-- **Pre-push**: Push-target validation (blocks direct pushes to `main`)
+- **Pre-push**: Push-target validation (blocks direct pushes to `main`), plus the project-local extension at `.ralph/pre-push`, which runs the bash test suite
 - **Commit-msg**: Conventional commit format enforcement
+
+## Tests
+
+Regression tests for the shell config and git hooks live in `bash/tests/`:
+
+```bash
+bash bash/tests/run-tests.sh          # whole suite
+bash bash/tests/run-tests.sh path-order   # one test, by name substring
+```
+
+The runner discovers every `bash/tests/test-*.sh` automatically. It runs on
+push via `.ralph/pre-push` and in CI via `.github/workflows/bash-tests.yml`
+(on a macOS runner — the tests assert macOS-specific behavior). Requires
+bash 5. See `bash/README.md` for the conventions for adding a test.
 
 ## Setup on a new machine
 

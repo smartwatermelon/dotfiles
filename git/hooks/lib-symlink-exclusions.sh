@@ -59,6 +59,9 @@ _symlink_is_excluded() {
     test/*) return 0 ;;
     # Copy-and-edit templates — meant to be copied by hand, not symlinked
     *.example) return 0 ;;
+    # Project-local hook extension (runs the bash test suite before push).
+    # Repo tooling, invoked from the repo by git/hooks/pre-push — not app config.
+    .ralph/*) return 0 ;;
     # Other repo-level files that may be added
     Makefile) return 0 ;;
     .editorconfig) return 0 ;;
