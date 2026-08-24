@@ -57,6 +57,12 @@ _symlink_is_excluded() {
     *.bats) return 0 ;;
     tests/*) return 0 ;;
     test/*) return 0 ;;
+    # Nested test dirs (e.g. bash/tests/). A bash `case` glob does not cross
+    # directory levels, so `tests/*` matches only at the repo root — without
+    # these, bash/tests/* was symlinked into ~/.config/bash/tests
+    # (smartwatermelon/dotfiles#227).
+    */tests/*) return 0 ;;
+    */test/*) return 0 ;;
     # Copy-and-edit templates — meant to be copied by hand, not symlinked
     *.example) return 0 ;;
     # Project-local hook extension (runs the bash test suite before push).

@@ -25,6 +25,13 @@
 # automatic review silently did not fire in this checkout.
 set -euo pipefail
 
+# Suite convention (bash/README.md, "Adding a test"): CDPATH makes `cd` echo
+# its resolved path to stdout, which corrupts command substitution. Unset it
+# once here so any `cd` added later is protected without per-call-site
+# reasoning; the inline `CDPATH=''` below stays as a local belt-and-braces
+# guard, matching test-allup-continue-state.sh and run-tests.sh.
+unset CDPATH
+
 REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail=0
@@ -128,13 +135,19 @@ else
   _fail "origin remote is missing"
 fi
 
-# The loop above fails per offending remote; this reports the clean case so
-# a passing run shows the assertion actually ran.
+# The loop above already fails once per offending remote, naming it and its
+# URL. This block exists only to report the CLEAN case, so a passing run shows
+# the assertion actually ran rather than skipping a zero-iteration loop. It
+# deliberately does not _fail on a dirty run: a summary count adds a second
+# FAIL line for a condition the loop has already reported in more useful
+# detail (smartwatermelon/dotfiles#242).
+#
+# The `|| true` is load-bearing, not defensive habit: `grep -c` exits 1 when
+# the count is zero — the clean case — which `set -e` would otherwise treat
+# as a fatal error.
 unexpected_count=$(git -C "${REPO_ROOT}" remote | grep -cvx "origin" || true)
 if [[ "${unexpected_count}" -eq 0 ]]; then
   _pass "no remotes other than origin"
-else
-  _fail "${unexpected_count} unexpected remote(s) present"
 fi
 
 echo
