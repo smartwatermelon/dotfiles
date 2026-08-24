@@ -546,7 +546,7 @@ check_pr_review_iteration() {
 # =========================================================
 # PROJECT-LOCAL PRE-PUSH EXTENSIONS
 # =========================================================
-# Repos can add a .ralph/pre-push script for project-specific
+# Repos can add a .project-hooks/pre-push script for project-specific
 # checks (tests, type-checking, etc.) that run before push.
 #
 # Trust model: same as Makefiles, npm scripts, and git hooks — if you
@@ -559,7 +559,7 @@ run_project_extensions() {
     return 0
   fi
 
-  local ext="${repo_root}/.ralph/pre-push"
+  local ext="${repo_root}/.project-hooks/pre-push"
   if [[ -x "${ext}" ]]; then
     log "Running project-local pre-push extension: ${ext}"
     if ! "${ext}"; then

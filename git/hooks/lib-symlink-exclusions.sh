@@ -61,7 +61,7 @@ _symlink_is_excluded() {
     *.example) return 0 ;;
     # Project-local hook extension (runs the bash test suite before push).
     # Repo tooling, invoked from the repo by git/hooks/pre-push — not app config.
-    .ralph/*) return 0 ;;
+    .project-hooks/*) return 0 ;;
     # Other repo-level files that may be added
     Makefile) return 0 ;;
     .editorconfig) return 0 ;;

@@ -15,7 +15,7 @@
 #
 # Because the mechanism is unknown, this test detects rather than prevents:
 # it asserts the checkout's local config is clean, so the next occurrence
-# fails loudly in the suite (which runs on every push via .ralph/pre-push
+# fails loudly in the suite (which runs on every push via .project-hooks/pre-push
 # and in CI) no matter what writes it.
 #
 # The empty-hooksPath case is the one that actually mattered. An empty
