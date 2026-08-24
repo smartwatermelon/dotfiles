@@ -41,6 +41,71 @@ After installation, the configuration will be loaded automatically when opening 
 - Set environment variables in `env.sh`
 - Store sensitive information in `secrets.sh` (which is git-ignored)
 
+## Testing
+
+Regression tests live in `tests/`. Each is a standalone script that sets up its
+own sandbox (scratch `$HOME`, scratch git repos, mocked `gh`), asserts, cleans
+up after itself, and reports via its exit code.
+
+Run the whole suite:
+
+```bash
+bash bash/tests/run-tests.sh
+```
+
+The runner discovers every `bash/tests/test-*.sh` automatically, prints each
+test's output, and exits non-zero if any fail — so there is no list to keep in
+sync when a test is added.
+
+Run a single test, by passing a substring of its name:
+
+```bash
+bash bash/tests/run-tests.sh path-order      # runs test-path-order.sh
+```
+
+Or invoke the file directly:
+
+```bash
+bash bash/tests/test-path-order.sh
+```
+
+**Bash 5 is required.** Some tests use `mapfile -d` (bash 4.4+), which the
+bash 3.2 that macOS ships at `/bin/bash` does not have. The runner checks the
+version and refuses to run on anything older rather than letting those tests
+quietly produce empty results and appear to pass.
+
+### When these run automatically
+
+- **On push** — `.ralph/pre-push` runs the suite via the pre-push hook's
+  project-extension seam (see `git/hooks/pre-push`). A failure blocks the push.
+- **In CI** — `.github/workflows/bash-tests.yml` runs it on every pull request
+  and on pushes to `main`. It uses a **macOS** runner: the tests assert against
+  macOS assumptions (Homebrew-rooted PATH tiers, macOS-only paths in `env.sh`),
+  so a Linux runner would fail for reasons that say nothing about the code.
+
+### Adding a test
+
+Name the file `tests/test-<subject>.sh` and make it executable — that is the
+whole registration step; the runner and CI pick it up on the next run.
+
+Follow the conventions the existing tests share:
+
+- `#!/usr/bin/env bash` shebang, then `set -euo pipefail` (or `set -uo pipefail`
+  where a case deliberately expects a non-zero exit).
+- `unset CDPATH` before any `cd` — with `CDPATH` set, `cd` echoes the resolved
+  path to stdout and corrupts command substitutions.
+- Resolve the repo root rather than assuming a working directory:
+  `REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"`.
+- Isolate from the real machine: scratch `$HOME` or `mktemp -d`, with a
+  `trap 'rm -rf ...' EXIT` for cleanup. Never touch real git remotes, real
+  `gh` auth, or the developer's actual config.
+- Print `PASS: <case>` / `FAIL: <case>` per assertion, track a `fail` variable,
+  and `exit "${fail}"` at the end.
+- Prove a stub or mock is actually intercepting before relying on it — a clean
+  result from a stub that never fired proves nothing.
+- Open with a comment explaining the regression the test covers and, where
+  there is one, the issue number.
+
 ## Requirements
 
 - macOS
