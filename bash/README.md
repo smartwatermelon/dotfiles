@@ -50,7 +50,7 @@ up after itself, and reports via its exit code.
 Run the whole suite:
 
 ```bash
-bash bash/tests/run-tests.sh
+"$(brew --prefix)/bin/bash" bash/tests/run-tests.sh
 ```
 
 The runner discovers every `bash/tests/test-*.sh` automatically, prints each
@@ -60,19 +60,32 @@ sync when a test is added.
 Run a single test, by passing a substring of its name:
 
 ```bash
-bash bash/tests/run-tests.sh path-order      # runs test-path-order.sh
+"$(brew --prefix)/bin/bash" bash/tests/run-tests.sh path-order   # runs test-path-order.sh
 ```
 
 Or invoke the file directly:
 
 ```bash
-bash bash/tests/test-path-order.sh
+"$(brew --prefix)/bin/bash" bash/tests/test-path-order.sh
 ```
 
-**Bash 5 is required.** Some tests use `mapfile -d` (bash 4.4+), which the
-bash 3.2 that macOS ships at `/bin/bash` does not have. The runner checks the
-version and refuses to run on anything older rather than letting those tests
-quietly produce empty results and appear to pass.
+**Bash 4.4 or newer is required.** Some tests use `mapfile -d`, and the `-d`
+option arrived in bash 4.4 — the bash 3.2 that macOS ships at `/bin/bash` has
+no `mapfile` builtin at all. The runner checks the version and refuses to run
+on anything older rather than letting those tests quietly produce empty
+results and appear to pass.
+
+Invoke the runner with an explicit modern bash rather than a bare `bash`,
+which resolves through `PATH` and on macOS can still find 3.2:
+
+```bash
+"$(brew --prefix)/bin/bash" bash/tests/run-tests.sh
+```
+
+The runner passes its own interpreter down to each child test, so whichever
+bash you start it with is the one every test runs under. On macOS, Homebrew
+is how you get a modern bash; it installs bash 5, comfortably above the 4.4
+floor.
 
 ### When these run automatically
 
@@ -109,7 +122,7 @@ Follow the conventions the existing tests share:
 ## Requirements
 
 - macOS
-- Bash 5 (installable via Homebrew)
+- Bash 4.4 or newer (macOS ships 3.2; `brew install bash` gets you 5)
 
 ## License
 

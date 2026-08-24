@@ -82,6 +82,18 @@ for test in "${tests[@]}"; do
   # with "mapfile: command not found" despite the guard having passed. $BASH is
   # set by bash to the full path of the running interpreter, so the vetted one
   # propagates to every child.
+  #
+  # The contract this places on the CALLER: whichever bash you invoke this
+  # runner with is the bash every test runs under. The guard above only
+  # establishes a 4.4 floor, not that you got the interpreter you meant — so
+  # invoke the runner explicitly:
+  #
+  #   "$(brew --prefix)/bin/bash" bash/tests/run-tests.sh
+  #
+  # rather than a bare `bash run-tests.sh`, whose PATH lookup could land on any
+  # 4.4+ bash that happens to come first. Both current callers do this:
+  # `.ralph/pre-push` resolves a Homebrew bash before exec'ing the runner, and
+  # `.github/workflows/bash-tests.yml` installs bash 5 and invokes it by path.
   if "${BASH}" "${test}"; then
     passed+=("${name}")
     echo "--> PASS ${name}"
