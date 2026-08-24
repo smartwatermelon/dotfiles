@@ -96,6 +96,23 @@ floor.
   macOS assumptions (Homebrew-rooted PATH tiers, macOS-only paths in `env.sh`),
   so a Linux runner would fail for reasons that say nothing about the code.
 
+### The one test that inspects the real repo
+
+`tests/test-git-config-hygiene.sh` is the exception to the isolation rule
+below: it deliberately asserts against this checkout's own `.git/config`
+rather than a scratch fixture, because that is the thing it guards.
+
+It fails if the local config picks up a `user.email` / `user.name` override,
+an empty `core.hooksPath`, or any remote besides `origin` — all states this
+repo has actually been found in (see #239). It never writes; it only reads.
+
+The `core.hooksPath` case is the one worth knowing about independently: an
+empty value does **not** mean "unset". Git resolves it to `./`, the repo
+root, where the `pre-commit/` *directory* satisfies an `[[ -x ]]` check while
+git still finds no executable file to run — so every hook silently stops
+firing, and local review stops with it. The test therefore checks that a
+`pre-commit` regular file actually resolves, not merely that the key is unset.
+
 ### Adding a test
 
 Name the file `tests/test-<subject>.sh` and make it executable — that is the
