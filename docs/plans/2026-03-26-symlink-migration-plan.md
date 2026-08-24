@@ -1,5 +1,10 @@
 # Symlink Migration Implementation Plan
 
+> **Historical document.** This plan records the migration as it was carried out
+> in March 2026 and is kept unedited as a record. The project-local hook seam it
+> calls `.ralph/` was renamed to `.project-hooks/` in #233; the old name below is
+> accurate for the time of writing, not for current behavior.
+>
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Sync diverged files between `~/Developer/dotfiles` and `~/.config`, then rewrite `install.sh` to create per-file symlinks from `~/.config` into the repo.
