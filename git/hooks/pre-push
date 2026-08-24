@@ -306,6 +306,12 @@ run_reviews() {
   local diff_lines
   diff_lines=$(echo "${full_diff}" | wc -l | tr -d ' ')
 
+  # Runs a whole-codebase review that FILES its non-blocking findings as GitHub
+  # issues, in whatever repo you are pushing from (this hook is global via
+  # core.hooksPath). To read those findings before they are filed, dry-run this
+  # same script with `gh` stubbed first: see claude-config/docs/CHECKLISTS.md ->
+  # "Pre-Push Review Dry-Run". That procedure is authored alongside the reviewer,
+  # not alongside this hook — if run-review.sh ever moves, the docs move with it.
   local REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
   if [[ ! -x "${REVIEW_SCRIPT}" ]]; then
     log_warning "run-review.sh not found — skipping reviews"

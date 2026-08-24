@@ -132,6 +132,8 @@ and check whether any reported findings' line ranges overlap your diff.
 
 **Why**: Ensures CI workflows use same linting rules as local development
 
+**Also runs AI review**: on non-main branches with a diff against `main`, the hook runs `~/.claude/hooks/run-review.sh` in `--mode=full-diff` and `--mode=codebase`. The codebase pass **files its non-blocking findings as GitHub issues in whatever repo you are pushing from** — this hook is global via `core.hooksPath`, so that is not limited to claude-config. To read those findings before they are filed, dry-run the same script with `gh` stubbed: see `claude-config/docs/CHECKLISTS.md` -> "Pre-Push Review Dry-Run" (also reachable as `~/.claude/docs/CHECKLISTS.md`). The reviewer and its procedure live in claude-config; if `run-review.sh` moves, the docs move with it.
+
 ### lint-shell.sh
 
 **Purpose**: Auto-fix shell scripts with shellcheck + shfmt
