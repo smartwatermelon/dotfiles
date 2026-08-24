@@ -196,6 +196,15 @@ nested_must_include=(
   "bash/testing-utils.sh"
   "git/latest/config"
   "bash/tests.sh"
+  # Directory-segment cases: a *directory* whose name merely contains "test"
+  # is not a test dir. `*/tests/*` correctly won't match these, but nothing
+  # pinned that until now — a future edit widening the glob to `*test*/*`
+  # would silently stop symlinking real config, and no test would catch it
+  # (smartwatermelon/dotfiles#245). Each case below was verified to fail
+  # against that widened glob, so these assert behavior rather than assume it.
+  "bash/testing/config.sh"
+  "a/test-utils/b.sh"
+  "bash/contest/c.sh"
 )
 for pattern in "${nested_must_include[@]}"; do
   if _symlink_is_excluded "${pattern}"; then
