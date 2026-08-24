@@ -12,7 +12,7 @@
 set -euo pipefail
 
 # Hook parameters from git
-_prev_head=$1 # Unused - we only care about branch_checkout
+_prev_head=$1 # Null SHA on clone/init; a real commit on a branch switch
 _new_head=$2  # Unused - we only care about branch_checkout
 branch_checkout=$3
 
@@ -60,6 +60,126 @@ mkdir -p ".claude/hooks/extensions"
 if [[ -f ".claude/hooks/extensions/example.sh.disabled" ]]; then
   chmod -x ".claude/hooks/extensions/example.sh.disabled"
 fi
+
+# Record the tracking policy for the scaffold we just created.
+#
+# The scaffold is generated content this hook can reproduce on demand, and
+# the other common inhabitant of .claude/ (settings.local.json) is
+# machine-local by Claude Code's own naming convention -- so "ignored" is the
+# right default. Without this, each repo's .claude/ ends up arbitrarily
+# tracked or ignored by whoever touches it next (smartwatermelon/dotfiles#220).
+#
+# This hook is global via core.hooksPath and fires on every clone, init, AND
+# branch switch on this machine, so it is deliberately reluctant to write.
+# Four guards, in order of what they rule out:
+#
+#   0. Not a fresh clone/init -- post-checkout also fires with $3 == 1 on
+#      `git checkout -b` and on `git worktree add`, and in both of those the repo
+#      already had its chance to decide. Two signals separate them:
+#        - prev_head ($1) is the null SHA on clone and init, but a real
+#          commit on a branch switch, so it rules out `git checkout -b`.
+#        - a *linked* worktree also reports the null SHA, so prev_head alone
+#          is not enough. A linked worktree's --git-dir differs from its
+#          --git-common-dir (it lives at <repo>/.git/worktrees/<name>),
+#          whereas a main work tree's two agree. Its .claude/ is absent
+#          because the parent repo ignores it, so the "does .claude/ exist"
+#          no-op above does not fire, and without this check we would rewrite
+#          an established repo's committed, *tracked* .gitignore.
+#   1. Already tracked -- if any path under .claude/ is in the index, the repo
+#      chose to track it. Adding an ignore line there would be actively wrong:
+#      gitignore does not affect already-tracked files, so the repo would
+#      claim a policy it isn't following.
+#   2. Already ignored -- checked via `git check-ignore`, which consults BOTH
+#      .gitignore (committed, shared) and .git/info/exclude (local, never
+#      committed), plus any global core.excludesFile. Grepping .gitignore
+#      alone would miss the info/exclude case and convert someone's
+#      deliberate private hold into a shared committed policy.
+#   3. A tracked .gitignore -- the repo committed that file, and rewriting it
+#      would leave every fresh clone with a *modified tracked file*, which
+#      breaks `git diff --exit-code` checks, `git describe --dirty`, and any
+#      `git commit -a` that would sweep the line into an unrelated commit. In
+#      that case the entry goes to .git/info/exclude instead: same effect,
+#      local to this clone, never committed, and the clone stays clean.
+#      A non-regular .gitignore (symlink, directory) is skipped outright.
+#
+# Every write is failure-tolerant: a post-checkout that exits non-zero makes
+# `git clone` itself exit 1 *after* the files have already landed, which is a
+# far worse outcome than skipping the ignore line. Hence `|| return 0` on the
+# writes and `|| true` on the call.
+#
+# Projects that do want to share part of .claude/ can negate specific paths:
+#   .claude/
+#   !.claude/skills/
+add_claude_gitignore_entry() {
+  # Not a work tree (or git is unhappy) -- do nothing.
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+  # Guard 0a: prev_head is the null SHA only on a fresh clone or init; a
+  # branch switch passes the commit it moved away from.
+  if [[ ! "${_prev_head}" =~ ^0+$ ]]; then
+    return 0
+  fi
+
+  # Guard 0b: a linked worktree also reports the null SHA, so exclude it by
+  # comparing its own git dir against the shared one -- they differ only for
+  # a linked worktree.
+  local git_dir="" common_dir=""
+  git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null) || return 0
+  common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+  if [[ "${git_dir}" != "${common_dir}" ]]; then
+    return 0
+  fi
+
+  # Guard 1: any path under .claude/ already tracked in the index.
+  local tracked=""
+  tracked=$(git ls-files -- .claude 2>/dev/null) || tracked=""
+  if [[ -n "${tracked}" ]]; then
+    return 0
+  fi
+
+  # Guard 2: already ignored via .gitignore, .git/info/exclude, or a global
+  # core.excludesFile.
+  if git check-ignore -q ".claude/" 2>/dev/null; then
+    return 0
+  fi
+
+  # Guard 3: if .gitignore is tracked, write to .git/info/exclude instead so
+  # the clone is not left holding a modified tracked file.
+  local target=".gitignore" label=".gitignore"
+  local tracked_ignore=""
+  tracked_ignore=$(git ls-files -- .gitignore 2>/dev/null) || tracked_ignore=""
+  if [[ -n "${tracked_ignore}" ]]; then
+    local common_git_dir=""
+    common_git_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+    [[ -d "${common_git_dir}/info" ]] || mkdir -p "${common_git_dir}/info" 2>/dev/null || return 0
+    target="${common_git_dir}/info/exclude"
+    label=".git/info/exclude"
+  fi
+
+  # Refuse anything that is not a plain writable file. -e follows symlinks, so
+  # a dangling symlink reports neither -e nor -w and would slip past a naive
+  # check straight into a failing append.
+  if [[ -L "${target}" ]]; then
+    return 0
+  fi
+  if [[ -e "${target}" ]]; then
+    [[ -f "${target}" && -w "${target}" ]] || return 0
+  fi
+
+  # Append, creating the file if absent and keeping a trailing newline even
+  # when the existing file lacks one. Every write tolerates failure.
+  local last_byte=""
+  if [[ -s "${target}" ]]; then
+    last_byte=$(tail -c 1 "${target}" 2>/dev/null) || last_byte=""
+    if [[ -n "${last_byte}" ]]; then
+      printf '\n' >>"${target}" 2>/dev/null || return 0
+    fi
+  fi
+  printf '.claude/\n' >>"${target}" 2>/dev/null || return 0
+  echo "📝 Added .claude/ to ${label}"
+}
+
+add_claude_gitignore_entry || true
 
 echo "✅ Claude Code infrastructure created in .claude/"
 echo ""

@@ -21,6 +21,26 @@ The `.claude/` directory provides project-specific configuration and extensions 
         └── example.sh.disabled  # Example extension (disabled by default)
 ```
 
+## Is this directory tracked?
+
+By default, **no**. The hook that created this directory also recorded `.claude/` as ignored — normally in the repo's `.gitignore`, or in `.git/info/exclude` when `.gitignore` is already tracked (so your clone isn't left holding a modified committed file).
+
+The scaffold is generated content the hook can reproduce on demand, and `settings.local.json` — the other common inhabitant — is machine-local by Claude Code's own `.local.` naming convention.
+
+The hook only writes into a genuinely fresh clone or init that hasn't already decided. If `.claude/` was already tracked, or already ignored by any mechanism, it leaves that decision alone.
+
+If part of this directory *is* meant to be shared with the team — a `skills/` directory, a `pre-launch.sh`, a secrets template — negate those specific paths and commit them:
+
+```gitignore
+.claude/
+!.claude/skills/
+!.claude/pre-launch.sh
+```
+
+To track the whole directory instead, remove the `.claude/` line and `git add .claude`.
+
+Run `git check-ignore -v .claude/` to see which file and line is doing the ignoring.
+
 ## Quick Start
 
 ### Option 1: No Additional Configuration Needed
