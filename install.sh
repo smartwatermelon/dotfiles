@@ -185,43 +185,10 @@ _ensure_symlink() {
   installed+=("symlink:${link}")
 }
 
-_is_excluded() {
-  case "$1" in
-    # CI / GitHub metadata
-    .github/*) return 0 ;;
-    # Git ignore files (repo-level, not app configs)
-    .gitignore) return 0 ;;
-    */.gitignore) return 0 ;;
-    # Repo management files
-    Brewfile) return 0 ;;
-    README.md) return 0 ;;
-    */README.md) return 0 ;;
-    install.sh) return 0 ;;
-    docs/*) return 0 ;;
-    # Project metadata that may be added in the future
-    LICENSE*) return 0 ;;
-    CLAUDE.md) return 0 ;;
-    */CLAUDE.md) return 0 ;;
-    MEMORY.md) return 0 ;;
-    */MEMORY.md) return 0 ;;
-    .claude/*) return 0 ;;
-    .pre-commit-config.yaml) return 0 ;;
-    # Test files
-    *.test.*) return 0 ;;
-    *.bats) return 0 ;;
-    tests/*) return 0 ;;
-    test/*) return 0 ;;
-    # Copy-and-edit templates — meant to be copied by hand, not symlinked
-    *.example) return 0 ;;
-    # Other repo-level files that may be added
-    Makefile) return 0 ;;
-    .editorconfig) return 0 ;;
-    .gitattributes) return 0 ;;
-    CONTRIBUTING.md) return 0 ;;
-    CHANGELOG.md) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+# Exclusion list is shared with the pre-commit repair hook — see
+# git/hooks/lib-symlink-exclusions.sh. Defines _symlink_is_excluded().
+# shellcheck source=git/hooks/lib-symlink-exclusions.sh
+source "${REPO_DIR}/git/hooks/lib-symlink-exclusions.sh"
 
 # Known config directories that should be symlinked into ~/.config.
 # Any top-level path not in this list AND not excluded triggers a warning.
@@ -255,13 +222,13 @@ fi
 _info "Creating config symlinks from repo to ~/.config..."
 
 while IFS= read -r file; do
-  if _is_excluded "${file}"; then
+  if _symlink_is_excluded "${file}"; then
     continue
   fi
 
   # Safety net: warn about tracked files not in a known config directory
   if ! _is_known_config_path "${file}"; then
-    _warn "Unrecognized config path: ${file} — add to _KNOWN_CONFIG_DIRS or _is_excluded"
+    _warn "Unrecognized config path: ${file} — add to _KNOWN_CONFIG_DIRS or git/hooks/lib-symlink-exclusions.sh"
     failures+=("unrecognized-path:${file}")
     continue
   fi
@@ -489,7 +456,7 @@ else
   _info "Checking config symlink health..."
   symlink_errors=0
   while IFS= read -r file; do
-    if _is_excluded "${file}"; then
+    if _symlink_is_excluded "${file}"; then
       continue
     fi
     if ! _is_known_config_path "${file}"; then
