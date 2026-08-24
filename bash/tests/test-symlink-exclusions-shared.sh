@@ -168,6 +168,43 @@ for pattern in "${must_include[@]}"; do
 done
 ((overreach == 0)) && _pass "real config paths are still symlinked"
 
+# --- Case 7: nested test directories are excluded ------------------------
+# A bash `case` glob does not cross directory levels, so `tests/*` matches
+# only at the repo root. Before #227 that let every file under bash/tests/
+# get symlinked into ~/.config/bash/tests. These cases pin the `*/tests/*`
+# and `*/test/*` patterns that close it.
+echo "Case: nested test directories are excluded"
+nested_missing=0
+nested_must_exclude=(
+  "bash/tests/test-foo.sh"
+  "bash/tests/run-tests.sh"
+  "git/test/helper.sh"
+  "a/b/tests/deep.sh"
+)
+for pattern in "${nested_must_exclude[@]}"; do
+  if ! _symlink_is_excluded "${pattern}"; then
+    _fail "nested test path '${pattern}' is not excluded — it would be symlinked into ~/.config"
+    nested_missing=1
+  fi
+done
+((nested_missing == 0)) && _pass "all ${#nested_must_exclude[@]} nested test paths excluded"
+
+# The patterns must not swallow config that merely has "test" in a path
+# segment — only a directory named exactly `test` or `tests` counts.
+nested_overreach=0
+nested_must_include=(
+  "bash/testing-utils.sh"
+  "git/latest/config"
+  "bash/tests.sh"
+)
+for pattern in "${nested_must_include[@]}"; do
+  if _symlink_is_excluded "${pattern}"; then
+    _fail "nested test patterns wrongly exclude real config '${pattern}'"
+    nested_overreach=1
+  fi
+done
+((nested_overreach == 0)) && _pass "paths merely containing 'test' are still symlinked"
+
 echo ""
 if ((fail != 0)); then
   echo "test-symlink-exclusions-shared: SOME CHECKS FAILED" >&2
