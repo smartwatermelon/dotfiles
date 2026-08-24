@@ -18,6 +18,8 @@ git/
 ├── ignore              # Additional ignore patterns
 ├── hooks/              # Custom git hooks
 │   ├── lint-shell.sh   # Shell script linting with auto-fix
+│   ├── lib-symlink-exclusions.sh  # Which repo files are NOT symlinked to ~/.config
+│   ├── lib-symlink-repair.sh      # Repairs ~/.config symlinks clobbered by atomic writes
 │   ├── pre-commit      # Pre-commit hook (delegates to repo or global)
 │   ├── commit-msg      # Commit-msg hook (conventional-commits validation + AI review)
 │   ├── post-checkout   # Post-checkout hook (delegates to the template hook)
@@ -83,6 +85,34 @@ All hooks are configured via `core.hooksPath` to use this directory instead of p
 3. If no: Runs global linting (fallback to `lint-shell.sh`)
 
 **Integration**: Works with [pre-commit framework](https://pre-commit.com/) configurations in individual repos
+
+#### Symlink repair
+
+Before linting, the hook sources `hooks/lib-symlink-repair.sh` and runs a
+repair pass. Editors and tools that write atomically (write a temp file,
+rename it over the target) replace a symlink with a regular file. The pass
+walks `git ls-files`, finds `~/.config` entries that are regular files where
+a symlink belongs, copies any changed content back into the repo, and
+restores the link.
+
+It decides which files it manages using `_symlink_is_excluded()` from
+`hooks/lib-symlink-exclusions.sh` — the same list `install.sh` uses to decide
+what to symlink in the first place. The two must agree; see
+[What does not get symlinked](../README.md#what-does-not-get-symlinked).
+
+`lib-symlink-repair.sh` is sourced from two different places, so it resolves
+the exclusion list without assuming the caller's cwd or environment:
+
+1. The sibling of its own fully-resolved path. The hook sources the deployed
+   copy at `~/.config/git/hooks/lib-symlink-repair.sh`, which is a symlink
+   into the repo; bash reports the symlink in `BASH_SOURCE`, so following it
+   is what lands back inside the repo.
+2. Its literal sibling directory.
+3. `${REPO_DIR}/git/hooks/`.
+
+If none resolve, it fails **closed** — `_symlink_is_excluded()` returns true
+for everything, so the repair pass manages nothing rather than touching files
+it has no list for.
 
 #### Bypassing pre-existing zizmor findings
 

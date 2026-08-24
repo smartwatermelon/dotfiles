@@ -41,6 +41,36 @@ Some tools expect config in `~/` rather than `~/.config/`. These symlinks bridge
 
 Git, vim, yamllint, btop, gh, and yt-dlp all read from `~/.config/` natively via XDG conventions or built-in support.
 
+### What does not get symlinked
+
+`install.sh` walks `git ls-files` and symlinks each tracked file into
+`~/.config/`. Not every tracked file belongs there — `~/.config` is where
+applications look for configuration, so repo-management files (README,
+LICENSE, CI metadata, `Makefile`, tests, agent instructions) and
+copy-and-edit templates (`*.example`) are skipped.
+
+That skip list lives in one place:
+
+**`git/hooks/lib-symlink-exclusions.sh`** — defines `_symlink_is_excluded()`,
+a single `case` over repo-relative paths.
+
+Two consumers source it, and they must agree:
+
+| Consumer | Uses the list to decide |
+|----------|-------------------------|
+| `install.sh` | which tracked files get a symlink |
+| `git/hooks/lib-symlink-repair.sh` | which symlinks the pre-commit repair pass manages |
+
+They previously kept separate copies, which drifted by eight patterns
+(#225). Disagreement fails silently in both directions: a file the
+installer links but the hook ignores drifts unmanaged, and a file the
+installer skips but the hook manages gets recreated on every commit.
+`bash/tests/test-symlink-exclusions-shared.sh` guards against the
+duplication returning.
+
+To stop a newly added file from being symlinked, add its pattern to
+`lib-symlink-exclusions.sh` — nowhere else.
+
 ## Gitignore strategy
 
 The root `.gitignore` uses a **default-ignore, explicit-allow** pattern:

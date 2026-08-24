@@ -5,39 +5,73 @@
 # (caused by atomic writes), copies content back to repo, restores symlinks.
 #
 # Requires REPO_DIR to be set before sourcing.
+# Sources lib-symlink-exclusions.sh (same directory) for the exclusion list.
 # Sets SYMLINK_REPAIRS=() with list of repaired files.
 
 SYMLINK_REPAIRS=()
 
-# Files in the repo that should NOT be symlinked to ~/.config
-_repair_is_excluded() {
-  local file="$1"
-  case "${file}" in
-    .github/*) return 0 ;;
-    .gitignore) return 0 ;;
-    */.gitignore) return 0 ;;
-    Brewfile) return 0 ;;
-    README.md) return 0 ;;
-    */README.md) return 0 ;;
-    install.sh) return 0 ;;
-    docs/*) return 0 ;;
-    LICENSE*) return 0 ;;
-    CLAUDE.md) return 0 ;;
-    MEMORY.md) return 0 ;;
-    .claude/*) return 0 ;;
-    Makefile) return 0 ;;
-    .editorconfig) return 0 ;;
-    .gitattributes) return 0 ;;
-    CHANGELOG*) return 0 ;;
-    .pre-commit-config.yaml) return 0 ;;
-    *.test.*) return 0 ;;
-    *.spec.*) return 0 ;;
-    *.bats) return 0 ;;
-    tests/*) return 0 ;;
-    test/*) return 0 ;;
-    *) return 1 ;;
-  esac
+# Exclusion list is shared with install.sh — see lib-symlink-exclusions.sh.
+#
+# Resolution has to survive the pre-commit hook, which sources the DEPLOYED
+# copy at ~/.config/git/hooks/lib-symlink-repair.sh. That deployed path is a
+# symlink into the repo, and bash sets BASH_SOURCE to the symlink, not its
+# target — so a plain sibling lookup finds ~/.config/git/hooks/, which only
+# holds the exclusions file after install.sh has deployed it. On a machine
+# mid-upgrade that lookup misses.
+#
+# So: try the sibling of the fully-resolved (symlink-followed) path first,
+# which always lands inside the repo, then the literal sibling, then
+# ${REPO_DIR}. Never assume the caller's cwd or shell environment.
+# Capture this file's own path at source time. Inside the function below,
+# BASH_SOURCE[0] would be this file too, but only because the function is
+# defined here — reading it from a variable set at the top level makes that
+# independent of where the function is called from, so moving or wrapping the
+# call cannot silently change which file gets resolved.
+_SYMLINK_REPAIR_SELF="${BASH_SOURCE[0]}"
+
+_symlink_exclusions_lib() {
+  local self="${_SYMLINK_REPAIR_SELF}" dir resolved candidate
+  dir="$(CDPATH='' cd "$(dirname "${self}")" && pwd)"
+
+  resolved="${self}"
+  while [[ -L "${resolved}" ]]; do
+    local link
+    link="$(readlink "${resolved}")"
+    if [[ "${link}" == /* ]]; then
+      resolved="${link}"
+    else
+      resolved="$(dirname "${resolved}")/${link}"
+    fi
+  done
+
+  for candidate in \
+    "$(dirname "${resolved}")/lib-symlink-exclusions.sh" \
+    "${dir}/lib-symlink-exclusions.sh" \
+    "${REPO_DIR:-}/git/hooks/lib-symlink-exclusions.sh"; do
+    if [[ -f "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
 }
+
+_SYMLINK_EXCLUSIONS_LIB="$(_symlink_exclusions_lib)" || {
+  echo "[symlink-repair] ERROR: cannot locate lib-symlink-exclusions.sh" >&2
+  echo "[symlink-repair] Run install.sh --sync to deploy it." >&2
+}
+
+if [[ -n "${_SYMLINK_EXCLUSIONS_LIB:-}" ]]; then
+  # shellcheck source=git/hooks/lib-symlink-exclusions.sh
+  source "${_SYMLINK_EXCLUSIONS_LIB}"
+fi
+
+# Fail closed: if the exclusion list could not be loaded, treat every file as
+# excluded rather than as includable. A missing list must never cause the
+# repair pass to start managing files it has no business touching.
+if ! declare -F _symlink_is_excluded >/dev/null 2>&1; then
+  _symlink_is_excluded() { return 0; }
+fi
 
 # Repair broken symlinks in ~/.config — returns 0 if all healthy or repaired
 repair_config_symlinks() {
@@ -50,7 +84,7 @@ repair_config_symlinks() {
 
   local file target link
   while IFS= read -r file; do
-    _repair_is_excluded "${file}" && continue
+    _symlink_is_excluded "${file}" && continue
 
     target="${REPO_DIR}/${file}"
     link="${HOME}/.config/${file}"
