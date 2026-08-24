@@ -80,18 +80,34 @@ fi
 
 echo "Case: hooks actually resolve to an executable pre-commit"
 
-# Resolving the key is not the same as the hook being runnable — a
-# same-named *directory* satisfies `[[ -x ]]`. Check for a regular file.
-hooks_dir="$(git -C "${REPO_ROOT}" rev-parse --git-path hooks)"
-case "${hooks_dir}" in
-  /*) resolved_hooks="${hooks_dir}" ;;
-  *) resolved_hooks="${REPO_ROOT}/${hooks_dir}" ;;
-esac
+# This assertion is machine-local, unlike the config checks above. It is
+# meaningful only where this machine's shared hooks are actually deployed
+# (via a global core.hooksPath). A CI runner has a fresh clone, no global
+# git config, and no ~/.config/git/hooks — so .git/hooks holds only samples
+# and there is nothing to assert. Skip there rather than fail, following
+# the pattern test-path-order.sh uses for Homebrew-dependent checks.
+#
+# The precondition is "a global core.hooksPath is configured", not "$CI is
+# set": that states the actual dependency, and it stays correct on a
+# developer machine that has not run install.sh yet.
+global_hooks_path="$(git config --global --get core.hooksPath 2>/dev/null || true)"
 
-if [[ -f "${resolved_hooks}/pre-commit" && -x "${resolved_hooks}/pre-commit" ]]; then
-  _pass "pre-commit resolves to an executable file (${resolved_hooks})"
+if [[ -z "${global_hooks_path}" ]]; then
+  echo "  SKIP: no global core.hooksPath configured; shared hooks are not deployed here"
 else
-  _fail "no executable pre-commit file at resolved hooks dir '${resolved_hooks}' — local review will not run"
+  # Resolving the key is not the same as the hook being runnable — a
+  # same-named *directory* satisfies `[[ -x ]]`. Check for a regular file.
+  hooks_dir="$(git -C "${REPO_ROOT}" rev-parse --git-path hooks)"
+  case "${hooks_dir}" in
+    /*) resolved_hooks="${hooks_dir}" ;;
+    *) resolved_hooks="${REPO_ROOT}/${hooks_dir}" ;;
+  esac
+
+  if [[ -f "${resolved_hooks}/pre-commit" && -x "${resolved_hooks}/pre-commit" ]]; then
+    _pass "pre-commit resolves to an executable file (${resolved_hooks})"
+  else
+    _fail "no executable pre-commit file at resolved hooks dir '${resolved_hooks}' — local review will not run"
+  fi
 fi
 
 echo "Case: no unexpected remotes"

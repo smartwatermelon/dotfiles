@@ -113,6 +113,14 @@ git still finds no executable file to run — so every hook silently stops
 firing, and local review stops with it. The test therefore checks that a
 `pre-commit` regular file actually resolves, not merely that the key is unset.
 
+That last check is machine-local, and it is skipped where no global
+`core.hooksPath` is configured — a CI runner, or a machine that has not run
+`install.sh` yet. The precondition is the absence of a global hooks setting
+rather than `$CI`, so it states the real dependency. The config-hygiene
+assertions are portable and always run; the empty-`hooksPath` bug is still
+caught in a skipping environment, because that is a config check rather than
+a resolution check.
+
 ### Adding a test
 
 Name the file `tests/test-<subject>.sh` and make it executable — that is the
