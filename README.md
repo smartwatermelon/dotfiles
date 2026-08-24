@@ -140,14 +140,17 @@ This repo uses global git hooks from `~/.config/git/hooks/`. See `git/README.md`
 Regression tests for the shell config and git hooks live in `bash/tests/`:
 
 ```bash
-bash bash/tests/run-tests.sh          # whole suite
-bash bash/tests/run-tests.sh path-order   # one test, by name substring
+# Invoke with an explicit modern bash: a bare `bash` resolves through PATH,
+# which on macOS can still find the 3.2 at /bin/bash.
+"$(brew --prefix)/bin/bash" bash/tests/run-tests.sh              # whole suite
+"$(brew --prefix)/bin/bash" bash/tests/run-tests.sh path-order   # one test, by substring
 ```
 
 The runner discovers every `bash/tests/test-*.sh` automatically. It runs on
 push via `.ralph/pre-push` and in CI via `.github/workflows/bash-tests.yml`
 (on a macOS runner — the tests assert macOS-specific behavior). Requires
-bash 5. See `bash/README.md` for the conventions for adding a test.
+bash 4.4 or newer, which on macOS means a Homebrew bash rather than the 3.2
+at `/bin/bash`. See `bash/README.md` for the conventions for adding a test.
 
 ## Setup on a new machine
 
