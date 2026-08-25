@@ -106,7 +106,12 @@ mkdir -p "${off_org_clone}" "${in_org_clone}"
 # its mktemp and its explicit cleanup cannot leak it. The `:-` guard covers the
 # window before it is assigned. Leaked fixture dirs are the defect class this
 # suite has been clearing out (#255, #256).
-trap 'rm -rf "${off_org_clone}" "${in_org_clone}" "${cwd_status_dir:-}"' EXIT
+# `${cwd_status_dir:+...}` expands to nothing at all when the variable is unset,
+# rather than handing `rm -rf` an empty string. macOS `rm -rf ""` happens to be
+# a silent no-op (verified), but GNU coreutils is not obliged to agree, and a
+# spurious error here would land on top of whatever real failure triggered the
+# abort. This form is unambiguous on both.
+trap 'rm -rf "${off_org_clone}" "${in_org_clone}" ${cwd_status_dir:+"${cwd_status_dir}"}' EXIT
 (cd "${off_org_clone}" && command git init -q && command git remote add origin git@github.com:someoutsideorg/foo.git)
 (cd "${in_org_clone}" && command git init -q && command git remote add origin git@github.com:smartwatermelon/dotfiles.git)
 

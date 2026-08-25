@@ -216,8 +216,29 @@ run_bounded() {
   fi
 
   if [[ -n "${timeout_bin}" ]]; then
-    "${timeout_bin}" "${secs}" "$@"
-    return $?
+    # --kill-after is not optional. Plain `timeout N` sends only SIGTERM and
+    # then waits indefinitely for a command that ignores it — it still reports
+    # 124, so it CLAIMS to have bounded the run while actually blocking for the
+    # command's full length. Measured: `timeout 2` against a SIGTERM-ignoring
+    # command returned 124 after 60 seconds; with --kill-after it returned at 4
+    # (smartwatermelon/dotfiles#262). Without this the hook keeps exactly the
+    # hang #251 set out to remove, on any machine that has coreutils.
+    local timeout_status=0
+    # A SIGKILLed child makes the invoking shell print a "Killed: 9" job notice
+    # on its own stderr. That is cosmetic and only appears on the escalation
+    # path, which already logs an explicit timeout warning right after — and it
+    # cannot be suppressed from inside this function, since the notice comes
+    # from the shell reaping the job rather than from the command. Left alone
+    # rather than papered over with a subshell that does not actually stop it.
+    "${timeout_bin}" --kill-after="${SEMGREP_TIMEOUT_KILL_GRACE:-2}" "${secs}" "$@" \
+      || timeout_status=$?
+    # When --kill-after escalates, timeout exits 137 (SIGKILL) rather than 124.
+    # Both mean the same thing to the caller — the budget expired — so report
+    # one code, matching the fallback path below.
+    if ((timeout_status == 137 || timeout_status == 143)); then
+      return 124
+    fi
+    return "${timeout_status}"
   fi
 
   # Fallback watchdog: run the command in the background, kill it if it
