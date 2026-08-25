@@ -30,13 +30,18 @@ fail=0
 assert_fails() {
   local desc="$1"
   shift
-  if "$@" >/tmp/gpush-test-out-$$ 2>&1; then
+  local out_file
+  out_file="$(mktemp "${TMPDIR:-/tmp}/gpush-test-out.XXXXXX")"
+  if "$@" >"${out_file}" 2>&1; then
     echo "FAIL: ${desc} — expected non-zero exit, got 0"
+    # Print what the command actually emitted; without this the diagnostic
+    # for an unexpected success is silently dropped.
+    sed 's/^/    /' "${out_file}"
     fail=1
   else
     echo "PASS: ${desc}"
   fi
-  rm -f "/tmp/gpush-test-out-$$"
+  rm -f "${out_file}"
 }
 
 # Case 1: unknown flag rejected
