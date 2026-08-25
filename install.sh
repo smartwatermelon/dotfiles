@@ -64,7 +64,13 @@ fi
 # entry by bare name (see smartwatermelon/dotfiles#176).
 REPO_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ ! -d "${REPO_DIR}/.git" ]]; then
+# `git rev-parse --git-dir`, not `[[ -d .git ]]`. A linked worktree's .git is a
+# FILE holding a `gitdir:` pointer, not a directory, so the -d test rejected a
+# perfectly valid worktree as "not a git repository"
+# (smartwatermelon/dotfiles#254). rev-parse resolves both forms and, unlike
+# `-e`, confirms the entry actually resolves to a repository rather than just
+# existing.
+if ! git -C "${REPO_DIR}" rev-parse --git-dir >/dev/null 2>&1; then
   _err "Not a git repository: ${REPO_DIR}"
   _err "This script must be run from the dotfiles repo root."
   exit 1

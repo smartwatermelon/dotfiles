@@ -72,6 +72,25 @@ EOF
   chmod +x "${bin_dir}/gh"
 }
 
+# Mocked semgrep: exits clean immediately.
+#
+# The hook's static-analysis stage runs a real, network-dependent Semgrep scan.
+# Mocking `gh` but not `semgrep` left the boundary half-drawn: the test still
+# reached the network, and from a linked worktree — where there is no warm
+# Semgrep cache — the scan ran long enough that the whole suite looked hung
+# (smartwatermelon/dotfiles#251). The hook now bounds the scan with a timeout,
+# so this is no longer an unbounded stall, but a test asserting stale-CI
+# detection has no business scanning source at all.
+write_mock_semgrep() {
+  local bin_dir="$1"
+  cat >"${bin_dir}/semgrep" <<'MOCK_EOF'
+#!/usr/bin/env bash
+# Clean scan, no findings, no network.
+exit 0
+MOCK_EOF
+  chmod +x "${bin_dir}/semgrep"
+}
+
 # Run the hook as a subprocess with a controlled PATH (mock gh first),
 # controlled stdin (pre-push protocol line), and non-interactive strict mode
 # forced on so the CI-failure path actually attempts to block.
@@ -103,6 +122,7 @@ cat >"${JSON1}" <<EOF
 {"number":42,"reviewDecision":null,"reviews":[],"statusCheckRollup":[{"name":"docker","conclusion":"FAILURE"}],"headRefOid":"${PUSHED_SHA_1}"}
 EOF
 write_mock_gh "${BIN1}" "${JSON1}"
+write_mock_semgrep "${BIN1}"
 
 run_hook "${REPO1}" "${PUSHED_SHA_1}" "${BIN1}"
 exit1=$?
@@ -133,13 +153,14 @@ BIN2="${WORKDIR}/bin2"
 mkdir -p "${BIN2}"
 setup_repo "${REPO2}"
 PUSHED_SHA_2=$(cd "${REPO2}" && /usr/bin/git rev-parse HEAD)
-OLD_SHA_2="1111111111111111111111111111111111111"
+OLD_SHA_2="1111111111111111111111111111111111111111"
 
 JSON2="${WORKDIR}/gh2.json"
 cat >"${JSON2}" <<EOF
 {"number":42,"reviewDecision":null,"reviews":[],"statusCheckRollup":[{"name":"docker","conclusion":"FAILURE"}],"headRefOid":"${OLD_SHA_2}"}
 EOF
 write_mock_gh "${BIN2}" "${JSON2}"
+write_mock_semgrep "${BIN2}"
 
 run_hook "${REPO2}" "${PUSHED_SHA_2}" "${BIN2}"
 exit2=$?
@@ -176,6 +197,7 @@ cat >"${JSON3}" <<EOF
 {"number":42,"reviewDecision":null,"reviews":[],"statusCheckRollup":[{"name":"docker","conclusion":"SUCCESS"}],"headRefOid":"${PUSHED_SHA_3}"}
 EOF
 write_mock_gh "${BIN3}" "${JSON3}"
+write_mock_semgrep "${BIN3}"
 
 run_hook "${REPO3}" "${PUSHED_SHA_3}" "${BIN3}"
 exit3=$?
