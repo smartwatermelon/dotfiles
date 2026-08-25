@@ -47,6 +47,26 @@ unset _GIT_WRAPPER_ACTIVE
 # write through that symlink and clobber the real repo file instead of the
 # scratch fixture. Confirmed by direct reproduction: prior to this fix,
 # every run of this test corrupted git/template/hooks/post-checkout.
+#
+# GIT_CONFIG_COUNT/KEY_N/VALUE_N arrived in git 2.31 (March 2021). An older git
+# IGNORES them silently — the override would not apply, template hooks would be
+# symlinked in, and the `cat >` clobber described above would return, corrupting
+# a tracked repo file while the test still reported green. Fail loudly instead
+# of degrading into that (smartwatermelon/dotfiles#247).
+# `command git`, not bare `git`: this file's whole subject is the git wrapper,
+# and the version must come from the real binary regardless of whether a
+# wrapper function is in scope.
+_git_version="$(command git --version | awk '{print $3}')"
+_git_major="${_git_version%%.*}"
+_git_rest="${_git_version#*.}"
+_git_minor="${_git_rest%%.*}"
+if ((_git_major < 2 || (_git_major == 2 && _git_minor < 31))); then
+  echo "FAIL: git ${_git_version} is too old for this test (needs 2.31+)." >&2
+  echo "      GIT_CONFIG_COUNT is ignored before 2.31, which would let this" >&2
+  echo "      test clobber git/template/hooks/post-checkout in the real repo." >&2
+  exit 1
+fi
+
 export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0="init.templateDir"
 export GIT_CONFIG_VALUE_0=""

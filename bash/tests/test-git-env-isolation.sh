@@ -76,7 +76,23 @@ make_fixture() {
 config_fingerprint() {
   # The COMMON config, which linked worktrees share — this is the file that was
   # contaminated in the incident.
-  md5 -q "$1/.git/config" 2>/dev/null || echo "MISSING"
+  #
+  # `md5` is macOS-only. On a runner without it every call returned the literal
+  # "MISSING", which compares equal to itself — so before == after always held,
+  # the control assertion ("an unguarded write DOES contaminate") always failed,
+  # and the test aborted with a misleading error instead of testing anything
+  # (smartwatermelon/dotfiles#252). CI is macos-latest today, so this has not
+  # bitten yet; it would the moment a ubuntu runner is added.
+  #
+  # cksum is POSIX and present on both platforms. A missing or unreadable file
+  # must NOT collapse to a constant, or the vacuous-comparison bug returns, so
+  # the failure branch emits a value unique to that path and file.
+  local config="$1/.git/config"
+  if [[ ! -r "${config}" ]]; then
+    printf 'UNREADABLE:%s\n' "${config}"
+    return 0
+  fi
+  cksum <"${config}"
 }
 
 # --------------------------------------------------------------------------
