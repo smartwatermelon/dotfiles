@@ -11,6 +11,15 @@ set -uo pipefail
 unset CDPATH
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Clear inherited git repository-selection state before touching any fixture.
+# A hook invoked from a linked worktree exports GIT_DIR, which outranks both the
+# working directory and `git -C`, so without this the scratch repos below are
+# silently redirected at the real checkout (smartwatermelon/dotfiles#239).
+_tests_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/git-env-isolation.sh
+source "${_tests_dir}/lib/git-env-isolation.sh"
+isolate_git_env
+
 export BASH_CONFIG_DIR="${REPO_ROOT}/bash"
 
 #shellcheck source=/dev/null

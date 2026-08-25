@@ -121,6 +121,49 @@ assertions are portable and always run; the empty-`hooksPath` bug is still
 caught in a skipping environment, because that is a config check rather than
 a resolution check.
 
+### Git environment isolation (#239)
+
+A test that creates fixture repositories must clear git's
+repository-selection environment first. `tests/lib/git-env-isolation.sh`
+does this:
+
+```bash
+_tests_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/git-env-isolation.sh
+source "${_tests_dir}/lib/git-env-isolation.sh"
+isolate_git_env "${WORKDIR}"
+```
+
+**Why `cd` and `-C` are not enough.** `GIT_DIR` outranks both the process
+working directory and `git -C`:
+
+```
+GIT_DIR=/elsewhere/.git git -C /tmp/scratch config user.email x@y.z
+  -> writes to /elsewhere/.git/config, not /tmp/scratch
+```
+
+**Where the inherited value came from.** Git exports `GIT_DIR` into a hook's
+environment when — and only when — the hook runs from a linked worktree.
+`.project-hooks/pre-push` execs `tests/run-tests.sh`, so every test inherited
+it, and fixture writes landed in the worktree's administrative git directory.
+Linked worktrees share the common `.git/config`, so the real checkout was
+contaminated with `core.hooksPath=` (empty), `core.bare=true`, a fake
+identity, and a bogus `upstream` remote.
+
+This is why the bug looked intermittent and survived three investigations: a
+test run by hand has no hook, therefore no `GIT_DIR`, therefore no
+contamination. Only a hook-invoked run from a worktree reproduces it.
+`tests/test-git-env-isolation.sh` injects that condition deliberately, and
+keeps a control case that must contaminate — otherwise the guarded assertions
+would pass vacuously if the injection ever stopped working.
+
+The helper derives its unset list from `git rev-parse --local-env-vars`
+rather than hardcoding one, unioned with a fallback for older git. It
+deliberately leaves `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` alone: those
+are not repository-selection variables, and several tests set them on purpose
+to point git at a sandboxed global config. Call `isolate_git_env` *before*
+exporting those.
+
 ### Adding a test
 
 Name the file `tests/test-<subject>.sh` and make it executable — that is the
@@ -137,6 +180,10 @@ Follow the conventions the existing tests share:
 - Isolate from the real machine: scratch `$HOME` or `mktemp -d`, with a
   `trap 'rm -rf ...' EXIT` for cleanup. Never touch real git remotes, real
   `gh` auth, or the developer's actual config.
+- **If the test creates or mutates a git repository, source
+  `tests/lib/git-env-isolation.sh` and call `isolate_git_env "${WORKDIR}"`
+  before the first git call.** A scratch directory is not a scratch repository
+  when `GIT_DIR` is already set — see the section below.
 - Print `PASS: <case>` / `FAIL: <case>` per assertion, track a `fail` variable,
   and `exit "${fail}"` at the end.
 - Prove a stub or mock is actually intercepting before relying on it — a clean

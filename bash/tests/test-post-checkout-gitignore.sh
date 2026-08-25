@@ -39,13 +39,23 @@ WORKDIR="/tmp/post-checkout-gitignore-test-$$"
 mkdir -p "${WORKDIR}"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
-export GIT_CEILING_DIRECTORIES="${WORKDIR}"
-
 # Inherited git environment variables would silently redirect every git call
 # below at the ambient repo instead of the scratch fixtures -- GIT_INDEX_FILE
 # in particular makes `git ls-files` report the caller's staged paths, which
 # fires the already-tracked guard in repos that track nothing.
-unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY
+#
+# This test's hand-rolled unset list predates the shared helper and was the
+# precedent for it (smartwatermelon/dotfiles#239). It now delegates, so the list
+# is maintained in one place and derived from `git rev-parse --local-env-vars`
+# rather than hardcoded here.
+_tests_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/git-env-isolation.sh
+source "${_tests_dir}/lib/git-env-isolation.sh"
+isolate_git_env "${WORKDIR}"
+
+# GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM are NOT repository-selection variables,
+# so the helper deliberately leaves them alone. This test wants them gone as
+# well, to keep the developer's real ~/.gitconfig out of the fixtures.
 unset GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
 
 # Minimal stand-in for git/template/.claude-template, so the test never

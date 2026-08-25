@@ -32,6 +32,18 @@ set -euo pipefail
 # guard, matching test-allup-continue-state.sh and run-tests.sh.
 unset CDPATH
 
+# Clear inherited git repository-selection state. This detector inspects the
+# REAL checkout via `git -C "${REPO_ROOT}"`, and an inherited GIT_DIR outranks
+# `-C` — so without this the detector can report on a different repository than
+# the one it names, which is a false PASS (smartwatermelon/dotfiles#239).
+#
+# No GIT_CEILING_DIRECTORIES here, unlike the fixture tests: this test must be
+# able to resolve the real repo it is auditing.
+_tests_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/git-env-isolation.sh
+source "${_tests_dir}/lib/git-env-isolation.sh"
+isolate_git_env
+
 REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail=0
@@ -148,6 +160,28 @@ fi
 unexpected_count=$(git -C "${REPO_ROOT}" remote | grep -cvx "origin" || true)
 if [[ "${unexpected_count}" -eq 0 ]]; then
   _pass "no remotes other than origin"
+fi
+
+# Case: the repo is not falsely marked bare.
+#
+# This assertion exists because a green detector run was NOT sufficient evidence
+# that the config was sound. On 2026-08-24 the four values above were cleaned,
+# this test reported ALL CHECKS PASSED, and `git status` still failed with
+# "fatal: this operation must be run in a work tree" because core.bare=true
+# remained (smartwatermelon/dotfiles#239).
+#
+# core.bare=true comes from a `git init` that ran with an inherited GIT_DIR but
+# no GIT_WORK_TREE — the linked-worktree shape specifically; pointing GIT_DIR at
+# an ordinary .git leaves bare=false. It breaks every work-tree operation:
+# status, add, commit.
+#
+# An absent key is cleanest, but an explicit `false` is equally safe, so only
+# `true` fails here.
+bare_value="$(_local_get core.bare)"
+if [[ "${bare_value}" == "true" ]]; then
+  _fail "core.bare is true, but this repo has a work tree"
+else
+  _pass "core.bare is not true"
 fi
 
 echo
