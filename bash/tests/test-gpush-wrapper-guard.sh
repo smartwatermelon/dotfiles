@@ -31,7 +31,14 @@ assert_fails() {
   local desc="$1"
   shift
   local out_file
-  out_file="$(mktemp "${TMPDIR:-/tmp}/gpush-test-out.XXXXXX")"
+  # A failed mktemp would leave out_file empty, redirecting the diagnostic to a
+  # file named "" and silently discarding the output this helper exists to
+  # capture (smartwatermelon/dotfiles#250).
+  if ! out_file="$(mktemp "${TMPDIR:-/tmp}/gpush-test-out.XXXXXX")" || [[ -z "${out_file}" ]]; then
+    echo "FAIL: ${desc} — mktemp failed, cannot capture output" >&2
+    fail=1
+    return 1
+  fi
   if "$@" >"${out_file}" 2>&1; then
     echo "FAIL: ${desc} — expected non-zero exit, got 0"
     # Print what the command actually emitted; without this the diagnostic
@@ -51,7 +58,36 @@ assert_fails "gpush --bogus-flag rejected" gpush --bogus-flag
 WORKDIR="/tmp/gpush-wrapper-guard-test-$$"
 mkdir -p "${WORKDIR}"
 trap 'rm -rf "${WORKDIR}"' EXIT
-(cd "${WORKDIR}" && /usr/bin/git init -q -b main && /usr/bin/git commit -q --allow-empty -m init)
+# Isolated from this machine ambient hooks/templates for the same reason as
+# Case 3 below: the global pre-commit hook this repo installs blocks commits to
+# main, so an unisolated fixture silently ends up with no commits at all
+# (smartwatermelon/dotfiles#256).
+(
+  cd "${WORKDIR}" || exit 1
+  /usr/bin/git -c core.hooksPath= -c init.templateDir= init -q -b main
+  # An EMPTY core.hooksPath, not `--unset`. Verified empirically: with
+  # core.hooksPath="" git runs no hooks at all — neither the global ones nor a
+  # local .git/hooks/pre-commit that exits non-zero. `--unset` would instead
+  # fall back to the global core.hooksPath this repo installs, reintroducing
+  # the very blocking hook the fixture needs neutralized. The `-c` above covers
+  # only the init call, so the value is persisted here for later commands.
+  /usr/bin/git config core.hooksPath ""
+  /usr/bin/git -c user.email=test@example.com -c user.name=Test \
+    commit -q --allow-empty -m init
+)
+
+# Assert the fixture actually reached the state under test, rather than
+# assuming it. Case 2 refuses on main whether or not a commit exists, so
+# without this the case could keep passing over an empty repository.
+if ! /usr/bin/git -C "${WORKDIR}" rev-parse --verify -q HEAD >/dev/null; then
+  echo "FAIL: Case 2 fixture produced no commit — nothing was tested"
+  exit 1
+fi
+case2_branch="$(/usr/bin/git -C "${WORKDIR}" symbolic-ref --short HEAD)" || case2_branch=""
+if [[ "${case2_branch}" != "main" ]]; then
+  echo "FAIL: Case 2 fixture is not on main — nothing was tested"
+  exit 1
+fi
 
 # The capture file lives INSIDE WORKDIR rather than in /tmp under its own
 # "$$". The subshell below expands "$$" to the SUBSHELL's pid, so a /tmp path
@@ -85,24 +121,61 @@ if [[ ${main_exit} -ne 0 ]]; then
 fi
 
 # Case 3: refuses to run on detached HEAD — use real git repo and real detached HEAD
-# Use a separate temp directory to avoid interference from main repo's git wrappers
+#
+# This case previously reported PASS while testing nothing
+# (smartwatermelon/dotfiles#256). Three separate defects stacked up:
+#
+#   1. No hook isolation. This repo's install.sh sets a GLOBAL core.hooksPath
+#      whose pre-commit hook blocks commits to main, so the fixture's `commit`
+#      was refused, `rev-list` found no HEAD, and the detach never happened.
+#   2. `trap ... RETURN` in a `bash -c` top level (not a function) never fires,
+#      so the temp dir leaked — the same class as the Case 2 leak fixed in #255.
+#   3. The assertion could not tell a real detached HEAD from a fake one. After
+#      sourcing gpush-wrapper.sh, a bare `git` resolves to this repo's git
+#      WRAPPER, not /usr/bin/git. The wrapper left `git symbolic-ref` returning
+#      empty, so gpush printed "Refusing to run on detached HEAD" while HEAD was
+#      still on main — and the grep matched. The case passed on a message that
+#      described a state the fixture had never reached.
+#
+# The fixture is therefore isolated from ambient hooks/templates, and the
+# preconditions are ASSERTED rather than assumed: a test for detached-HEAD
+# behavior must confirm the HEAD is actually detached before asserting on the
+# message, or it is only testing its own string matching.
 detached_test_output=$(/bin/bash -c '
-  tmpwork=$(mktemp -d)
+  tmpwork=$(mktemp -d) || exit 1
   cd "${tmpwork}" || exit 1
-  trap "rm -rf ${tmpwork}" RETURN
+  # EXIT, not RETURN: this is a script top level, not a function, so a RETURN
+  # trap never fires and the directory leaks.
+  trap "rm -rf \"${tmpwork}\"" EXIT
 
-  # Use /usr/bin/git to bypass any wrapper functions
-  /usr/bin/git init -q -b main
-  /usr/bin/git commit -q --allow-empty -m "init"
+  # Neutralize this machine ambient git hooks and templates. Without this the
+  # global pre-commit hook refuses the commit below and the whole fixture
+  # collapses silently.
+  git_isolated() {
+    /usr/bin/git -c core.hooksPath= -c init.templateDir= \
+      -c user.email=test@example.com -c user.name=Test "$@"
+  }
 
-  # Get the SHA of the first commit
-  first_commit=$(/usr/bin/git rev-list --max-parents=0 HEAD)
+  git_isolated init -q -b main
+  git_isolated config core.hooksPath ""
+  git_isolated commit -q --allow-empty -m "init"
 
-  # Create a second commit
-  /usr/bin/git commit -q --allow-empty -m "second"
+  first_commit=$(git_isolated rev-list --max-parents=0 HEAD)
+  if [[ -z "${first_commit}" ]]; then
+    echo "FAIL: fixture produced no commit — nothing was tested"
+    exit 1
+  fi
 
-  # Checkout the first commit to create real detached HEAD
-  /usr/bin/git checkout -q --detach "${first_commit}"
+  git_isolated commit -q --allow-empty -m "second"
+  git_isolated checkout -q --detach "${first_commit}"
+
+  # The substantive precondition. Assert against /usr/bin/git explicitly: a
+  # bare `git` would resolve to this repo git wrapper once gpush-wrapper.sh is
+  # sourced below, and the wrapper is exactly what faked this state before.
+  if /usr/bin/git symbolic-ref -q HEAD >/dev/null 2>&1; then
+    echo "FAIL: HEAD is not detached — the fixture never reached the state under test"
+    exit 1
+  fi
 
   #shellcheck source=/dev/null
   source "'"${BASH_CONFIG_DIR}"'/gpush-wrapper.sh"

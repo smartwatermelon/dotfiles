@@ -190,6 +190,72 @@ run_supply_chain_scan() {
 run_supply_chain_scan
 
 # =========================================================
+# BOUNDED COMMAND RUNNER
+# =========================================================
+# Runs a command with a wall-clock ceiling and reports 124 on expiry, matching
+# coreutils `timeout`. Semgrep's code scan reaches the network, and with no
+# bound a slow or unreachable backend blocks the push indefinitely rather than
+# degrading — observed as an apparent hang of the test suite from a linked
+# worktree, where no warm Semgrep cache exists (smartwatermelon/dotfiles#251).
+# The same stall can hit a real push on a slow network, which is why the bound
+# lives in the hook rather than only in the test's mocks.
+#
+# GNU `timeout` is not on stock macOS (it arrives with Homebrew coreutils), so
+# prefer it when present and fall back to a watchdog subshell otherwise.
+SEMGREP_TIMEOUT_SECS="${SEMGREP_TIMEOUT_SECS:-300}"
+
+run_bounded() {
+  local secs="$1"
+  shift
+
+  local timeout_bin=""
+  if command -v timeout &>/dev/null; then
+    timeout_bin="timeout"
+  elif command -v gtimeout &>/dev/null; then
+    timeout_bin="gtimeout"
+  fi
+
+  if [[ -n "${timeout_bin}" ]]; then
+    "${timeout_bin}" "${secs}" "$@"
+    return $?
+  fi
+
+  # Fallback watchdog: run the command in the background, kill it if it
+  # outlives the budget. `wait` on a known pid yields the command's own exit
+  # status, so a normal completion is reported untouched.
+  "$@" &
+  local cmd_pid=$!
+
+  (
+    # Poll rather than `sleep ${secs}` in one shot so the watchdog exits
+    # promptly once the command finishes, instead of lingering for the full
+    # budget on every invocation.
+    local waited=0
+    while ((waited < secs)); do
+      kill -0 "${cmd_pid}" 2>/dev/null || exit 0
+      sleep 1
+      ((waited += 1))
+    done
+    kill -TERM "${cmd_pid}" 2>/dev/null || true
+    sleep 2
+    kill -KILL "${cmd_pid}" 2>/dev/null || true
+  ) &
+  local watchdog_pid=$!
+
+  local status=0
+  wait "${cmd_pid}" 2>/dev/null || status=$?
+  kill -TERM "${watchdog_pid}" 2>/dev/null || true
+  wait "${watchdog_pid}" 2>/dev/null || true
+
+  # A killed command surfaces as 143 (SIGTERM) / 137 (SIGKILL); normalize to
+  # coreutils' 124 so callers have one expiry code to branch on.
+  if ((status == 143 || status == 137)); then
+    return 124
+  fi
+  return "${status}"
+}
+
+# =========================================================
 # SEMGREP STATIC ANALYSIS
 # =========================================================
 # With a Semgrep token: runs `semgrep ci --code` against the connected
@@ -216,7 +282,7 @@ run_static_analysis() {
     if git rev-parse --verify --quiet origin/main >/dev/null; then
       fallback_args+=(--baseline-commit origin/main)
     fi
-    if ! semgrep "${fallback_args[@]}" .; then
+    if ! run_bounded "${SEMGREP_TIMEOUT_SECS}" semgrep "${fallback_args[@]}" .; then
       echo "" >&2
       log_warning "🛑 Semgrep found issues. Fix them before pushing."
       echo "" >&2
@@ -236,7 +302,7 @@ run_static_analysis() {
     if git rev-parse --verify --quiet origin/main >/dev/null; then
       export SEMGREP_BASELINE_REF="origin/main"
     fi
-    semgrep ci --code --dry-run --quiet
+    run_bounded "${SEMGREP_TIMEOUT_SECS}" semgrep ci --code --dry-run --quiet
   ) || exit_code=$?
 
   case ${exit_code} in
@@ -251,8 +317,15 @@ run_static_analysis() {
       ;;
     *)
       echo "" >&2
-      log_warning "⚠️  Semgrep failed to complete (exit ${exit_code}) — likely network/auth/rules issue, not findings."
-      log_warning "   Diagnose: SEMGREP_APP_TOKEN=<token> semgrep ci --code --dry-run"
+      # 124 is run_bounded's expiry code. Naming it separately keeps a slow or
+      # unreachable scan from being diagnosed as an auth/rules problem.
+      if ((exit_code == 124)); then
+        log_warning "⚠️  Semgrep exceeded ${SEMGREP_TIMEOUT_SECS}s and was terminated — slow or unreachable backend, not findings."
+        log_warning "   Raise the budget with SEMGREP_TIMEOUT_SECS=<seconds> if this is expected."
+      else
+        log_warning "⚠️  Semgrep failed to complete (exit ${exit_code}) — likely network/auth/rules issue, not findings."
+        log_warning "   Diagnose: SEMGREP_APP_TOKEN=<token> semgrep ci --code --dry-run"
+      fi
       echo "" >&2
       if [[ -t 0 ]]; then
         local push_anyway
