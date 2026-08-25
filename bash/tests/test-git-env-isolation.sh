@@ -61,7 +61,16 @@ make_fixture() {
   # sanctioned-path worktree policy is not involved.
   "${GIT}" -C "${root}" -c core.hooksPath= worktree add -q --detach \
     "${root}/linked" >/dev/null 2>&1
-  sed 's/^gitdir: //' "${root}/linked/.git"
+  # A linked worktree's .git is a file reading `gitdir: <admin dir>`. Parse it
+  # strictly: a malformed file would otherwise yield a wrong path and cascade
+  # into a confusing assertion failure somewhere else entirely.
+  local admin_dir
+  admin_dir="$(sed -n 's/^gitdir: //p' "${root}/linked/.git")"
+  if [[ -z "${admin_dir}" || ! -d "${admin_dir}" ]]; then
+    echo "make_fixture: could not resolve worktree admin dir from ${root}/linked/.git" >&2
+    return 1
+  fi
+  printf '%s\n' "${admin_dir}"
 }
 
 config_fingerprint() {
