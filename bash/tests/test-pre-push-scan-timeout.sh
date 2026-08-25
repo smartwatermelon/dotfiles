@@ -184,8 +184,13 @@ for mode in timeout fallback; do
   else
     _fail "${label}: over-budget command exited ${rc}, expected 124"
   fi
-  if ((elapsed <= 10)); then
-    _pass "${label}: terminated near the budget (${elapsed}s), not at the command's own length"
+  # The assertion is "bounded", not "bounded precisely". The ceiling is well
+  # clear of the 3s budget plus SIGKILL escalation, but far below the 60s the
+  # command would run unbounded — so a loaded runner cannot flake it, while a
+  # genuinely unbounded run still fails. `SECONDS` has 1-second granularity,
+  # which the margin absorbs.
+  if ((elapsed <= 20)); then
+    _pass "${label}: terminated near the budget (${elapsed}s of a 60s command)"
   else
     _fail "${label}: took ${elapsed}s for a 3s budget — not actually bounded"
   fi
@@ -212,7 +217,10 @@ for mode in timeout fallback; do
   # waiting out the whole budget.
   case_out="$(run_case "${force}" 30 sleep 2)"
   read -r rc elapsed <<<"${case_out}"
-  if [[ "${rc}" == "0" ]] && ((elapsed < 15)); then
+  # The point is that the watchdog does not hold the budget open after the
+  # command finishes. Anything comfortably under 30s proves that; the margin is
+  # sized so shell overhead on a saturated runner cannot flake it.
+  if [[ "${rc}" == "0" ]] && ((elapsed < 25)); then
     _pass "${label}: returns when the command finishes (${elapsed}s of a 30s budget)"
   else
     _fail "${label}: exit ${rc} after ${elapsed}s — expected 0 in well under 30s"

@@ -237,8 +237,33 @@ run_bounded() {
       ((waited += 1))
     done
     kill -TERM "${cmd_pid}" 2>/dev/null || true
-    sleep 2
-    kill -KILL "${cmd_pid}" 2>/dev/null || true
+
+    # Escalate to SIGKILL only while the process is still ours to signal.
+    #
+    # A flat `sleep 2; kill -KILL` would signal a pid the parent's `wait` may
+    # already have reaped, and a reaped pid can be reassigned — so the SIGKILL
+    # could land on an unrelated process
+    # (smartwatermelon/dotfiles#258). Polling in short steps and re-checking
+    # liveness before escalating both shortens that window and makes the
+    # escalation conditional on the process still existing.
+    #
+    # This narrows the race rather than eliminating it: nothing in POSIX makes
+    # "check liveness, then signal" atomic. It cannot be closed from a shell
+    # without process groups or pidfds, and the residual window is now a few
+    # milliseconds on a path that runs once per push.
+    local grace=0
+    while ((grace < 20)); do
+      # `|| exit 0` is the SUCCESS path, not an error path: the command is
+      # already gone, so there is nothing left to escalate against and the
+      # watchdog has no further work. The counter uses `+= 1` rather than
+      # `++` because `((v++))` evaluates to 0 when v is 0 and would abort
+      # this subshell under the inherited `set -e`.
+      kill -0 "${cmd_pid}" 2>/dev/null || exit 0
+      sleep 0.1
+      ((grace += 1))
+    done
+    kill -0 "${cmd_pid}" 2>/dev/null && kill -KILL "${cmd_pid}" 2>/dev/null
+    exit 0
   ) &
   local watchdog_pid=$!
 
