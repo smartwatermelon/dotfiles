@@ -249,6 +249,59 @@ for mode in timeout fallback; do
   fi
 done
 
+# ---------------------------------------------------------------
+# The SIGKILL escalation branch
+# ---------------------------------------------------------------
+# The cases above all terminate on SIGTERM, so the grace loop exits early and
+# the `kill -KILL` line never runs. That left the escalation branch with no
+# coverage at all: a future edit could break it and every test would still pass
+# (smartwatermelon/dotfiles#262).
+#
+# A command that IGNORES SIGTERM forces the escalation. It must still be
+# terminated, and within the grace budget rather than running to its own length.
+echo "Case: run_bounded escalates to SIGKILL for a SIGTERM-ignoring command"
+
+IGNORER="${WORKDIR}/ignores-sigterm.sh"
+cat >"${IGNORER}" <<'IGNORER_EOF'
+#!/usr/bin/env bash
+# Survives SIGTERM; only SIGKILL can stop this.
+#
+# The `sleep` runs in the foreground, so killing this script tears it down with
+# it. Verified by sampling `pgrep -f "sleep 60"` across a full run: the count
+# rises during each case and returns to zero between them, with none left
+# behind at the end.
+trap '' TERM
+sleep 60
+IGNORER_EOF
+chmod +x "${IGNORER}"
+
+for mode in timeout fallback; do
+  force=0
+  label="GNU timeout"
+  if [[ "${mode}" == "fallback" ]]; then
+    force=1
+    label="watchdog fallback"
+  fi
+
+  case_out="$(run_case "${force}" 2 "${IGNORER}")"
+  read -r rc elapsed <<<"${case_out}"
+
+  # GNU timeout reports 124 on expiry; the fallback normalizes SIGKILL's 137 to
+  # 124 itself. Either way the caller must see the expiry code.
+  if [[ "${rc}" == "124" ]]; then
+    _pass "${label}: a SIGTERM-ignoring command is still reported as expired"
+  else
+    _fail "${label}: SIGTERM-ignoring command exited ${rc}, expected 124"
+  fi
+
+  # The escalation must actually land. Unterminated, the command runs 60s.
+  if ((elapsed <= 20)); then
+    _pass "${label}: escalation killed it in ${elapsed}s, not its full 60s"
+  else
+    _fail "${label}: took ${elapsed}s — the SIGKILL escalation did not land"
+  fi
+done
+
 echo
 if ((fail)); then
   echo "SOME CHECKS FAILED" >&2
