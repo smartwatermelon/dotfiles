@@ -163,7 +163,6 @@ echo "Case: real fixture tests run clean under an inherited GIT_DIR"
 # test joins this list automatically rather than silently falling out of
 # coverage. test-git-env-isolation.sh (this file) is excluded: it invokes the
 # others, and probing itself would recurse.
-guarded_list=""
 guarded_list="$(grep -l 'isolate_git_env' "${TESTS_DIR}"/test-*.sh | sort || true)"
 self_name="${BASH_SOURCE[0]##*/}"
 guarded_tests=()
