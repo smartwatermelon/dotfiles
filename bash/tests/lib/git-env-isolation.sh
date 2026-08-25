@@ -42,6 +42,16 @@
 # sets them first and isolates second is relying on that, which is a fragile
 # thing to rely on.
 
+# Include guard. The array below is `readonly`, so a second source in the same
+# process would abort with "readonly variable" — fatal under `set -e`. Today
+# every test is dispatched as its own subprocess by run-tests.sh, so that cannot
+# happen; the guard means a future caller that sources a test inline does not
+# discover this the hard way.
+if [[ -n "${_GIT_ENV_ISOLATION_LOADED:-}" ]]; then
+  return 0
+fi
+readonly _GIT_ENV_ISOLATION_LOADED=1
+
 # Variables that redirect repository-local state. Git knows its own list, so ask
 # it rather than hardcoding one that silently rots as git versions change:
 # `git rev-parse --local-env-vars` is the authoritative enumeration.

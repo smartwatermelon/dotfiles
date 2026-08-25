@@ -154,7 +154,30 @@ echo "Case: real fixture tests run clean under an inherited GIT_DIR"
 # The end-to-end assertion: invoke the actual tests that caused the incident,
 # under the actual triggering condition, and require the shared config to be
 # untouched.
-for test_name in test-pre-push-stale-ci.sh test-gh-wrapper-identity.sh; do
+# Every test that creates or mutates a git fixture, not only the two that were
+# the incident's confirmed sources. A guard that regresses in any of them
+# reintroduces the same failure, and the runner-level clear in run-tests.sh does
+# not protect a test invoked directly.
+#
+# Derived from the tests that source the isolation helper, so a newly guarded
+# test joins this list automatically rather than silently falling out of
+# coverage. test-git-env-isolation.sh (this file) is excluded: it invokes the
+# others, and probing itself would recurse.
+guarded_list=""
+guarded_list="$(grep -l 'isolate_git_env' "${TESTS_DIR}"/test-*.sh | sort || true)"
+self_name="${BASH_SOURCE[0]##*/}"
+guarded_tests=()
+while IFS= read -r candidate; do
+  [[ -n "${candidate}" ]] || continue
+  [[ "${candidate##*/}" == "${self_name}" ]] && continue
+  guarded_tests+=("${candidate##*/}")
+done <<<"${guarded_list}"
+
+if ((${#guarded_tests[@]} == 0)); then
+  _fail "no guarded tests discovered — the probe set is empty, so the loop below proves nothing"
+fi
+
+for test_name in "${guarded_tests[@]}"; do
   test_path="${TESTS_DIR}/${test_name}"
   if [[ ! -f "${test_path}" ]]; then
     _fail "${test_name}: not found"
