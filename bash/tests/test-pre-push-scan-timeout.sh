@@ -49,28 +49,50 @@ _fail() {
 # The function's text is isolated first, parsed in a clean subshell, and then
 # reprinted by `declare -f` — so what this test drives is what bash parsed,
 # not what a regex guessed at.
-# awk brace-balances from the function header to its true close, so the slice
-# ends at run_bounded's own `}` regardless of indentation — unlike a
+# Brace-balance from the function header to its true close, so the slice ends at
+# run_bounded's own `}` regardless of indentation — unlike a
 # `sed '/start/,/^}/p'` range, which stops at the first column-0 `}` and would
-# truncate mid-function if a nested block ever closed there. The slice is then
-# handed to bash to PARSE, so what the cases drive is a function bash accepted,
-# not a region a regex guessed at. (Sourcing the hook itself is not an option:
-# it runs its checks at source time.)
+# truncate mid-function if a nested block ever closed there.
+#
+# Comments are stripped before counting. Counting raw characters treats a `{` in
+# a comment or URL as structure, which skews the depth and makes the slice
+# over-run into whatever follows the function
+# (smartwatermelon/dotfiles#260). Verified against a body carrying
+# `# see https://example.com/{path`, which over-ran before this and does not now.
+#
+# The stripping is only for the COUNT; the printed lines are the originals, so
+# the extracted body is byte-identical to the source.
+#
+# `sub(/#.*/, "")` also strips a `#` inside a quoted string, which would
+# under-count a brace that really is structure. That is the safe direction: it
+# can only end the slice early, and bash then fails to parse the truncation, so
+# the guards below report which stage failed rather than the test running on a
+# partial function. Verified by hiding an unbalanced `}` in a string inside
+# run_bounded: the test fails with an explicit message naming the extraction.
+# A shell-accurate tokenizer is not worth writing here. bash then parses it and
+# `declare -f` reprints it, so what the cases drive is a function bash accepted,
+# not a region awk guessed at.
 _raw_body="$(awk '
   /^run_bounded\(\)/ { collecting = 1 }
   collecting {
     print
-    n = gsub(/\{/, "{"); depth += n
-    n = gsub(/\}/, "}"); depth -= n
+    counted = $0
+    sub(/#.*/, "", counted)
+    n = gsub(/\{/, "{", counted); depth += n
+    n = gsub(/\}/, "}", counted); depth -= n
     if (depth == 0 && seen_open) { exit }
     if (depth > 0) { seen_open = 1 }
   }
 ' "${HOOK}")"
 
+# `|| RUNNER_SRC=""`, because a bare command-substitution assignment that exits
+# non-zero would abort the script under `set -e` — silently, before the
+# diagnostic guards below could say why. A truncated slice must produce an
+# explanation, not an empty exit 1.
 RUNNER_SRC="$(bash --norc --noprofile -c '
   eval "$1" || exit 1
   declare -f run_bounded
-' _ "${_raw_body}" 2>/dev/null)"
+' _ "${_raw_body}" 2>/dev/null)" || RUNNER_SRC=""
 
 if [[ -n "${RUNNER_SRC}" ]]; then
   _timeout_default="$(grep -E '^SEMGREP_TIMEOUT_SECS=' "${HOOK}" | head -1)" || _timeout_default=""
