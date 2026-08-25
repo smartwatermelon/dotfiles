@@ -23,6 +23,24 @@ set -uo pipefail
 # command substitution below.
 unset CDPATH
 
+# Clear inherited git repository-selection state before running any test.
+#
+# This is the PRIMARY chokepoint for smartwatermelon/dotfiles#239, not merely
+# defense in depth. `.project-hooks/pre-push` execs this runner from inside a git
+# hook, and git exports GIT_DIR into a hook's environment when the hook runs from
+# a linked worktree. Every test then inherited it, and GIT_DIR outranks both the
+# working directory and `git -C`, so fixture writes landed in the worktree's
+# administrative git directory — which shares the common config with the real
+# checkout.
+#
+# The individual tests isolate themselves too, which is what protects a test run
+# directly rather than through this runner. Clearing it here as well means a test
+# added later without that guard is still contained.
+_tests_dir_for_isolation="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/git-env-isolation.sh
+source "${_tests_dir_for_isolation}/lib/git-env-isolation.sh"
+isolate_git_env
+
 TESTS_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then

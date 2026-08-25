@@ -25,6 +25,15 @@ WORKDIR="/tmp/post-checkout-hookspath-test-$$"
 mkdir -p "${WORKDIR}"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
+# Clear inherited git repository-selection state before touching any fixture.
+# A hook invoked from a linked worktree exports GIT_DIR, which outranks both the
+# working directory and `git -C`, so without this the scratch repos below are
+# silently redirected at the real checkout (smartwatermelon/dotfiles#239).
+_tests_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/git-env-isolation.sh
+source "${_tests_dir}/lib/git-env-isolation.sh"
+isolate_git_env "${WORKDIR}"
+
 fail=0
 
 # --- Case 1: delegate execs the canonical hook with args intact -----------

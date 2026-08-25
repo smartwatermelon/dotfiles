@@ -21,10 +21,20 @@ WORKDIR="/tmp/git-wrapper-init-hook-test-$$"
 mkdir -p "${WORKDIR}"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
+# Clear inherited git repository-selection state before touching any fixture.
+# A hook invoked from a linked worktree exports GIT_DIR, which outranks both the
+# working directory and `git -C`, so without this the scratch repos below are
+# silently redirected at the real checkout (smartwatermelon/dotfiles#239).
+_tests_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/git-env-isolation.sh
+source "${_tests_dir}/lib/git-env-isolation.sh"
+isolate_git_env "${WORKDIR}"
+
 # Reset the wrapper guard to ensure clean test environment
 unset _GIT_WRAPPER_ACTIVE
 # Isolate test repos from any ambient git context
-export GIT_CEILING_DIRECTORIES="${WORKDIR}"
+# GIT_CEILING_DIRECTORIES is set by isolate_git_env above, which receives
+# WORKDIR as its ceiling argument.
 
 # Disable the global init.templateDir for every `git init` this test runs.
 # On a machine with init.templateDir configured (this repo's own install.sh
