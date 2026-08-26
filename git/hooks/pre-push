@@ -232,10 +232,25 @@ run_bounded() {
     # rather than papered over with a subshell that does not actually stop it.
     "${timeout_bin}" --kill-after="${SEMGREP_TIMEOUT_KILL_GRACE:-2}" "${secs}" "$@" \
       || timeout_status=$?
-    # When --kill-after escalates, timeout exits 137 (SIGKILL) rather than 124.
-    # Both mean the same thing to the caller — the budget expired — so report
-    # one code, matching the fallback path below.
-    if ((timeout_status == 137 || timeout_status == 143)); then
+    # 137 ONLY, not 143. GNU timeout already distinguishes these itself, so
+    # mapping both would throw away information it went to the trouble of
+    # providing (smartwatermelon/dotfiles#270). Measured against GNU coreutils
+    # timeout, which is what `brew install coreutils` provides and what this
+    # hook's macOS environment has; the codes below follow coreutils' documented
+    # convention (128+signal, 124 for expiry) rather than being specific to this
+    # machine. A non-GNU `timeout` is not expected on the supported platform, and
+    # if one appeared, a mismatched code lands in the generic branch — which
+    # prompts interactively and blocks in strict mode, so it degrades safely
+    # rather than passing a scan off as clean.
+    #
+    #   124 — its own expiry, SIGTERM sufficed
+    #   137 — its own expiry, escalated via --kill-after
+    #   143 — the timeout BINARY was killed from outside, inside its budget
+    #
+    # So 137 is an expiry and folds into 124 for one caller-facing code, while
+    # 143 is a signal death that must stay 143. Collapsing it would reintroduce
+    # on this path exactly the mislabelling #266 fixed on the fallback.
+    if ((timeout_status == 137)); then
       return 124
     fi
     return "${timeout_status}"
@@ -251,6 +266,19 @@ run_bounded() {
   local expiry_marker
   expiry_marker="$(mktemp "${TMPDIR:-/tmp}/prepush-expiry.XXXXXX")"
   rm -f "${expiry_marker}"
+
+  # Cleanup is explicit on each return path below, NOT a `trap ... RETURN`.
+  #
+  # A RETURN trap set inside a function is not scoped to that function: it stays
+  # armed and fires again when the CALLER returns, by which point this `local`
+  # is out of scope and `set -u` aborts the hook with "expiry_marker: unbound
+  # variable". That reached CI as a red bash-tests run — invisible locally,
+  # where coreutils `timeout` exists so this branch never executes
+  # (smartwatermelon/dotfiles#268 attempted the trap; this reverts it).
+  #
+  # The window #268 wanted closed is narrow and the residue is harmless: an
+  # empty file under TMPDIR with a recognizable prefix, which the OS collects.
+  # Trading a real crash for that is not a good exchange.
 
   "$@" &
   local cmd_pid=$!
@@ -315,11 +343,15 @@ run_bounded() {
   # (smartwatermelon/dotfiles#266). The marker is written by the watchdog just
   # before it signals, so its presence distinguishes "we timed this out" from
   # "something else killed it".
-  if [[ -f "${expiry_marker}" ]] && ((status == 143 || status == 137)); then
-    rm -f "${expiry_marker}"
-    return 124
+  local expired=0
+  if [[ -f "${expiry_marker}" ]]; then
+    expired=1
   fi
   rm -f "${expiry_marker}"
+
+  if ((expired)) && ((status == 143 || status == 137)); then
+    return 124
+  fi
   return "${status}"
 }
 

@@ -345,6 +345,54 @@ else
   _fail "watchdog fallback: took ${elapsed}s — did not return on the signal"
 fi
 
+# ---------------------------------------------------------------
+# run_bounded must survive its caller returning
+# ---------------------------------------------------------------
+# A `trap ... RETURN` set inside run_bounded is NOT scoped to run_bounded: it
+# stays armed and fires again when the CALLER returns, when the function's
+# `local` is out of scope and `set -u` aborts with "expiry_marker: unbound
+# variable". That shipped and turned CI red while every local run passed,
+# because this machine has coreutils `timeout` and never took the branch that
+# set the trap (smartwatermelon/dotfiles#268).
+#
+# The cases above all invoke run_bounded at the top level, so none of them would
+# have caught it. This one calls it from inside a function and then returns,
+# under `set -eu`, which is how the hook actually uses it.
+echo "Case: run_bounded does not corrupt its caller's scope"
+
+SCOPE_PROBE="${WORKDIR}/scope-probe.sh"
+cat >"${SCOPE_PROBE}" <<SCOPE_EOF
+set -euo pipefail
+source "${RUNNER_FILE}"
+outer() {
+  run_bounded 5 true
+  echo "inner-ok"
+}
+outer
+echo "caller-ok"
+SCOPE_EOF
+
+for mode in timeout fallback; do
+  label="GNU timeout"
+  probe_path="${PATH}"
+  if [[ "${mode}" == "fallback" ]]; then
+    label="watchdog fallback"
+    # Strip the directories carrying timeout/gtimeout, reproducing a stock macOS
+    # box — which is exactly what the CI runner is, and where this bug lived.
+    probe_path="/usr/bin:/bin"
+  fi
+
+  if scope_out="$(PATH="${probe_path}" "${TEST_BASH}" "${SCOPE_PROBE}" 2>&1)"; then
+    if [[ "${scope_out}" == *"caller-ok"* ]]; then
+      _pass "${label}: the caller returns normally after run_bounded"
+    else
+      _fail "${label}: caller did not complete — output: ${scope_out}"
+    fi
+  else
+    _fail "${label}: run_bounded aborted its caller — output: ${scope_out}"
+  fi
+done
+
 echo
 if ((fail)); then
   echo "SOME CHECKS FAILED" >&2

@@ -143,8 +143,18 @@ run_cwd_case() {
   )
 }
 
-run_cwd_case "${off_org_clone}" "off-org cwd remote fallback" 1 off-org
-run_cwd_case "${in_org_clone}" "in-org cwd remote fallback" 0 in-org
+# `|| true` so a subshell that dies mid-case does not abort this script under
+# `set -e`. Without it the script exits immediately with the subshell's status
+# and NO explanation — the missing-verdict check below never runs, so a broken
+# case looks like a bare non-zero exit rather than a named failure
+# (smartwatermelon/dotfiles#270).
+#
+# This does not weaken the fail-closed property: the verdict file is still only
+# written by a case that ran to completion, and a missing file is still treated
+# as a failure. It only ensures the failure is REPORTED instead of aborting
+# silently.
+run_cwd_case "${off_org_clone}" "off-org cwd remote fallback" 1 off-org || true
+run_cwd_case "${in_org_clone}" "in-org cwd remote fallback" 0 in-org || true
 
 for tag in off-org in-org; do
   if [[ ! -f "${cwd_status_dir}/${tag}" ]]; then
