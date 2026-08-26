@@ -110,6 +110,16 @@ fi
 _pass "fixture worktree has the .git-as-file shape"
 
 # The guard itself, applied to each shape.
+# Bare `git`, deliberately — install.sh calls bare `git` too, so this exercises
+# the same resolution path the guard actually takes rather than a stricter one.
+# The fixture setup above uses /usr/bin/git because it must build a specific
+# repository shape regardless of what is on PATH; the guard check must instead
+# mirror production.
+#
+# Verified that the two agree here: this repo's git wrapper special-cases only
+# `init` and otherwise delegates through `command git "$@"`, so bare `git` and
+# /usr/bin/git return the same verdict for `rev-parse --git-dir` on both a
+# normal checkout and a linked worktree (smartwatermelon/dotfiles#258).
 guard_accepts() {
   local dir="$1"
   git -C "${dir}" rev-parse --git-dir >/dev/null 2>&1
