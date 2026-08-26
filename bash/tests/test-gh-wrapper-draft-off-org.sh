@@ -106,7 +106,12 @@ mkdir -p "${off_org_clone}" "${in_org_clone}"
 # its mktemp and its explicit cleanup cannot leak it. The `:-` guard covers the
 # window before it is assigned. Leaked fixture dirs are the defect class this
 # suite has been clearing out (#255, #256).
-trap 'rm -rf "${off_org_clone}" "${in_org_clone}" "${cwd_status_dir:-}"' EXIT
+# `${cwd_status_dir:+...}` expands to nothing at all when the variable is unset,
+# rather than handing `rm -rf` an empty string. macOS `rm -rf ""` happens to be
+# a silent no-op (verified), but GNU coreutils is not obliged to agree, and a
+# spurious error here would land on top of whatever real failure triggered the
+# abort. This form is unambiguous on both.
+trap 'rm -rf "${off_org_clone}" "${in_org_clone}" ${cwd_status_dir:+"${cwd_status_dir}"}' EXIT
 (cd "${off_org_clone}" && command git init -q && command git remote add origin git@github.com:someoutsideorg/foo.git)
 (cd "${in_org_clone}" && command git init -q && command git remote add origin git@github.com:smartwatermelon/dotfiles.git)
 
@@ -138,8 +143,18 @@ run_cwd_case() {
   )
 }
 
-run_cwd_case "${off_org_clone}" "off-org cwd remote fallback" 1 off-org
-run_cwd_case "${in_org_clone}" "in-org cwd remote fallback" 0 in-org
+# `|| true` so a subshell that dies mid-case does not abort this script under
+# `set -e`. Without it the script exits immediately with the subshell's status
+# and NO explanation — the missing-verdict check below never runs, so a broken
+# case looks like a bare non-zero exit rather than a named failure
+# (smartwatermelon/dotfiles#270).
+#
+# This does not weaken the fail-closed property: the verdict file is still only
+# written by a case that ran to completion, and a missing file is still treated
+# as a failure. It only ensures the failure is REPORTED instead of aborting
+# silently.
+run_cwd_case "${off_org_clone}" "off-org cwd remote fallback" 1 off-org || true
+run_cwd_case "${in_org_clone}" "in-org cwd remote fallback" 0 in-org || true
 
 for tag in off-org in-org; do
   if [[ ! -f "${cwd_status_dir}/${tag}" ]]; then

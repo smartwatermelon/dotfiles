@@ -249,6 +249,150 @@ for mode in timeout fallback; do
   fi
 done
 
+# ---------------------------------------------------------------
+# The SIGKILL escalation branch
+# ---------------------------------------------------------------
+# The cases above all terminate on SIGTERM, so the grace loop exits early and
+# the `kill -KILL` line never runs. That left the escalation branch with no
+# coverage at all: a future edit could break it and every test would still pass
+# (smartwatermelon/dotfiles#262).
+#
+# A command that IGNORES SIGTERM forces the escalation. It must still be
+# terminated, and within the grace budget rather than running to its own length.
+echo "Case: run_bounded escalates to SIGKILL for a SIGTERM-ignoring command"
+
+IGNORER="${WORKDIR}/ignores-sigterm.sh"
+cat >"${IGNORER}" <<'IGNORER_EOF'
+#!/usr/bin/env bash
+# Survives SIGTERM; only SIGKILL can stop this.
+#
+# The `sleep` runs in the foreground, so killing this script tears it down with
+# it. Verified by sampling `pgrep -f "sleep 60"` across a full run: the count
+# rises during each case and returns to zero between them, with none left
+# behind at the end.
+trap '' TERM
+sleep 60
+IGNORER_EOF
+chmod +x "${IGNORER}"
+
+for mode in timeout fallback; do
+  force=0
+  label="GNU timeout"
+  if [[ "${mode}" == "fallback" ]]; then
+    force=1
+    label="watchdog fallback"
+  fi
+
+  case_out="$(run_case "${force}" 2 "${IGNORER}")"
+  read -r rc elapsed <<<"${case_out}"
+
+  # GNU timeout reports 124 on expiry; the fallback normalizes SIGKILL's 137 to
+  # 124 itself. Either way the caller must see the expiry code.
+  if [[ "${rc}" == "124" ]]; then
+    _pass "${label}: a SIGTERM-ignoring command is still reported as expired"
+  else
+    _fail "${label}: SIGTERM-ignoring command exited ${rc}, expected 124"
+  fi
+
+  # The escalation must actually land. Unterminated, the command runs 60s.
+  if ((elapsed <= 20)); then
+    _pass "${label}: escalation killed it in ${elapsed}s, not its full 60s"
+  else
+    _fail "${label}: took ${elapsed}s — the SIGKILL escalation did not land"
+  fi
+done
+
+# ---------------------------------------------------------------
+# A signal death inside the budget is not an expiry
+# ---------------------------------------------------------------
+# The fallback used to relabel any 143/137 as 124, so a command killed by an
+# external SIGTERM well inside its budget was reported as a timeout
+# (smartwatermelon/dotfiles#266).
+#
+# The fixture signals ITSELF rather than the test hunting for the process with
+# pkill. Both `pkill -f "sleep N"` and `pkill -x -n sleep` were tried and are
+# unreliable here: -f also matches the driver shells, which carry the command in
+# their own argv, and -n races against the test's own helper sleeps. A
+# self-signalling fixture needs no process discovery at all, so the case cannot
+# flake on which process the pattern happened to match.
+echo "Case: an external signal inside the budget is not reported as expiry"
+
+SELF_SIGNALLER="${WORKDIR}/self-sigterm.sh"
+cat >"${SELF_SIGNALLER}" <<'SIGNALLER_EOF'
+#!/usr/bin/env bash
+# Dies by SIGTERM after 1s, well inside any budget this case uses. Stands in for
+# any external kill — an operator, an OOM reaper, a parent tearing down.
+sleep 1
+kill -TERM $$
+sleep 30
+SIGNALLER_EOF
+chmod +x "${SELF_SIGNALLER}"
+
+case_out="$(run_case 1 30 "${SELF_SIGNALLER}")"
+read -r rc elapsed <<<"${case_out}"
+
+if [[ "${rc}" == "143" ]]; then
+  _pass "watchdog fallback: a SIGTERM inside the budget reports 143, not the expiry code"
+elif [[ "${rc}" == "124" ]]; then
+  _fail "watchdog fallback: a signal death was mislabelled as an expiry (124)"
+else
+  _fail "watchdog fallback: signal death reported ${rc}, expected 143"
+fi
+
+if ((elapsed < 15)); then
+  _pass "watchdog fallback: returned on the signal (${elapsed}s), not at the 30s budget"
+else
+  _fail "watchdog fallback: took ${elapsed}s — did not return on the signal"
+fi
+
+# ---------------------------------------------------------------
+# run_bounded must survive its caller returning
+# ---------------------------------------------------------------
+# A `trap ... RETURN` set inside run_bounded is NOT scoped to run_bounded: it
+# stays armed and fires again when the CALLER returns, when the function's
+# `local` is out of scope and `set -u` aborts with "expiry_marker: unbound
+# variable". That shipped and turned CI red while every local run passed,
+# because this machine has coreutils `timeout` and never took the branch that
+# set the trap (smartwatermelon/dotfiles#268).
+#
+# The cases above all invoke run_bounded at the top level, so none of them would
+# have caught it. This one calls it from inside a function and then returns,
+# under `set -eu`, which is how the hook actually uses it.
+echo "Case: run_bounded does not corrupt its caller's scope"
+
+SCOPE_PROBE="${WORKDIR}/scope-probe.sh"
+cat >"${SCOPE_PROBE}" <<SCOPE_EOF
+set -euo pipefail
+source "${RUNNER_FILE}"
+outer() {
+  run_bounded 5 true
+  echo "inner-ok"
+}
+outer
+echo "caller-ok"
+SCOPE_EOF
+
+for mode in timeout fallback; do
+  label="GNU timeout"
+  probe_path="${PATH}"
+  if [[ "${mode}" == "fallback" ]]; then
+    label="watchdog fallback"
+    # Strip the directories carrying timeout/gtimeout, reproducing a stock macOS
+    # box — which is exactly what the CI runner is, and where this bug lived.
+    probe_path="/usr/bin:/bin"
+  fi
+
+  if scope_out="$(PATH="${probe_path}" "${TEST_BASH}" "${SCOPE_PROBE}" 2>&1)"; then
+    if [[ "${scope_out}" == *"caller-ok"* ]]; then
+      _pass "${label}: the caller returns normally after run_bounded"
+    else
+      _fail "${label}: caller did not complete — output: ${scope_out}"
+    fi
+  else
+    _fail "${label}: run_bounded aborted its caller — output: ${scope_out}"
+  fi
+done
+
 echo
 if ((fail)); then
   echo "SOME CHECKS FAILED" >&2
