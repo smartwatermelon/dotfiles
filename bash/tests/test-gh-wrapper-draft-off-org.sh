@@ -102,25 +102,56 @@ fi
 off_org_clone="/tmp/gh-wrapper-draft-test-off-org-$$"
 in_org_clone="/tmp/gh-wrapper-draft-test-in-org-$$"
 mkdir -p "${off_org_clone}" "${in_org_clone}"
-trap 'rm -rf "${off_org_clone}" "${in_org_clone}"' EXIT
+# cwd_status_dir is created further down but named here, so an abort between
+# its mktemp and its explicit cleanup cannot leak it. The `:-` guard covers the
+# window before it is assigned. Leaked fixture dirs are the defect class this
+# suite has been clearing out (#255, #256).
+trap 'rm -rf "${off_org_clone}" "${in_org_clone}" "${cwd_status_dir:-}"' EXIT
 (cd "${off_org_clone}" && command git init -q && command git remote add origin git@github.com:someoutsideorg/foo.git)
 (cd "${in_org_clone}" && command git init -q && command git remote add origin git@github.com:smartwatermelon/dotfiles.git)
 
-cwd_fail_file="/tmp/gh-wrapper-draft-test-cwd-fail-$$"
-rm -f "${cwd_fail_file}"
-(
-  cd "${off_org_clone}"
-  assert_args "off-org cwd remote fallback" 1 pr create --title x
-  if [[ "${fail}" == "1" ]]; then touch "${cwd_fail_file}"; fi
-)
-(
-  cd "${in_org_clone}"
-  assert_args "in-org cwd remote fallback" 0 pr create --title x
-  if [[ "${fail}" == "1" ]]; then touch "${cwd_fail_file}"; fi
-)
-if [[ -f "${cwd_fail_file}" ]]; then
-  fail=1
-fi
-rm -f "${cwd_fail_file}"
+# `fail` is set inside subshells, so it cannot propagate back by assignment.
+# It travels through the filesystem instead — and the direction matters.
+#
+# Signalling FAILURE ("touch on failure") fails OPEN: this script runs under
+# `set -e`, so a subshell that dies before reaching its sentinel line — an
+# unexpected non-zero from `cd` or `assert_args` rather than a `fail=1` — writes
+# nothing, and the parent reads that silence as a pass
+# (smartwatermelon/dotfiles#247).
+#
+# Signalling COMPLETION instead fails CLOSED. Each subshell records its own
+# verdict only after it has run to the end, so an early exit leaves the file
+# absent and the parent treats a missing verdict as a failure. Silence can no
+# longer be mistaken for success — the defect class this suite has been
+# clearing out (see #256).
+cwd_status_dir="$(mktemp -d "${TMPDIR:-/tmp}/gh-wrapper-draft-cwd.XXXXXX")"
+
+run_cwd_case() {
+  local clone="$1" desc="$2" want="$3" tag="$4"
+  (
+    cd "${clone}" || exit 1
+    fail=0
+    assert_args "${desc}" "${want}" pr create --title x
+    # Reached only if the case ran to completion; the recorded value is this
+    # subshell's own verdict.
+    printf '%s\n' "${fail}" >"${cwd_status_dir}/${tag}"
+  )
+}
+
+run_cwd_case "${off_org_clone}" "off-org cwd remote fallback" 1 off-org
+run_cwd_case "${in_org_clone}" "in-org cwd remote fallback" 0 in-org
+
+for tag in off-org in-org; do
+  if [[ ! -f "${cwd_status_dir}/${tag}" ]]; then
+    echo "FAIL: ${tag} cwd case did not run to completion (aborted before recording a verdict)"
+    fail=1
+  else
+    cwd_verdict="$(cat "${cwd_status_dir}/${tag}")" || cwd_verdict="unreadable"
+    if [[ "${cwd_verdict}" != "0" ]]; then
+      fail=1
+    fi
+  fi
+done
+rm -rf "${cwd_status_dir}"
 
 exit "${fail}"
