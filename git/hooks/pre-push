@@ -248,9 +248,27 @@ run_bounded() {
   # The marker records that the watchdog — rather than anything else — is what
   # killed the command, so the expiry code below is not inferred from the signal
   # number alone.
+  # mktemp is used to RESERVE A UNIQUE PATH, not to create the file that is read
+  # later. The marker's meaning is its existence — the watchdog creates it with
+  # `: >` just before it signals, and the expiry check below tests for it — so
+  # the file mktemp creates is removed immediately, leaving the path free to
+  # carry that meaning. Without this the marker would already exist on every
+  # call and every result would look like an expiry.
+  #
+  # mktemp rather than a constructed name because it reserves the path against
+  # concurrent runs of this hook, which a "$$"-style name does not do reliably.
   local expiry_marker
   expiry_marker="$(mktemp "${TMPDIR:-/tmp}/prepush-expiry.XXXXXX")"
   rm -f "${expiry_marker}"
+
+  # RETURN genuinely fires here: run_bounded is a function, unlike the `bash -c`
+  # script top level where a RETURN trap silently never runs and leaked a
+  # directory per test run (smartwatermelon/dotfiles#256). Verified in a scratch
+  # function before relying on it.
+  #
+  # This covers every exit path, so a killed hook cannot leave the marker behind
+  # (smartwatermelon/dotfiles#268).
+  trap 'rm -f "${expiry_marker}"' RETURN
 
   "$@" &
   local cmd_pid=$!
@@ -315,11 +333,10 @@ run_bounded() {
   # (smartwatermelon/dotfiles#266). The marker is written by the watchdog just
   # before it signals, so its presence distinguishes "we timed this out" from
   # "something else killed it".
+  # Cleanup is the RETURN trap's job on every path below.
   if [[ -f "${expiry_marker}" ]] && ((status == 143 || status == 137)); then
-    rm -f "${expiry_marker}"
     return 124
   fi
-  rm -f "${expiry_marker}"
   return "${status}"
 }
 
