@@ -26,12 +26,21 @@ REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 _tests_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/git-env-isolation.sh
 source "${_tests_dir}/lib/git-env-isolation.sh"
-isolate_git_env
 
 fail=0
 
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/install-worktree-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
+
+# Pass WORKDIR as the ceiling, not just the bare call. This test asserts that the
+# guard REJECTS a non-repository directory, and without GIT_CEILING_DIRECTORIES a
+# git command run from a scratch dir walks up to whatever repository encloses it
+# — which would resolve, making that negative case pass vacuously
+# (smartwatermelon/dotfiles#264). WORKDIR lives under TMPDIR today, so nothing
+# encloses it in practice; the ceiling makes that a property of the test rather
+# than of where mktemp happened to put it. Verified: a scratch dir placed inside
+# a repo resolves to that repo's .git without a ceiling.
+isolate_git_env "${WORKDIR}"
 
 _pass() { echo "  PASS: $1"; }
 _fail() {

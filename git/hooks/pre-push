@@ -244,6 +244,14 @@ run_bounded() {
   # Fallback watchdog: run the command in the background, kill it if it
   # outlives the budget. `wait` on a known pid yields the command's own exit
   # status, so a normal completion is reported untouched.
+  #
+  # The marker records that the watchdog — rather than anything else — is what
+  # killed the command, so the expiry code below is not inferred from the signal
+  # number alone.
+  local expiry_marker
+  expiry_marker="$(mktemp "${TMPDIR:-/tmp}/prepush-expiry.XXXXXX")"
+  rm -f "${expiry_marker}"
+
   "$@" &
   local cmd_pid=$!
 
@@ -257,6 +265,7 @@ run_bounded() {
       sleep 1
       ((waited += 1))
     done
+    : >"${expiry_marker}"
     kill -TERM "${cmd_pid}" 2>/dev/null || true
 
     # Escalate to SIGKILL only while the process is still ours to signal.
@@ -290,14 +299,27 @@ run_bounded() {
 
   local status=0
   wait "${cmd_pid}" 2>/dev/null || status=$?
+  # SIGTERM to the watchdog also takes down whatever `sleep` it is sitting in:
+  # that sleep is a foreground child of the subshell, not a background job, so
+  # it dies with its parent. Checked by sampling the process table across
+  # repeated calls — no `sleep` survives run_bounded's return
+  # (smartwatermelon/dotfiles#264).
   kill -TERM "${watchdog_pid}" 2>/dev/null || true
   wait "${watchdog_pid}" 2>/dev/null || true
 
-  # A killed command surfaces as 143 (SIGTERM) / 137 (SIGKILL); normalize to
-  # coreutils' 124 so callers have one expiry code to branch on.
-  if ((status == 143 || status == 137)); then
+  # Report expiry only when the WATCHDOG is what killed the command.
+  #
+  # Normalizing on the signal number alone would relabel any 143/137 as a
+  # timeout — including a command killed by an external SIGTERM well inside its
+  # budget, which is a signal death and not an expiry
+  # (smartwatermelon/dotfiles#266). The marker is written by the watchdog just
+  # before it signals, so its presence distinguishes "we timed this out" from
+  # "something else killed it".
+  if [[ -f "${expiry_marker}" ]] && ((status == 143 || status == 137)); then
+    rm -f "${expiry_marker}"
     return 124
   fi
+  rm -f "${expiry_marker}"
   return "${status}"
 }
 
