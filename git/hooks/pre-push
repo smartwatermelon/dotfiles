@@ -2,6 +2,70 @@
 set -euo pipefail
 
 # =========================================================
+# SELF-MUTATION DETECTION
+# =========================================================
+# Bash does not read a script into memory before running it: it reads a chunk,
+# executes it, then returns to the FILE for the next chunk, tracking its place
+# by byte offset. This hook is deployed as a symlink into a live working tree
+# (~/.config/git/hooks/pre-push -> the dotfiles checkout), so editing that file
+# — or any checkout/rebase/reset that rewrites it — moves bytes under a shell
+# that is still reading. Bash then resumes at a stale offset in new content and
+# lands mid-line, reporting errors that cite a line whose content does not match
+# the message (smartwatermelon/dotfiles#274):
+#
+#   line 490: ==================: command not found
+#   line 412: syntax error near unexpected token `('
+#
+# The first is a comment divider whose "# " prefix fell outside the resumed
+# offset. Such an error is not a defect in this hook and not a problem with the
+# code being pushed — the push aborts cleanly and an unchanged retry succeeds.
+#
+# This does not PREVENT the corruption. Wrapping the body in a brace group would
+# (bash parses the whole block before executing any of it), but that idiom
+# belongs to scripts piped over a network — `curl … | bash` — not to a local
+# file, no other hook here uses it, and the repo's shell formatter reindents
+# everything inside the braces, turning a three-line change into a 644-line
+# reformat. The failure only occurs while the hook file is actively being
+# rewritten, so naming it clearly is worth more than engineering it away.
+#
+# Stamp the RESOLVED target rather than "$0": the deployed path is a symlink,
+# whose own mtime does not change when the file it points at is rewritten.
+_HOOK_REAL_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+_hook_stamp() {
+  # mtime:size — cheap, and enough to catch any rewrite that shifts offsets.
+  stat -f '%m:%z' "${_HOOK_REAL_PATH}" 2>/dev/null || echo "unknown"
+}
+_HOOK_STAMP_START="$(_hook_stamp)"
+_HOOK_MUTATION_REPORTED=0
+
+_warn_if_hook_mutated() {
+  # Fires from both ERR and EXIT so it is reported whether the corruption
+  # surfaces as a failed command or as a clean-looking early finish; the guard
+  # keeps it to one message.
+  [[ "${_HOOK_MUTATION_REPORTED}" == "1" ]] && return 0
+  local now
+  now="$(_hook_stamp)"
+  [[ "${now}" == "${_HOOK_STAMP_START}" ]] && return 0
+  _HOOK_MUTATION_REPORTED=1
+
+  echo "" >&2
+  echo "⚠️  [PRE-PUSH] THIS HOOK WAS EDITED WHILE IT WAS RUNNING." >&2
+  echo "" >&2
+  echo "    ${_HOOK_REAL_PATH}" >&2
+  echo "    changed mid-run (${_HOOK_STAMP_START} -> ${now})." >&2
+  echo "" >&2
+  echo "    Bash reads a script incrementally, so it may have resumed at a" >&2
+  echo "    stale byte offset. Any syntax error above that cites a line whose" >&2
+  echo "    content does not match the message is THIS, not your code and not" >&2
+  echo "    a real finding (smartwatermelon/dotfiles#274)." >&2
+  echo "" >&2
+  echo "    Nothing is lost. Re-run the push once the file has settled." >&2
+  echo "    Do NOT reach for STRICT_PREPUSH=0 on account of this." >&2
+  echo "" >&2
+}
+trap '_warn_if_hook_mutated' ERR EXIT
+
+# =========================================================
 # COLOR OUTPUT AND LOGGING FUNCTIONS
 # =========================================================
 
@@ -498,7 +562,10 @@ run_reviews() {
   local fulldiff_log codebase_log
   fulldiff_log=$(mktemp)
   codebase_log=$(mktemp)
-  trap 'rm -f "${fulldiff_log:-}" "${codebase_log:-}"' EXIT
+  # Chain the mutation warning rather than replacing it: a bare EXIT trap here
+  # would drop the detection installed at the top of this file for the rest of
+  # the run, which is exactly the window where #274 was observed.
+  trap 'rm -f "${fulldiff_log:-}" "${codebase_log:-}"; _warn_if_hook_mutated' EXIT
 
   (echo "${full_diff}" | "${REVIEW_SCRIPT}" --mode=full-diff >"${fulldiff_log}" 2>&1) &
   local fulldiff_pid=$!
@@ -522,7 +589,8 @@ run_reviews() {
   # linger as a process-scoped handler referencing now-out-of-scope
   # locals once this function returns (it's only meaningful for
   # early-exit paths still inside this function's execution).
-  trap - EXIT
+  # Restore the top-level detection rather than clearing to default.
+  trap '_warn_if_hook_mutated' EXIT
 
   # Evaluate results
   local has_failure=false
