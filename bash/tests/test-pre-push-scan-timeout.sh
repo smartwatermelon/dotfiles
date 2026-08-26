@@ -302,6 +302,49 @@ for mode in timeout fallback; do
   fi
 done
 
+# ---------------------------------------------------------------
+# A signal death inside the budget is not an expiry
+# ---------------------------------------------------------------
+# The fallback used to relabel any 143/137 as 124, so a command killed by an
+# external SIGTERM well inside its budget was reported as a timeout
+# (smartwatermelon/dotfiles#266).
+#
+# The fixture signals ITSELF rather than the test hunting for the process with
+# pkill. Both `pkill -f "sleep N"` and `pkill -x -n sleep` were tried and are
+# unreliable here: -f also matches the driver shells, which carry the command in
+# their own argv, and -n races against the test's own helper sleeps. A
+# self-signalling fixture needs no process discovery at all, so the case cannot
+# flake on which process the pattern happened to match.
+echo "Case: an external signal inside the budget is not reported as expiry"
+
+SELF_SIGNALLER="${WORKDIR}/self-sigterm.sh"
+cat >"${SELF_SIGNALLER}" <<'SIGNALLER_EOF'
+#!/usr/bin/env bash
+# Dies by SIGTERM after 1s, well inside any budget this case uses. Stands in for
+# any external kill — an operator, an OOM reaper, a parent tearing down.
+sleep 1
+kill -TERM $$
+sleep 30
+SIGNALLER_EOF
+chmod +x "${SELF_SIGNALLER}"
+
+case_out="$(run_case 1 30 "${SELF_SIGNALLER}")"
+read -r rc elapsed <<<"${case_out}"
+
+if [[ "${rc}" == "143" ]]; then
+  _pass "watchdog fallback: a SIGTERM inside the budget reports 143, not the expiry code"
+elif [[ "${rc}" == "124" ]]; then
+  _fail "watchdog fallback: a signal death was mislabelled as an expiry (124)"
+else
+  _fail "watchdog fallback: signal death reported ${rc}, expected 143"
+fi
+
+if ((elapsed < 15)); then
+  _pass "watchdog fallback: returned on the signal (${elapsed}s), not at the 30s budget"
+else
+  _fail "watchdog fallback: took ${elapsed}s — did not return on the signal"
+fi
+
 echo
 if ((fail)); then
   echo "SOME CHECKS FAILED" >&2
