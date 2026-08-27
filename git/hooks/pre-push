@@ -511,12 +511,18 @@ run_static_analysis() {
 run_static_analysis
 
 # =========================================================
-# FULL-DIFF + CODEBASE REVIEW (parallel)
+# FULL-DIFF REVIEW
 # =========================================================
-# Runs two reviews in parallel on complete main...HEAD diff:
+# Runs one review on the complete main...HEAD diff:
 #   --mode=full-diff: diff-only cross-file integration check
-#   --mode=codebase:  whole-codebase review with tool access
-# Both must pass for push to succeed.
+# It must pass for the push to succeed.
+#
+# --mode=codebase used to run here in parallel. It was removed from the push
+# path (dev-env/docs/plans/2026-08-26-review-pipeline-redesign-design.md §1):
+# a whole-codebase scan hunts PRE-EXISTING defects, which do not appear between
+# pushes, so per-push cadence bought nothing while costing a second Sonnet call
+# on the identical diff and a non-converging stream of auto-filed issues. The
+# mode still exists in run-review.sh for weekly and on-demand use.
 run_reviews() {
   local current_branch
   current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
@@ -543,48 +549,36 @@ run_reviews() {
   local diff_lines
   diff_lines=$(echo "${full_diff}" | wc -l | tr -d ' ')
 
-  # Runs a whole-codebase review that FILES its non-blocking findings as GitHub
-  # issues, in whatever repo you are pushing from (this hook is global via
-  # core.hooksPath). To read those findings before they are filed, dry-run this
-  # same script with `gh` stubbed first: see claude-config/docs/CHECKLISTS.md ->
-  # "Pre-Push Review Dry-Run". That procedure is authored alongside the reviewer,
-  # not alongside this hook — if run-review.sh ever moves, the docs move with it.
+  # The surviving --mode=full-diff review files nothing: every path through
+  # run-review.sh's full-diff block exits before reaching the sole
+  # create_nonblocking_issues call site, which lives in the codebase block.
+  # No push from this hook creates a GitHub issue, so the dry-run procedure
+  # that used to be referenced here no longer applies to the push path.
   local REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
   if [[ ! -x "${REVIEW_SCRIPT}" ]]; then
     log_warning "run-review.sh not found — skipping reviews"
     return 0
   fi
 
-  log "Running full-diff + codebase review in parallel (${diff_lines} lines)"
+  log "Running full-diff review (${diff_lines} lines)"
 
-  # Run both reviews in parallel
-  local fulldiff_exit=0 codebase_exit=0
-  local fulldiff_log codebase_log
+  local fulldiff_exit=0
+  local fulldiff_log
   fulldiff_log=$(mktemp)
-  codebase_log=$(mktemp)
   # Chain the mutation warning rather than replacing it: a bare EXIT trap here
   # would drop the detection installed at the top of this file for the rest of
   # the run, which is exactly the window where #274 was observed.
-  trap 'rm -f "${fulldiff_log:-}" "${codebase_log:-}"; _warn_if_hook_mutated' EXIT
+  trap 'rm -f "${fulldiff_log:-}"; _warn_if_hook_mutated' EXIT
 
   (echo "${full_diff}" | "${REVIEW_SCRIPT}" --mode=full-diff >"${fulldiff_log}" 2>&1) &
   local fulldiff_pid=$!
 
-  (echo "${full_diff}" | "${REVIEW_SCRIPT}" --mode=codebase >"${codebase_log}" 2>&1) &
-  local codebase_pid=$!
-
-  # Wait for both
   wait "${fulldiff_pid}" || fulldiff_exit=$?
-  wait "${codebase_pid}" || codebase_exit=$?
 
-  # Show output from both
   if [[ -s "${fulldiff_log}" ]]; then
     cat "${fulldiff_log}" >&2
   fi
-  if [[ -s "${codebase_log}" ]]; then
-    cat "${codebase_log}" >&2
-  fi
-  rm -f "${fulldiff_log}" "${codebase_log}"
+  rm -f "${fulldiff_log}"
   # Explicit cleanup above already ran; unset the trap so it doesn't
   # linger as a process-scoped handler referencing now-out-of-scope
   # locals once this function returns (it's only meaningful for
@@ -597,10 +591,6 @@ run_reviews() {
   if [[ ${fulldiff_exit} -ne 0 ]]; then
     has_failure=true
     log_warning "Full-diff review found issues"
-  fi
-  if [[ ${codebase_exit} -ne 0 ]]; then
-    has_failure=true
-    log_warning "Codebase review found issues"
   fi
 
   if [[ "${has_failure}" == true ]]; then
@@ -630,7 +620,7 @@ run_reviews() {
       return 0
     fi
   else
-    log_success "Full-diff + codebase review passed"
+    log_success "Full-diff review passed"
   fi
 }
 run_reviews

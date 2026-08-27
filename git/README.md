@@ -167,7 +167,7 @@ and check whether any reported findings' line ranges overlap your diff.
 
 **Why**: Ensures CI workflows use same linting rules as local development
 
-**Also runs AI review**: on non-main branches with a diff against `main`, the hook runs `~/.claude/hooks/run-review.sh` in `--mode=full-diff` and `--mode=codebase`. The codebase pass **files its non-blocking findings as GitHub issues in whatever repo you are pushing from** — this hook is global via `core.hooksPath`, so that is not limited to claude-config. To read those findings before they are filed, dry-run the same script with `gh` stubbed: see `claude-config/docs/CHECKLISTS.md` -> "Pre-Push Review Dry-Run" (also reachable as `~/.claude/docs/CHECKLISTS.md`). The reviewer and its procedure live in claude-config; if `run-review.sh` moves, the docs move with it.
+**Also runs AI review**: on non-main branches with a diff against `main`, the hook runs `~/.claude/hooks/run-review.sh` in `--mode=full-diff`. That pass reports its findings to stderr and gates the push on its exit code; it **files no GitHub issues**. `--mode=codebase` used to run here in parallel and was the only thing on the push path that filed issues. It was removed from the push path — see `dev-env/docs/plans/2026-08-26-review-pipeline-redesign-design.md` §1 — because a whole-codebase scan hunts pre-existing defects, which do not appear between pushes. The mode itself remains in `run-review.sh` for weekly and on-demand use. The reviewer lives in claude-config; if `run-review.sh` moves, the docs move with it.
 
 ### post-checkout
 
