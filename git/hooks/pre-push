@@ -114,6 +114,40 @@ strict_noninteractive_block() {
 }
 
 # =========================================================
+# BASE REF RESOLVER (shared)
+# =========================================================
+# Which ref the diff-scoped checks below measure "what this branch changed"
+# against. Prefers origin/main; falls back to local main.
+#
+# #284: using local `main` produced false BLOCKING findings on code the
+# pusher never touched. Nothing in a feature-branch workflow updates local
+# `main` — `git fetch` moves the remote-tracking ref `origin/main`, not
+# `main` — so in a long session local `main` silently lags behind, and the
+# hook has no way to notice.
+#
+# The drift only bites in combination with a merge. `main...HEAD` is a
+# SYMMETRIC range: it diffs from the merge-base, not from main's tip. While
+# local main is merely a stale ancestor of origin/main, the merge-base is the
+# same commit either way. But once the branch merges upstream in (a routine
+# `Merge branch 'main' into ...`), that upstream commit enters the branch's
+# history, the merge-base against stale local main moves back, and files
+# already merged to origin/main land inside the range.
+#
+# No fetch: this is the push hot path, a network round-trip would have to be
+# timeout-guarded, and it would fail offline. origin/main is already fresh in
+# practice — push updates it, and so does any fetch or pull. When it is
+# absent entirely (fresh clone, fork with a differently-named remote) the
+# local ref is the only base available and the old behaviour is correct.
+# Same guard shape as the Semgrep baseline in run_static_analysis().
+_base_ref() {
+  if git rev-parse --verify --quiet origin/main >/dev/null; then
+    printf 'origin/main'
+  else
+    printf 'main'
+  fi
+}
+
+# =========================================================
 # SEMGREP TOKEN READER (shared)
 # =========================================================
 # Safe read of ~/.semgrep/settings.yml — anchors the grep to the api_token
@@ -202,9 +236,10 @@ run_supply_chain_scan() {
   local pattern
   pattern=$(printf '%s\n' "${LOCKFILE_PATTERNS[@]}" | paste -sd'|' -)
 
-  # Check if any lockfiles changed between main and HEAD
-  local merge_base
-  merge_base=$(git merge-base main HEAD 2>/dev/null || echo "")
+  # Check if any lockfiles changed between the base ref and HEAD
+  local base_ref merge_base
+  base_ref=$(_base_ref)
+  merge_base=$(git merge-base "${base_ref}" HEAD 2>/dev/null || echo "")
   if [[ -z "${merge_base}" ]]; then
     return 0
   fi
@@ -513,7 +548,7 @@ run_static_analysis
 # =========================================================
 # FULL-DIFF REVIEW
 # =========================================================
-# Runs one review on the complete main...HEAD diff:
+# Runs one review on the complete <base ref>...HEAD diff (see _base_ref):
 #   --mode=full-diff: diff-only cross-file integration check
 # It must pass for the push to succeed.
 #
@@ -532,16 +567,17 @@ run_reviews() {
     return 0
   fi
 
-  # Skip if no divergence from main
-  local merge_base
-  merge_base=$(git merge-base main HEAD 2>/dev/null || echo "")
+  # Skip if no divergence from the base ref
+  local base_ref merge_base
+  base_ref=$(_base_ref)
+  merge_base=$(git merge-base "${base_ref}" HEAD 2>/dev/null || echo "")
   if [[ -z "${merge_base}" ]]; then
-    log_warning "Could not find merge-base with main — skipping reviews"
+    log_warning "Could not find merge-base with ${base_ref} — skipping reviews"
     return 0
   fi
 
   local full_diff
-  full_diff=$(git diff main...HEAD 2>/dev/null || echo "")
+  full_diff=$(git diff "${base_ref}...HEAD" 2>/dev/null || echo "")
   if [[ -z "${full_diff}" ]]; then
     return 0
   fi
