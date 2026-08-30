@@ -408,8 +408,19 @@ run_bounded() {
     # "check liveness, then signal" atomic. It cannot be closed from a shell
     # without process groups or pidfds, and the residual window is now a few
     # milliseconds on a path that runs once per push.
+    #
+    # Poll in 0.1s steps for SEMGREP_TIMEOUT_KILL_GRACE seconds. The GNU path
+    # at the top of this function passes the same variable to `timeout
+    # --kill-after`, so both paths honor one knob; this loop previously
+    # hardcoded 20 iterations and ignored it (smartwatermelon/dotfiles#279).
+    # bash has no float arithmetic, so the seconds value is scaled by 10 to
+    # get the iteration count. A non-numeric or empty value falls back to the
+    # same 2s default the GNU path uses.
+    local grace_secs="${SEMGREP_TIMEOUT_KILL_GRACE:-2}"
+    [[ "${grace_secs}" =~ ^[0-9]+$ ]] || grace_secs=2
+    local grace_steps=$((grace_secs * 10))
     local grace=0
-    while ((grace < 20)); do
+    while ((grace < grace_steps)); do
       # `|| exit 0` is the SUCCESS path, not an error path: the command is
       # already gone, so there is nothing left to escalate against and the
       # watchdog has no further work. The counter uses `+= 1` rather than
