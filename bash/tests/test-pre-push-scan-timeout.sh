@@ -393,6 +393,47 @@ for mode in timeout fallback; do
   fi
 done
 
+# ---------------------------------------------------------------
+# The fallback grace budget honors SEMGREP_TIMEOUT_KILL_GRACE
+# ---------------------------------------------------------------
+# The GNU path passes this variable to `timeout --kill-after`, but the fallback
+# grace loop used to hardcode 20 iterations (2s at 0.1s per step) and ignore it
+# entirely. Raising the variable had no effect on the fallback path, so the two
+# branches disagreed about the same knob (smartwatermelon/dotfiles#279).
+#
+# Measured against a SIGTERM-ignoring command, which is the only input that
+# reaches the escalation loop at all. A 6s grace must visibly outlast the 2s
+# default before SIGKILL lands.
+echo "Case: the fallback grace loop honors SEMGREP_TIMEOUT_KILL_GRACE"
+
+case_out="$(SEMGREP_TIMEOUT_KILL_GRACE=6 run_case 1 2 "${IGNORER}")"
+read -r rc elapsed <<<"${case_out}"
+
+if [[ "${rc}" == "124" ]]; then
+  _pass "watchdog fallback: a raised grace still reports the expiry code"
+else
+  _fail "watchdog fallback: expected 124 with a raised grace, got ${rc}"
+fi
+
+# 2s budget + 6s grace = ~8s. The hardcoded 2s grace would land near 4s, so a
+# lower bound of 6s separates the two without depending on exact scheduling.
+if ((elapsed >= 6)); then
+  _pass "watchdog fallback: grace of 6s was honored (escalated at ${elapsed}s)"
+else
+  _fail "watchdog fallback: escalated at ${elapsed}s — the grace loop ignored SEMGREP_TIMEOUT_KILL_GRACE"
+fi
+
+# A non-numeric value must not break the arithmetic under `set -e`; it falls
+# back to the same 2s default the GNU path uses.
+case_out="$(SEMGREP_TIMEOUT_KILL_GRACE=bogus run_case 1 2 "${IGNORER}")"
+read -r rc elapsed <<<"${case_out}"
+
+if [[ "${rc}" == "124" ]]; then
+  _pass "watchdog fallback: a non-numeric grace falls back instead of aborting"
+else
+  _fail "watchdog fallback: non-numeric grace exited ${rc}, expected 124"
+fi
+
 echo
 if ((fail)); then
   echo "SOME CHECKS FAILED" >&2
