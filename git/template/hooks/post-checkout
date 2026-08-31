@@ -36,13 +36,9 @@ if [[ "${branch_checkout}" != "1" ]]; then
   exit 0
 fi
 
-# Only run if .claude/ doesn't already exist
-# This prevents overwriting existing project infrastructure
-if [[ -d ".claude" ]]; then
-  exit 0
-fi
-
-# Get the template location from git config
+# Get the template location from git config.
+# Resolved BEFORE the .claude/ guard below: .editorconfig seeding needs
+# TEMPLATE_DIR too, and it must not be gated on .claude/ being absent.
 TEMPLATE_DIR=$(git config --get init.templateDir 2>/dev/null || echo "")
 if [[ -z "${TEMPLATE_DIR}" ]]; then
   # Fallback if not configured (shouldn't happen, but be defensive)
@@ -52,6 +48,69 @@ fi
 # Expand tilde in path
 TEMPLATE_DIR="${TEMPLATE_DIR/#\~/${HOME}}"
 CLAUDE_TEMPLATE="${TEMPLATE_DIR}/.claude-template"
+
+# Seed .editorconfig into a NEWLY INITIALIZED repo.
+#
+# Runs here, ahead of both the .claude/ guard and the .claude-template check:
+# whether Claude infrastructure is already installed says nothing about
+# whether this repo has stated a shell format, and the two must not be gated
+# on each other.
+#
+# git/hooks/lint-shell.sh only auto-formats when a repo states a preference via
+# .editorconfig; without one it reports drift and writes nothing
+# (smartwatermelon/dotfiles#290). Seeding at init means a new repo gets that
+# stated preference up front, instead of the author discovering the
+# advisory-only path later.
+#
+# COPIED, never symlinked. This file is meant to be committed and read by CI
+# and collaborators. A symlink into ${HOME} would either break for everyone
+# else once committed, or -- if left uncommitted -- hide the format from CI,
+# which is the exact disagreement #290 was about.
+#
+# INIT ONLY. This hook also fires on `git clone`, where the null _prev_head is
+# indistinguishable from the wrapper's synthesized init call. The discriminator
+# is the origin remote: a clone has one, a fresh init does not. Commit count
+# does NOT work here -- at hook time both a fresh init and a clone report an
+# empty `rev-list --all`. Seeding a clone would push a personal style into
+# someone else's project, which is the same over-reach #290 removed.
+seed_editorconfig() {
+  # Guard 1: only a repo with no origin remote, i.e. `git init`, not a clone.
+  local _origin
+  _origin=$(git remote 2>/dev/null | grep -Fx origin) || _origin=""
+  [[ -n "${_origin}" ]] && return 0
+
+  # Guard 2: never overwrite, and defer to any .editorconfig already in scope.
+  # shfmt searches upward, so one in a parent directory already answers for
+  # this repo; adding a second would silently change how the parent's files
+  # are treated. Walk up to / exactly as lint-shell.sh does.
+  local _probe
+  _probe="$(CDPATH='' cd . && pwd)" || return 0
+  while true; do
+    [[ -f "${_probe}/.editorconfig" ]] && return 0
+    [[ "${_probe}" == "/" ]] && break
+    _probe="$(dirname "${_probe}")"
+  done
+
+  # Guard 3: a non-regular .editorconfig (symlink, directory) is left alone.
+  [[ -e ".editorconfig" && ! -f ".editorconfig" ]] && return 0
+
+  # Resolve via TEMPLATE_DIR like every other asset this hook installs, rather
+  # than hardcoding a checkout path -- the dotfiles repo is not guaranteed to
+  # live at any particular location. install.sh deploys .editorconfig there.
+  local _src="${TEMPLATE_DIR}/.editorconfig"
+  [[ -f "${_src}" ]] || return 0
+
+  cp "${_src}" ".editorconfig" 2>/dev/null || return 0
+  echo "📝 Added .editorconfig (shell style; edit or delete to change)"
+}
+
+seed_editorconfig || true
+
+# Only run if .claude/ doesn't already exist
+# This prevents overwriting existing project infrastructure
+if [[ -d ".claude" ]]; then
+  exit 0
+fi
 
 # If template source doesn't exist, skip silently
 # This allows the hook to exist even if template isn't set up yet
