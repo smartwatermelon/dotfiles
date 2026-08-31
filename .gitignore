@@ -29,6 +29,9 @@ gh/*
 
 # ── Root files ────────────────────────────────────────────
 !.gitignore
+# Declares this repo's shell style so lint-shell.sh formats from a stated
+# preference rather than a hook default (smartwatermelon/dotfiles#290).
+!.editorconfig
 !README.md
 !liquidpromptrc
 !install.sh
