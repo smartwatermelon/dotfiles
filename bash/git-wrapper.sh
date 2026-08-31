@@ -146,4 +146,13 @@ git() {
 
   return "${git_result}"
 }
-export -f git # Exported - overrides system git command globally
+# Export git AND the helpers it calls: an exported function only carries its
+# own body into subshells, not functions it calls. git()'s RETURN trap calls
+# _git_wrapper_restore_dir, so a subshell that inherits the exported git but
+# did not source this file dies with "_git_wrapper_restore_dir: command not
+# found" (exit 127) the first time that trap fires. BASH_ENV normally hides
+# this by re-sourcing config in non-interactive children — but it is set to a
+# HOME-relative path, so any child with a rewritten HOME (the test suite's
+# fixtures, for one) resolves it to nothing and the helper vanishes while the
+# inherited git remains. Same reasoning, and the same fix, as gh-wrapper.sh.
+export -f git _git_wrapper_restore_dir # Exported - overrides system git command globally
