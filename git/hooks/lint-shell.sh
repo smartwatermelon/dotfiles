@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Track which files were modified and which have remaining issues
 declare -A fixed_by_shellcheck=() fixed_by_shfmt=() failed_files=()
+declare -A format_advisories=()
 temp_files=()
 
 # Cleanup temporary files on exit
@@ -113,12 +114,23 @@ for f in "$@"; do
       [[ "${editorconfig_dir}" == "/" ]] && break
       editorconfig_dir="$(dirname "${editorconfig_dir}")"
     done
+    # No .editorconfig anywhere up to / means the repo has stated no
+    # formatting preference. We have no authority to pick one for it: any
+    # fallback style we impose can disagree with what the repo's own CI
+    # enforces, and rewriting the file mid-commit turns that disagreement
+    # into a commit that silently contradicts its own author
+    # (smartwatermelon/dotfiles#290). Report the drift instead of fixing it,
+    # and leave the repo's CI as the only authority on its format.
     if ! ${has_editorconfig}; then
-      shfmt_flags=(-i 2 -ci -bn)
-    fi
-
+      # Advisory only: record the drift against shfmt's own defaults and
+      # leave the file untouched. shfmt -d exits non-zero when a diff exists,
+      # so a non-empty capture is the finding; an empty one means clean.
+      format_diff=$(shfmt -d "${f}" 2>/dev/null) || true
+      if [[ -n "${format_diff}" ]]; then
+        format_advisories["${f}"]="${format_diff}"
+      fi
     # Check if formatting is needed (without modifying)
-    if shfmt -d "${shfmt_flags[@]}" "${f}" >/dev/null 2>&1; then
+    elif shfmt -d "${shfmt_flags[@]}" "${f}" >/dev/null 2>&1; then
       # Already formatted correctly
       :
     else
@@ -168,6 +180,20 @@ if [[ ${#all_fixed[@]} -gt 0 ]]; then
   printf "  %s\n" "${all_fixed[@]}" | sort
 fi
 
+# Show formatting advisories (repos with no .editorconfig).
+# Informational only - these never set has_failures and never block a commit.
+# The repo has stated no formatting preference, so this is a note for the
+# author and reviewer to reason over, not a standard to enforce.
+if [[ ${#format_advisories[@]} -gt 0 ]]; then
+  echo "ℹ️  Formatting notes (advisory - nothing was changed, commit not blocked):"
+  for f in "${!format_advisories[@]}"; do
+    printf "  %s\n" "${f}"
+  done | sort
+  echo "     No .editorconfig found, so this repo's format is its own to set."
+  echo "     Diff vs shfmt defaults: shfmt -d <file>"
+  echo "     To adopt a style here: add an .editorconfig (then shfmt auto-fixes)."
+fi
+
 # Check for failed files
 has_failures=false
 for f in "${!failed_files[@]}"; do
@@ -181,6 +207,9 @@ done
 
 if ${has_failures}; then
   exit 1
+elif [[ ${#format_advisories[@]} -gt 0 ]]; then
+  # Nothing blocking, but don't claim "clean" over an open formatting note.
+  echo "🎉 No blocking issues (see formatting notes above)."
 else
   echo "🎉 All checked files are clean!"
 fi
