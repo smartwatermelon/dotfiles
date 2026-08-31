@@ -510,7 +510,17 @@ _gem_update() {
   _notif "Updating Ruby gems..."
   echo "=== gem update ${timestamp} ===" | _update_log
 
-  output=$(gem update --verbose 2>&1)
+  # --no-document: Homebrew's rubygems plugin shim
+  # (lib/ruby/gems/*/plugins/rdoc_plugin.rb) hardcodes the RDoc version shipped
+  # with the ruby formula, so every gem process loads that RDoc at startup.
+  # Doc generation then activates the newer rdoc from GEM_HOME, and the two
+  # copies overwrite each other's constants in-process. Mismatched
+  # RDoc::Markup::Formatter#initialize arity between the versions raises
+  # ArgumentError and fails the whole update. Doc generation is the only path
+  # that reaches the colliding code, so skipping it avoids the collision
+  # regardless of which RDoc versions are installed. Regenerate on demand with
+  # `gem rdoc <gemname>`.
+  output=$(gem update --no-document --verbose 2>&1)
   result=$?
   echo "${output}" | _update_log
 
