@@ -52,6 +52,16 @@ const googleEditor = (segment) => (url) =>
 
 export default {
   defaultBrowser: "Google Chrome",
+
+  options: {
+    // Finicky logs every opened URL to ~/Library/Logs/Finicky by default,
+    // which accumulates a plaintext record of browsing — including alert,
+    // ticket and PR links that carry account and incident identifiers.
+    // Diagnostics still go to the console, so `Finicky -config <file>` from a
+    // terminal remains available when a handler needs debugging.
+    logRequests: false,
+  },
+
   handlers: [
     // matchHostnames matches on host alone, so a bare https://github.com with
     // no trailing path is routed as well as any path beneath it.
