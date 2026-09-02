@@ -109,6 +109,24 @@ else
   check "duplicate marker fails" "nonzero" "nonzero"
 fi
 
+echo "render with trailing-space marker:"
+printf '// header\nconst INSTALLED_PWAS = {}; // @@INSTALLED_PWAS@@ \nexport default {};\n' >"${TMP}/trailing-space.js"
+if finicky_render "${TMP}/trailing-space.js" "${scan}" >"${TMP}/ts.out" 2>"${TMP}/ts.err"; then
+  check "trailing-space marker fails" "nonzero" "0"
+else
+  check "trailing-space marker fails" "nonzero" "nonzero"
+fi
+check "trailing-space marker error mentions marker" "1" "$(grep -c 'marker' "${TMP}/ts.err")"
+
+echo "render with marker embedded in a longer line:"
+printf '// header\n//   const INSTALLED_PWAS = {}; // @@INSTALLED_PWAS@@ (old)\nexport default {};\n' >"${TMP}/embedded.js"
+if finicky_render "${TMP}/embedded.js" "${scan}" >"${TMP}/em.out" 2>"${TMP}/em.err"; then
+  check "embedded marker fails" "nonzero" "0"
+else
+  check "embedded marker fails" "nonzero" "nonzero"
+fi
+check "embedded marker error mentions marker" "1" "$(grep -c 'marker' "${TMP}/em.err")"
+
 echo "real template:"
 REAL_TEMPLATE="${REPO_ROOT}/finicky/finicky.template.js"
 check "real template has exactly one marker" "1" "$(grep -cF 'const INSTALLED_PWAS = {}; // @@INSTALLED_PWAS@@' "${REAL_TEMPLATE}" 2>/dev/null || echo 0)"
@@ -202,6 +220,20 @@ if command -v node >/dev/null 2>&1; then
   check "invalid render leaves existing file intact" "1" "$(grep -cF "${FOO_ID}" "${OUT}")"
 else
   echo "  SKIP: node not on PATH, validation test not run"
+fi
+
+echo "temp file cleanup:"
+if command -v node >/dev/null 2>&1; then
+  TMPDIR_TEST="$(mktemp -d)"
+  FINICKY_TEMPLATE="${TEMPLATE}" FINICKY_OUTPUT="${OUT}" \
+    CHROME_APPS_DIR="${APPS}" CHROME_PROFILE_ROOT="${PROFILES}" \
+    FINICKY_RESTART_CMD="true" \
+    TMPDIR="${TMPDIR_TEST}" \
+    bash "${GEN}" >/dev/null 2>&1 || true
+  check "no finicky-check temp files remain" "0" "$(find "${TMPDIR_TEST}" -name 'finicky-check.*' | wc -l | tr -d ' ')"
+  rm -rf "${TMPDIR_TEST}"
+else
+  echo "  SKIP: node not on PATH, temp file cleanup test not run"
 fi
 
 echo "install.sh wiring:"
