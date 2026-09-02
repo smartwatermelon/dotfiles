@@ -255,6 +255,25 @@ while IFS= read -r file; do
 done < <(git -C "${REPO_DIR}" ls-files)
 
 # ============================================================================
+# 3b. GENERATED CONFIGS
+# ============================================================================
+# finicky.js is generated per machine from finicky.template.js plus the
+# Chrome PWAs installed here; a handler for a PWA that is missing would drop
+# URLs. The generator restarts Finicky when the file changes, because
+# Finicky's watcher does not survive the file being replaced.
+_info "Generating Finicky config from installed Chrome PWAs..."
+if [[ "${DRY_RUN}" == true ]]; then
+  if ! bash "${REPO_DIR}/finicky/generate-config.sh" --dry-run; then
+    failures+=("finicky-generate:dry-run")
+  fi
+elif bash "${REPO_DIR}/finicky/generate-config.sh"; then
+  installed+=("generated:${HOME}/.config/finicky/finicky.js")
+else
+  _warn "Finicky config generation failed — see messages above"
+  failures+=("finicky-generate")
+fi
+
+# ============================================================================
 # 4. HOME SYMLINKS (~/.<file> → ~/.config/<path>)
 # ============================================================================
 

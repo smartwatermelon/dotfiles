@@ -121,9 +121,110 @@ finicky_render() {
     awk '$0 == ENVIRON["RENDER_MARKER"] { print ENVIRON["RENDER_LITERAL"]; next } { print }' "${template}"
 }
 
-main() {
-  _gen_err "main not implemented yet"
+# Validates a rendered config with node when available. The rendered file
+# is an ES module, so it is checked under an .mjs name.
+_validate_rendered() {
+  local rendered="$1" tmp_mjs
+  if ! command -v node >/dev/null 2>&1; then
+    _gen_warn "node not on PATH; skipping syntax check of rendered config"
+    return 0
+  fi
+  tmp_mjs="$(mktemp "${TMPDIR:-/tmp}/finicky-check.XXXXXX").mjs"
+  cp "${rendered}" "${tmp_mjs}"
+  if node --check "${tmp_mjs}"; then
+    rm -f "${tmp_mjs}"
+    return 0
+  fi
+  rm -f "${tmp_mjs}"
   return 1
+}
+
+# Default restart: only if Finicky is running. `open -g` keeps it in the
+# background. Finicky's watcher does not survive an inode replacement, so a
+# restart is the only reliable way for a changed config to take effect.
+_default_restart() {
+  if pgrep -x Finicky >/dev/null 2>&1; then
+    pkill -x Finicky || true
+    sleep 1
+    open -g -a Finicky || _gen_warn "could not relaunch Finicky; start it by hand"
+    _gen_info "restarted Finicky so it reads the new config"
+  fi
+}
+
+main() {
+  local dry_run=false arg
+  for arg in "$@"; do
+    case "${arg}" in
+      --dry-run) dry_run=true ;;
+      *)
+        _gen_err "unknown argument: ${arg}"
+        return 1
+        ;;
+    esac
+  done
+
+  local script_dir template output apps_dir profile_root
+  script_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  template="${FINICKY_TEMPLATE:-${script_dir}/finicky.template.js}"
+  output="${FINICKY_OUTPUT:-${HOME}/.config/finicky/finicky.js}"
+  apps_dir="${CHROME_APPS_DIR:-${HOME}/Applications/Chrome Apps.localized}"
+  profile_root="${CHROME_PROFILE_ROOT:-${HOME}/Library/Application Support/Google/Chrome}"
+
+  local scan rendered
+  scan="$(finicky_scan_pwas "${apps_dir}" "${profile_root}")"
+  rendered="$(mktemp "${TMPDIR:-/tmp}/finicky-render.XXXXXX")"
+  if ! finicky_render "${template}" "${scan}" >"${rendered}"; then
+    rm -f "${rendered}"
+    return 1
+  fi
+  if ! _validate_rendered "${rendered}"; then
+    _gen_err "rendered config failed syntax check; leaving ${output} untouched"
+    rm -f "${rendered}"
+    return 1
+  fi
+
+  local count=0
+  [[ -n "${scan}" ]] && count="$(wc -l <<<"${scan}" | tr -d ' ')"
+  _gen_info "installed PWAs found: ${count}"
+
+  # A symlink here is the pre-generator deployment (finicky.js used to be
+  # tracked and linked into place). Its target was renamed, so it dangles.
+  # Compare against whatever the symlink resolves to (nothing, if dangling)
+  # so a symlink to already-correct content is still treated as unchanged.
+  if [[ -L "${output}" ]]; then
+    if [[ -f "${output}" ]] && cmp -s "${rendered}" "${output}"; then
+      _gen_info "unchanged: ${output}"
+      rm -f "${rendered}"
+      return 0
+    fi
+    if ${dry_run}; then
+      _gen_info "would remove symlink: ${output}"
+    else
+      rm -f "${output}"
+      _gen_info "removed symlink: ${output}"
+    fi
+  elif [[ -f "${output}" ]] && cmp -s "${rendered}" "${output}"; then
+    _gen_info "unchanged: ${output}"
+    rm -f "${rendered}"
+    return 0
+  fi
+
+  if ${dry_run}; then
+    _gen_info "would install: ${output}"
+    rm -f "${rendered}"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "${output}")"
+  mv "${rendered}" "${output}"
+  chmod 0644 "${output}"
+  _gen_info "installed: ${output}"
+
+  if [[ -n "${FINICKY_RESTART_CMD:-}" ]]; then
+    bash -c "${FINICKY_RESTART_CMD}"
+  else
+    _default_restart
+  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

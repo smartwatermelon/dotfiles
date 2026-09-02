@@ -132,4 +132,61 @@ else
   echo "  SKIP: node not on PATH, syntax check not run"
 fi
 
+echo "install:"
+OUT_DIR="${TMP}/out"
+mkdir -p "${OUT_DIR}"
+OUT="${OUT_DIR}/finicky.js"
+SENTINEL="${TMP}/restarted"
+run_gen() {
+  FINICKY_TEMPLATE="${TEMPLATE}" FINICKY_OUTPUT="${OUT}" \
+    CHROME_APPS_DIR="${APPS}" CHROME_PROFILE_ROOT="${PROFILES}" \
+    FINICKY_RESTART_CMD="touch ${SENTINEL}" \
+    bash "${GEN}" "$@"
+}
+
+ln -s "${TMP}/does-not-exist" "${OUT}"
+run_gen >"${TMP}/run1.out" 2>&1 || {
+  echo "  FAIL: first run exited non-zero"
+  cat "${TMP}/run1.out"
+  fail=1
+}
+check "dangling symlink replaced by a regular file" "regular" "$([[ -f "${OUT}" && ! -L "${OUT}" ]] && echo regular || echo other)"
+check "installed file carries the literal" "1" "$(grep -cF "${GH_ID}" "${OUT}")"
+check "first install reports installed" "1" "$(grep -c 'installed:' "${TMP}/run1.out")"
+check "first install runs the restart command" "yes" "$([[ -f "${SENTINEL}" ]] && echo yes || echo no)"
+
+rm -f "${SENTINEL}"
+run_gen >"${TMP}/run2.out" 2>&1 || {
+  echo "  FAIL: second run exited non-zero"
+  fail=1
+}
+check "second run reports unchanged" "1" "$(grep -c 'unchanged:' "${TMP}/run2.out")"
+check "second run does not restart" "no" "$([[ -f "${SENTINEL}" ]] && echo yes || echo no)"
+
+echo "dry-run:"
+rm -rf "${APPS}/Foo.app"
+run_gen --dry-run >"${TMP}/run3.out" 2>&1 || {
+  echo "  FAIL: dry-run exited non-zero"
+  fail=1
+}
+check "dry-run reports would install" "1" "$(grep -c 'would install:' "${TMP}/run3.out")"
+check "dry-run leaves the file alone" "1" "$(grep -cF "${FOO_ID}" "${OUT}")"
+check "dry-run does not restart" "no" "$([[ -f "${SENTINEL}" ]] && echo yes || echo no)"
+
+echo "validation:"
+printf '// GENERATED header stays\nconst INSTALLED_PWAS = {}; // @@INSTALLED_PWAS@@\nexport default { this is not javascript };\n' >"${TMP}/broken.template.js"
+if command -v node >/dev/null 2>&1; then
+  if FINICKY_TEMPLATE="${TMP}/broken.template.js" FINICKY_OUTPUT="${OUT}" CHROME_APPS_DIR="${APPS}" CHROME_PROFILE_ROOT="${PROFILES}" FINICKY_RESTART_CMD="touch ${SENTINEL}" bash "${GEN}" >/dev/null 2>&1; then
+    check "invalid render is rejected" "nonzero" "0"
+  else
+    check "invalid render is rejected" "nonzero" "nonzero"
+  fi
+  check "invalid render leaves existing file intact" "1" "$(grep -cF "${FOO_ID}" "${OUT}")"
+else
+  echo "  SKIP: node not on PATH, validation test not run"
+fi
+
+echo "install.sh wiring:"
+check "install.sh calls the generator" "2" "$(grep -c 'finicky/generate-config.sh' "${REPO_ROOT}/install.sh")"
+
 exit "${fail}"
