@@ -13,6 +13,7 @@ alias batp='bat -p'
 alias pbat='bat -p'
 alias profile='source ${HOME}/.bash_profile'
 alias ps='ps -efww'
+alias rgall='rg -uuu'
 alias rsync='rsync -avz'
 
 # Force pipx for global package installation (use \pip3 to bypass)
