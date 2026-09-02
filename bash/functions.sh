@@ -918,6 +918,13 @@ wf() {
 }
 # Not exported
 
+# Reinstall dotfiles and source profile in one step
+dotfiles() {
+  "${HOME}/Developer/dotfiles/install.sh" --sync || return $?
+  source "${HOME}/.bash_profile"
+}
+# Not exported
+
 # Extract compressed files (handles multiple formats)
 extract() {
   if [[ -f "$1" ]]; then
