@@ -142,13 +142,42 @@ _validate_rendered() {
 # Default restart: only if Finicky is running. `open -g` keeps it in the
 # background. Finicky's watcher does not survive an inode replacement, so a
 # restart is the only reliable way for a changed config to take effect.
+#
+# `pkill` returns as soon as the signal is sent, not when the process has
+# actually exited, and a single-instance app's `open -g -a Finicky` against
+# a still-terminating instance just activates the dying one and returns 0 —
+# so neither a fixed `sleep` nor `open`'s exit status can be trusted to know
+# when it's safe to relaunch, or whether the relaunch actually took. Poll
+# pgrep in both directions instead.
 _default_restart() {
-  if pgrep -x Finicky >/dev/null 2>&1; then
-    pkill -x Finicky || true
-    sleep 1
-    open -g -a Finicky || _gen_warn "could not relaunch Finicky; start it by hand"
-    _gen_info "restarted Finicky so it reads the new config"
+  pgrep -x Finicky >/dev/null 2>&1 || return 0
+
+  pkill -x Finicky || true
+  local waited=0
+  while pgrep -x Finicky >/dev/null 2>&1; do
+    if ((waited >= 50)); then
+      _gen_warn "Finicky did not exit after 10s; leaving it stopped, start it by hand"
+      return 0
+    fi
+    sleep 0.2
+    ((waited += 1))
+  done
+
+  if ! open -g -a Finicky; then
+    _gen_warn "could not relaunch Finicky; start it by hand"
+    return 0
   fi
+
+  waited=0
+  while ! pgrep -x Finicky >/dev/null 2>&1; do
+    if ((waited >= 25)); then
+      _gen_warn "Finicky was stopped but did not come back; start it by hand"
+      return 0
+    fi
+    sleep 0.2
+    ((waited += 1))
+  done
+  _gen_info "restarted Finicky so it reads the new config"
 }
 
 main() {
@@ -221,7 +250,7 @@ main() {
   _gen_info "installed: ${output}"
 
   if [[ -n "${FINICKY_RESTART_CMD:-}" ]]; then
-    bash -c "${FINICKY_RESTART_CMD}"
+    bash -c "${FINICKY_RESTART_CMD}" || _gen_warn "restart command failed: ${FINICKY_RESTART_CMD}"
   else
     _default_restart
   fi

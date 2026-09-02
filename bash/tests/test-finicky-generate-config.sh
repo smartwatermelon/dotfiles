@@ -173,6 +173,24 @@ check "dry-run reports would install" "1" "$(grep -c 'would install:' "${TMP}/ru
 check "dry-run leaves the file alone" "1" "$(grep -cF "${FOO_ID}" "${OUT}")"
 check "dry-run does not restart" "no" "$([[ -f "${SENTINEL}" ]] && echo yes || echo no)"
 
+echo "restart command failure:"
+# Foo.app is still removed from the dry-run case above; re-adding it alone
+# would render byte-identical to run1's output and hit the "unchanged"
+# early-return before restart is ever invoked. Also touch the template's
+# trailing comment so the render actually differs from what's on disk.
+make_shim "Foo" "${FOO_ID}" "https://foo.example/"
+TEMPLATE2="${TMP}/finicky.template2.js"
+cat "${TEMPLATE}" >"${TEMPLATE2}"
+echo '// force a content change for the restart-failure test' >>"${TEMPLATE2}"
+gen_exit=0
+FINICKY_TEMPLATE="${TEMPLATE2}" FINICKY_OUTPUT="${OUT}" \
+  CHROME_APPS_DIR="${APPS}" CHROME_PROFILE_ROOT="${PROFILES}" \
+  FINICKY_RESTART_CMD="false" \
+  bash "${GEN}" >"${TMP}/run4.out" 2>&1 || gen_exit=$?
+check "failing restart command still exits 0" "0" "${gen_exit}"
+check "failing restart command still reports installed" "1" "$(grep -c 'installed:' "${TMP}/run4.out")"
+check "failing restart command is warned about" "1" "$(grep -c 'restart command failed' "${TMP}/run4.out")"
+
 echo "validation:"
 printf '// GENERATED header stays\nconst INSTALLED_PWAS = {}; // @@INSTALLED_PWAS@@\nexport default { this is not javascript };\n' >"${TMP}/broken.template.js"
 if command -v node >/dev/null 2>&1; then
@@ -187,6 +205,6 @@ else
 fi
 
 echo "install.sh wiring:"
-check "install.sh calls the generator" "2" "$(grep -c 'finicky/generate-config.sh' "${REPO_ROOT}/install.sh")"
+check "install.sh calls the generator" "2" "$(grep -cE 'bash "\$\{REPO_DIR\}/finicky/generate-config\.sh"' "${REPO_ROOT}/install.sh")"
 
 exit "${fail}"
