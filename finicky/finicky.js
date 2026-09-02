@@ -1,54 +1,66 @@
 // Finicky configuration — routes opened URLs to the right browser or Chrome app.
-// Docs: https://github.com/johnste/finicky/wiki/Configuration
+// Docs: https://github.com/johnste/finicky/wiki/Configuration-(v4)
 //
-// Deployed by install.sh to ~/.config/finicky/finicky.js, which Finicky 4
-// searches natively — so no ~/.finicky.js link is needed.
+// Deployed by install.sh to ~/.config/finicky/finicky.js, one of the paths
+// Finicky 4 searches natively — so no ~/.finicky.js link is needed.
 //
-// Two constraints shape this file:
+// Constraints that shape this file:
 //
 //   1. Finicky evaluates config in goja, a Go JavaScript engine — not Node.
 //      There is no `process` global, so `process.env.HOME` throws a
 //      ReferenceError that takes down the whole config.
 //   2. Chrome PWAs ("Chrome Apps") live under a localized directory whose
 //      on-disk name macOS may render differently than it displays. Addressing
-//      one by bundle ID avoids depending on that path at all, and keeps working
-//      if the app moves.
+//      one by its Chrome app ID avoids depending on that path or the username
+//      at all, and keeps working if the app moves.
+//   3. Launching a PWA by bundle ID (`open -b com.google.Chrome.app.<id> URL`)
+//      does NOT deliver the URL: Chrome's app_mode_loader ignores it and opens
+//      the app's start page, so a deep link to a pull request lands on bare
+//      github.com. The only launch form that preserves the URL is Chrome
+//      itself with `--app-id=<id>` plus
+//      `--app-launch-url-for-shortcuts-menu-item=<url>`. A profile must be
+//      given so Finicky adds `-n` and macOS starts a fresh Chrome process that
+//      honors the args; without it the running Chrome is reused and the flags
+//      are dropped. Recipe from the Finicky wiki (Configuration ideas), needs
+//      Finicky >= 4.2.1.
+//   4. A handler whose app is not installed does NOT fall back to
+//      defaultBrowser — the URL is dropped. The config API offers no
+//      "is this app installed" check (finicky.isAppRunning only reports
+//      running apps), so list only PWAs that actually exist on this machine.
+//      App IDs are stable across machines for the same PWA — Chrome derives
+//      them from the manifest — so a PWA installed from the same origin
+//      elsewhere gets the same ID.
 //
-// Bundle IDs come from each app's own Info.plist:
+// App IDs come from each app's own Info.plist:
 //   defaults read ~/Applications/Chrome\ Apps.localized/<App>.app/Contents/Info.plist \
-//     CFBundleIdentifier
+//     CrAppModeShortcutID
+//
+// To test a change without opening anything:
+//   /Applications/Finicky.app/Contents/MacOS/Finicky -config finicky/finicky.js -dry-run
+//   (then `open https://github.com/...` from another shell and read the log)
 //
 // Anything with no matching handler falls through to defaultBrowser, so URLs
 // that have no dedicated app need no rule here.
 
-/** Builds a Chrome PWA browser target from its bundle ID. */
-const chromeApp = (bundleId) => ({ name: bundleId, appType: "bundleId" });
+// Chrome profile *directory* that owns the PWAs (not the display name, which
+// is per-user). Finicky resolves the directory with a warning suggesting the
+// display name; the directory is used deliberately so the config carries no
+// account-specific string.
+const CHROME_PROFILE_DIR = "Default";
+
+/** Builds a browser function that opens `url` inside a Chrome PWA. */
+const chromeApp = (appId) => (url) => ({
+  name: "Google Chrome",
+  profile: CHROME_PROFILE_DIR,
+  args: [
+    `--app-id=${appId}`,
+    `--app-launch-url-for-shortcuts-menu-item=${url.toString()}`,
+  ],
+});
 
 const apps = {
-  github: chromeApp("com.google.Chrome.app.mjoklplbddabcmpepnokjaffbmgbkkgg"),
-  meet: chromeApp("com.google.Chrome.app.kjgfgldnnfoeklkmfkjfagphfepbbdan"),
-  calendar: chromeApp("com.google.Chrome.app.kjbdgfilnfhdoflbpgamdcdgpehopbep"),
-  gmail: chromeApp("com.google.Chrome.app.fmgjjmmmlfnkbppncabfkddbjimcfncm"),
-  drive: chromeApp("com.google.Chrome.app.aghbiahbpaijignceidepookljebhfak"),
-  docs: chromeApp("com.google.Chrome.app.mpnpojknpmmopombnjdcgaaiekajbnjb"),
-  sheets: chromeApp("com.google.Chrome.app.fhihpiojkbmbpdjeoajapmgkhlnakfjf"),
-  slides: chromeApp("com.google.Chrome.app.kefjledonklijopmnomlcbpllchaibag"),
-  qualio: chromeApp("com.google.Chrome.app.ikpdgofpcddmjnkoffdccodkecpfaaig"),
-  rippling: chromeApp("com.google.Chrome.app.jeogaiagchpljgopogffgchiggmahhif"),
-  rootly: chromeApp("com.google.Chrome.app.bgaohalbodnpihominepoomjlllpgapa"),
-  datadog: chromeApp("com.google.Chrome.app.hbjgmkjbceobnneiobpfpjddpfmjlmbk"),
+  github: chromeApp("mjoklplbddabcmpepnokjaffbmgbkkgg"),
 };
-
-/**
- * Matches one docs.google.com editor by its leading path segment.
- *
- * Docs, Sheets and Slides all share the docs.google.com hostname and differ
- * only by path, so matchHostnames cannot tell them apart. Any other path on
- * that host (Forms, a bare docs.google.com) matches nothing here and falls
- * through to defaultBrowser.
- */
-const googleEditor = (segment) => (url) =>
-  url.hostname === "docs.google.com" && url.pathname.startsWith(`/${segment}/`);
 
 export default {
   defaultBrowser: "Google Chrome",
@@ -65,36 +77,15 @@ export default {
   handlers: [
     // matchHostnames matches on host alone, so a bare https://github.com with
     // no trailing path is routed as well as any path beneath it.
+    //
+    // Deliberately NOT matching subdomains (gist., docs., api.github.com):
+    // Chrome only honors the launch URL when it is inside the PWA's scope
+    // (github.com/). An out-of-scope URL opens the PWA at its start page and
+    // the link is lost — verified with gist.github.com. Subdomains fall
+    // through to Chrome instead.
     {
-      match: finicky.matchHostnames(["github.com", /\.github\.com$/]),
+      match: finicky.matchHostnames(["github.com", "www.github.com"]),
       browser: apps.github,
-    },
-
-    // ── Google Workspace ────────────────────────────────────
-    { match: finicky.matchHostnames("meet.google.com"), browser: apps.meet },
-    {
-      match: finicky.matchHostnames("calendar.google.com"),
-      browser: apps.calendar,
-    },
-    { match: finicky.matchHostnames("mail.google.com"), browser: apps.gmail },
-    { match: finicky.matchHostnames("drive.google.com"), browser: apps.drive },
-    { match: googleEditor("document"), browser: apps.docs },
-    { match: googleEditor("spreadsheets"), browser: apps.sheets },
-    { match: googleEditor("presentation"), browser: apps.slides },
-
-    // ── Work tools ──────────────────────────────────────────
-    { match: finicky.matchHostnames("app.qualio.com"), browser: apps.qualio },
-    {
-      match: finicky.matchHostnames("app.rippling.com"),
-      browser: apps.rippling,
-    },
-    {
-      match: finicky.matchHostnames(["rootly.com", /\.rootly\.com$/]),
-      browser: apps.rootly,
-    },
-    {
-      match: finicky.matchHostnames("app.datadoghq.com"),
-      browser: apps.datadog,
     },
   ],
 };
