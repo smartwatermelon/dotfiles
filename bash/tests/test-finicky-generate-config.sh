@@ -109,4 +109,27 @@ else
   check "duplicate marker fails" "nonzero" "nonzero"
 fi
 
+echo "real template:"
+REAL_TEMPLATE="${REPO_ROOT}/finicky/finicky.template.js"
+check "real template has exactly one marker" "1" "$(grep -cF 'const INSTALLED_PWAS = {}; // @@INSTALLED_PWAS@@' "${REAL_TEMPLATE}" 2>/dev/null || echo 0)"
+check "real template catalogs GitHub" "1" "$(grep -c 'mjoklplbddabcmpepnokjaffbmgbkkgg' "${REAL_TEMPLATE}" 2>/dev/null || echo 0)"
+real_rendered="$(finicky_render "${REAL_TEMPLATE}" "${scan}")"
+check "real template renders with fixture scan" "2" "$(grep -cF "${GH_ID}" <<<"${real_rendered}")"
+if command -v node >/dev/null 2>&1; then
+  printf '%s\n' "${real_rendered}" >"${TMP}/rendered.mjs"
+  if node --check "${TMP}/rendered.mjs" 2>"${TMP}/node.err"; then
+    check "rendered real template passes node --check" "ok" "ok"
+  else
+    check "rendered real template passes node --check" "ok" "$(head -3 "${TMP}/node.err")"
+  fi
+  printf '%s\n' "$(finicky_render "${REAL_TEMPLATE}" "")" >"${TMP}/rendered-empty.mjs"
+  if node --check "${TMP}/rendered-empty.mjs" 2>"${TMP}/node2.err"; then
+    check "rendered real template with no PWAs passes node --check" "ok" "ok"
+  else
+    check "rendered real template with no PWAs passes node --check" "ok" "$(head -3 "${TMP}/node2.err")"
+  fi
+else
+  echo "  SKIP: node not on PATH, syntax check not run"
+fi
+
 exit "${fail}"
