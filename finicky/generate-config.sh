@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# finicky/generate-config.sh
+#
+# Generates ~/.config/finicky/finicky.js from finicky.template.js plus the
+# Chrome PWAs actually installed on this machine.
+#
+# Why generate at all (all verified with Finicky 4.2.2, 2026-09-01):
+#   - A Finicky handler for an app that is not installed drops the URL —
+#     Chrome opens nothing, and Finicky does not fall back to defaultBrowser.
+#   - The config runs in goja with no filesystem access and cannot import a
+#     second file, so it cannot discover installed apps itself.
+#   - A config that fails to build makes Finicky send every URL to Safari.
+#   - Finicky's file watcher dies when the config's inode is replaced (every
+#     git pull did that while the file was a symlink into the repo), so a
+#     changed config needs a Finicky restart to take effect.
+#
+# "Installed" means a shim exists in ~/Applications/Chrome Apps.localized —
+# Chrome creates one per OS-integrated PWA and removes it on uninstall. The
+# per-profile "Manifest Resources" dirs are NOT used for that decision: they
+# also list Google's preinstalled apps in every profile. They are used only to
+# choose the --profile-directory to launch with.
+#
+# Usage: generate-config.sh [--dry-run]
+#
+# Environment overrides (for tests and unusual layouts):
+#   FINICKY_TEMPLATE     template path   (default: <this dir>/finicky.template.js)
+#   FINICKY_OUTPUT       output path     (default: ~/.config/finicky/finicky.js)
+#   CHROME_APPS_DIR      PWA shim dir    (default: ~/Applications/Chrome Apps.localized)
+#   CHROME_PROFILE_ROOT  Chrome profiles (default: ~/Library/Application Support/Google/Chrome)
+#   FINICKY_RESTART_CMD  command run after a changed install (default: restart Finicky if running)
+set -euo pipefail
+unset CDPATH
+
+_gen_info() { printf '[finicky] %s\n' "$*"; }
+_gen_warn() { printf '[finicky] WARN: %s\n' "$*" >&2; }
+_gen_err() { printf '[finicky] ERROR: %s\n' "$*" >&2; }
+
+MARKER='const INSTALLED_PWAS = {}; // @@INSTALLED_PWAS@@'
+
+# Reads one string key from a shim's Info.plist. Prints nothing on failure.
+_plist_string() {
+  local key="$1" plist="$2"
+  plutil -extract "${key}" raw -o - "${plist}" 2>/dev/null || true
+}
+
+# Picks the Chrome profile directory that has this app installed.
+# Prefers Default; otherwise the first match in sorted order; otherwise
+# Default with a warning (the launch will then fail, but loudly in the log).
+_profile_for_app() {
+  local app_id="$1" profile_root="$2" dir
+  if [[ -d "${profile_root}/Default/Web Applications/Manifest Resources/${app_id}" ]]; then
+    printf 'Default'
+    return 0
+  fi
+  for dir in "${profile_root}"/*/; do
+    dir="${dir%/}"
+    if [[ -d "${dir}/Web Applications/Manifest Resources/${app_id}" ]]; then
+      printf '%s' "$(basename "${dir}")"
+      return 0
+    fi
+  done
+  _gen_warn "app ${app_id} has a shim but no Chrome profile lists it; assuming Default"
+  printf 'Default'
+}
+
+# finicky_scan_pwas <apps_dir> <profile_root>
+# Emits "appId<TAB>name<TAB>profileDir" per installed PWA, sorted by appId.
+finicky_scan_pwas() {
+  local apps_dir="$1" profile_root="$2" shim plist app_id name profile
+  [[ -d "${apps_dir}" ]] || return 0
+  for shim in "${apps_dir}"/*.app; do
+    [[ -d "${shim}" ]] || continue
+    plist="${shim}/Contents/Info.plist"
+    [[ -f "${plist}" ]] || continue
+    app_id="$(_plist_string CrAppModeShortcutID "${plist}")"
+    [[ -n "${app_id}" ]] || continue
+    name="$(_plist_string CrAppModeShortcutName "${plist}")"
+    [[ -n "${name}" ]] || name="$(basename "${shim}" .app)"
+    profile="$(_profile_for_app "${app_id}" "${profile_root}")"
+    printf '%s\t%s\t%s\n' "${app_id}" "${name}" "${profile}"
+  done | LC_ALL=C sort
+}
+
+# Escapes a value for use inside a double-quoted JSON string.
+_json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "${s}"
+}
+
+# finicky_render <template_path> <scan_lines>
+# Prints the template with the marker line replaced by the installed-app
+# literal and a GENERATED header prepended. Fails unless exactly one marker.
+finicky_render() {
+  local template="$1" scan="$2" count literal="" app_id name profile sep=""
+  local esc_id esc_name esc_profile
+  [[ -f "${template}" ]] || {
+    _gen_err "template not found: ${template}"
+    return 1
+  }
+  count="$(grep -cF -- "${MARKER}" "${template}" || true)"
+  if [[ "${count}" -ne 1 ]]; then
+    _gen_err "expected exactly one marker line in ${template}, found ${count}: ${MARKER}"
+    return 1
+  fi
+  if [[ -n "${scan}" ]]; then
+    while IFS=$'\t' read -r app_id name profile; do
+      [[ -n "${app_id}" ]] || continue
+      esc_id="$(_json_escape "${app_id}")"
+      esc_name="$(_json_escape "${name}")"
+      esc_profile="$(_json_escape "${profile}")"
+      literal+="${sep}\"${esc_id}\": {\"name\": \"${esc_name}\", \"profile\": \"${esc_profile}\"}"
+      sep=", "
+    done <<<"${scan}"
+  fi
+  printf '// GENERATED by finicky/generate-config.sh from %s — do not edit.\n' "$(basename "${template}")"
+  printf '// Re-run install.sh --sync (or the generator) after installing or removing a Chrome PWA.\n'
+  # awk with -v would reinterpret backslashes in the literal; pass via ENVIRON.
+  RENDER_MARKER="${MARKER}" RENDER_LITERAL="const INSTALLED_PWAS = {${literal}};" \
+    awk '$0 == ENVIRON["RENDER_MARKER"] { print ENVIRON["RENDER_LITERAL"]; next } { print }' "${template}"
+}
+
+main() {
+  _gen_err "main not implemented yet"
+  return 1
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
