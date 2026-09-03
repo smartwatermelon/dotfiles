@@ -79,6 +79,64 @@ else
   _fail "matching GH_TOKEN: should proceed"
 fi
 
+# Case 4: expired or revoked GH_TOKEN, with CLAUDE_GH_TOKEN_LOGIN unset so the
+# `gh api user` path runs. Must fail closed AND say the identity could not be
+# resolved — not that it mismatched.
+#
+# KNOWN-BAD CASE: this fails against the pre-fix code. `gh api` writes its error
+# body to STDOUT, so `2>/dev/null` does not suppress it and the command
+# substitution captures `{"message": "Bad credentials", ...}`. token_login is
+# therefore non-empty, the "could not be resolved" branch is unreachable, and an
+# expired token is reported as an identity MISMATCH — sending the reader to
+# "unset GH_TOKEN" when the real fix is to rotate it. Measured against gh 2.99.0.
+STUB_DIR="${WORKDIR}/stub-bin"
+mkdir -p "${STUB_DIR}"
+cat >"${STUB_DIR}/gh" <<'STUB_EOF'
+#!/usr/bin/env bash
+# Mimic `gh api user` against a rejected token: JSON error body on STDOUT,
+# human-readable line on stderr, non-zero exit. Shape verified against the real
+# gh 2.99.0 binary.
+cat <<'JSON'
+{
+  "message": "Bad credentials",
+  "documentation_url": "https://docs.github.com/rest",
+  "status": "401"
+}
+JSON
+echo "gh: Bad credentials (HTTP 401)" >&2
+exit 1
+STUB_EOF
+chmod +x "${STUB_DIR}/gh"
+
+# _gh_wrapper_find_real_gh scans PATH and skips the wrapper itself, so the stub
+# is what it finds. Putting it first also keeps the real gh out of reach, which
+# is what makes this case hermetic.
+# Deliberately NOT shaped like a real `ghp_...` PAT: the secret scanners treat
+# that prefix as a hard-coded credential regardless of the value. The guard only
+# cares that GH_TOKEN is non-empty, so the shape is irrelevant to the test.
+err_output="$(_sync_under_env PATH="${STUB_DIR}:${PATH}" \
+  GH_TOKEN="expired-token-fixture" 2>&1)"
+rc=$?
+
+if [[ ${rc} -ne 0 ]]; then
+  _pass "expired GH_TOKEN: fails closed"
+else
+  _fail "expired GH_TOKEN: should fail closed"
+fi
+
+if [[ "${err_output}" == *"could not be resolved"* ]]; then
+  _pass "expired GH_TOKEN: reports a resolution failure"
+else
+  _fail "expired GH_TOKEN: should report a resolution failure, got: ${err_output}"
+fi
+
+# The error body must never be presented as though it were a login name.
+if [[ "${err_output}" == *"Bad credentials"* ]]; then
+  _fail "expired GH_TOKEN: leaked the raw API error body into the message"
+else
+  _pass "expired GH_TOKEN: does not echo the raw API error body"
+fi
+
 if [[ ${fail} -eq 0 ]]; then
   echo "test-gh-wrapper-gh-token-precedence.sh: all assertions passed"
   exit 0

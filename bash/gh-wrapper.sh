@@ -244,15 +244,34 @@ _gh_wrapper_sync_identity() {
       # _gh_wrapper_find_real_gh scans PATH while skipping this file.
       local real_gh
       if real_gh="$(_gh_wrapper_find_real_gh)"; then
-        token_login="$(GH_TOKEN="${GH_TOKEN}" "${real_gh}" api user --jq .login 2>/dev/null)"
+        # Exit status, not output emptiness, decides success here. `gh api`
+        # writes its error body to STDOUT, so a rejected token yields
+        # `{"message": "Bad credentials", ...}` — non-empty, and mistaken for a
+        # login name by any check that only tests for emptiness. Discard the
+        # output unless the call actually succeeded.
+        local api_out
+        if api_out="$(GH_TOKEN="${GH_TOKEN}" "${real_gh}" api user --jq .login 2>/dev/null)"; then
+          token_login="${api_out}"
+        fi
       fi
+    fi
+
+    # A login is a single GitHub username: alphanumerics and hyphens, nothing
+    # else. Anything multi-line or punctuated is an error body that reached here
+    # some other way, and must never be compared against `desired` as though it
+    # named an identity.
+    if [[ -n "${token_login}" && ! "${token_login}" =~ ^[A-Za-z0-9-]+$ ]]; then
+      token_login=""
     fi
 
     if [[ -z "${token_login}" ]]; then
       echo "[gh] ERROR: GH_TOKEN is set but its identity could not be resolved" >&2
       echo "[gh] Refusing to run: GH_TOKEN overrides 'gh auth switch', so the" >&2
-      echo "[gh] identity check cannot be trusted. Unset GH_TOKEN to use the" >&2
-      echo "[gh] keyring identity." >&2
+      echo "[gh] identity check cannot be trusted." >&2
+      echo "[gh] Most likely the token is expired or revoked. Check with:" >&2
+      echo "[gh]   gh api -i user | grep -i token-expiration" >&2
+      echo "[gh] Fix: rotate the token, or unset GH_TOKEN to use the keyring" >&2
+      echo "[gh] identity." >&2
       return 1
     fi
 
