@@ -566,6 +566,83 @@ _gh_wrapper_force_draft_for_off_org() {
   return 0
 }
 
+# --- F4: scope-error hint ------------------------------------------------------
+# GH_TOKEN (the CCCLI PAT) and the keyring token are the same login; only the
+# scopes differ. When gh fails because the active token lacks a scope, say
+# exactly how to re-run the one command with the other token. Detection is
+# gh's own ScopesSuggestion text, so there is no command classifier to get
+# wrong. Design: dev-env docs/superpowers/specs/2026-09-03-org-migration-design.md.
+#
+# Never widen the PAT: it is exported into every session, so a scope added
+# there applies to every call rather than the one that needed it.
+
+# Print the scope named in a captured stderr file, or nothing. The character
+# class accepts either quote style, so the hint keeps working whichever one gh
+# emits; pinning a single one would silently disable it if that ever changed.
+# Measured against gh 2.x (2026-09), which uses "...".
+_gh_wrapper_scope_from_file() {
+  grep -oE "needs the [\"'][A-Za-z0-9:_]+[\"'] scope" "$1" 2>/dev/null \
+    | head -1 | sed -E "s/needs the [\"']([^\"']+)[\"'] scope/\1/"
+}
+
+# Print the hint for `scope`, quoting the original argv back so the suggested
+# command can be pasted verbatim.
+_gh_wrapper_print_scope_hint() {
+  local scope="$1"
+  shift
+  local cmd
+  cmd="$(printf '%q ' "$@")"
+  cmd="${cmd% }"
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    local keyring
+    keyring="$(_gh_wrapper_keyring_login)"
+    # The login stays on the same line as its label: a reader grepping the
+    # hint for the account name should find it next to the word naming it,
+    # not wrapped onto the following line.
+    echo "[gh] GH_TOKEN is set and lacks the '${scope}' scope." >&2
+    echo "[gh] The keyring identity for ${keyring:-<none in hosts.yml>} has it." >&2
+    echo "[gh] Re-run this one command without GH_TOKEN:" >&2
+    echo "[gh]   env -u GH_TOKEN gh ${cmd}" >&2
+    echo "[gh] (Do not add the scope to the CCCLI PAT — it is exported into every session.)" >&2
+  else
+    echo "[gh] The active gh token lacks the '${scope}' scope. Add it to the keyring token:" >&2
+    echo "[gh]   gh auth refresh -h github.com -s ${scope}" >&2
+    echo "[gh] then re-run: gh ${cmd}" >&2
+  fi
+}
+
+# Run the real gh. stderr goes to the terminal live AND to a temp file; stdout
+# is untouched (fd 3 carries it around the pipe). On non-zero exit, a scope
+# error in the file triggers the hint. The real exit code is returned.
+#
+# Not `exec`: the hint needs gh's exit status and stderr after it returns.
+_gh_wrapper_run_with_scope_hint() {
+  local real_gh="$1"
+  shift
+  local errfile rc=0
+  # No temp file means no detection, but the command itself must still run —
+  # degrade to a plain passthrough rather than failing the call.
+  if ! errfile="$(mktemp "${TMPDIR:-/tmp}/gh-wrapper-stderr.XXXXXX")"; then
+    "${real_gh}" "$@"
+    return $?
+  fi
+  # `|| true` keeps `set -e` (standalone mode) from aborting on the failing
+  # pipeline before rc is read.
+  {
+    "${real_gh}" "$@" 2>&1 1>&3 3>&- | tee "${errfile}" >&2
+    rc="${PIPESTATUS[0]}"
+  } 3>&1 || true
+  if [[ "${rc}" -ne 0 ]]; then
+    local scope
+    scope="$(_gh_wrapper_scope_from_file "${errfile}")"
+    if [[ -n "${scope}" ]]; then
+      _gh_wrapper_print_scope_hint "${scope}" "$@"
+    fi
+  fi
+  rm -f "${errfile}"
+  return "${rc}"
+}
+
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   # --- Standalone-wrapper mode (executed directly, e.g. via the
   # ~/.local/bin/gh symlink) ---
@@ -623,15 +700,15 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     fi
   fi
 
-  # Only needed for the final exec below — computed here (after the
+  # Only needed for the final gh invocation below — computed here (after the
   # _GH_REVIEW_DONE-guarded checks above) rather than unconditionally at the
   # top of this block, so we don't do a needless PATH scan before knowing
   # this call is going to pass those checks.
   REAL_GH="$(_gh_wrapper_find_real_gh)"
   # Defensive: _gh_wrapper_find_real_gh currently fails hard on lookup
   # failure (and set -e aborts the assignment), but if it ever returns 0
-  # with empty output we'd otherwise exec "" "$@" and produce a confusing
-  # low-level exec error. Check explicitly instead.
+  # with empty output we'd otherwise run "" "$@" and produce a confusing
+  # low-level "command not found" error. Check explicitly instead.
   if [[ -z "${REAL_GH}" ]]; then
     echo "[gh] ERROR: could not locate real gh binary on PATH" >&2
     exit 1
@@ -643,7 +720,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     source "${CLAUDE_GH_TOKEN_ROUTER}" "$@"
   fi
 
-  exec "${REAL_GH}" "$@"
+  # Not exec: the F4 scope hint needs gh's exit status and stderr after it
+  # returns, so the process has to outlive the call. Only this standalone path
+  # runs the hint — function mode reaches it through `command gh`, which lands
+  # right here. If ~/.local/bin/gh is not on PATH, no hint is printed; that is
+  # the documented limit.
+  _gh_wrapper_rc=0
+  _gh_wrapper_run_with_scope_hint "${REAL_GH}" "$@" || _gh_wrapper_rc=$?
+  exit "${_gh_wrapper_rc}"
 else
   # --- Function-definition mode (sourced from functions.sh) ---
   gh() {
@@ -713,6 +797,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_logins_equal _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_logins_equal _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _GH_WRAPPER_LOGIN_ALIASES
 fi
