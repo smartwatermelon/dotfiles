@@ -28,6 +28,13 @@ isolate_git_env
 export HOME="/tmp/gh-wrapper-identity-test-home-$$"
 mkdir -p "${HOME}/.config/gh"
 
+# GH_TOKEN outranks the keyring identity, so _gh_wrapper_sync_identity fails
+# closed when a real token in the developer's environment disagrees with the
+# fixture owner each case resolves. That guard is correct; inheriting the
+# ambient token here is not. Sandbox it the same way HOME is sandboxed, so the
+# cases exercise the hosts.yml path they are written to test.
+unset GH_TOKEN CLAUDE_GH_TOKEN_LOGIN
+
 # git init inside the sandboxed HOME must not pick up interactive prompts.
 export GIT_CONFIG_GLOBAL="${HOME}/.gitconfig"
 export GIT_CONFIG_SYSTEM=/dev/null

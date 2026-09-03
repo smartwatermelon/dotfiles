@@ -224,6 +224,47 @@ _gh_wrapper_sync_identity() {
       ;;
   esac
 
+  # GH_TOKEN outranks the keyring identity that `gh auth switch` selects, so
+  # the hosts.yml check below verifies this function's own output rather than
+  # the auth `gh` will actually use. When a token is present and represents a
+  # different identity than the resolved owner needs, fail closed instead of
+  # silently acting as the wrong account.
+  #
+  # CLAUDE_GH_TOKEN_LOGIN names the identity GH_TOKEN authenticates as. The
+  # test fixture sets it directly. In production it is unset, so the `gh api
+  # user` fallback below resolves it — one network call per invocation. See
+  # Step 11: session-level caching is a known follow-up, deliberately not
+  # built here.
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    local token_login="${CLAUDE_GH_TOKEN_LOGIN:-}"
+
+    if [[ -z "${token_login}" ]]; then
+      # NOT `command gh`: ~/.local/bin/gh is this same wrapper and precedes
+      # the real binary in PATH, so `command` re-enters this function.
+      # _gh_wrapper_find_real_gh scans PATH while skipping this file.
+      local real_gh
+      if real_gh="$(_gh_wrapper_find_real_gh)"; then
+        token_login="$(GH_TOKEN="${GH_TOKEN}" "${real_gh}" api user --jq .login 2>/dev/null)"
+      fi
+    fi
+
+    if [[ -z "${token_login}" ]]; then
+      echo "[gh] ERROR: GH_TOKEN is set but its identity could not be resolved" >&2
+      echo "[gh] Refusing to run: GH_TOKEN overrides 'gh auth switch', so the" >&2
+      echo "[gh] identity check cannot be trusted. Unset GH_TOKEN to use the" >&2
+      echo "[gh] keyring identity." >&2
+      return 1
+    fi
+
+    if [[ "${token_login,,}" != "${desired,,}" ]]; then
+      echo "[gh] ERROR: GH_TOKEN authenticates as '${token_login}' but repo owner '${owner}' requires '${desired}'" >&2
+      echo "[gh] GH_TOKEN takes precedence over 'gh auth switch', so this would" >&2
+      echo "[gh] run as the wrong identity. Failing closed." >&2
+      echo "[gh] Fix: unset GH_TOKEN to use the keyring identity for this repo." >&2
+      return 1
+    fi
+  fi
+
   current=$(awk '/^github\.com:/{f=1} f && /^ *user:/{print $2; exit}' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'")
 
   if [[ -n "${current}" && "${current}" != "${desired}" ]]; then
