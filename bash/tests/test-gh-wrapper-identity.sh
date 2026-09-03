@@ -200,6 +200,81 @@ else
   echo "PASS: logins_equal rejects an unrelated login"
 fi
 
+# --- Alias resolves the SWITCH TARGET, not just the comparison ---------------
+# The window this pins: pre-rename, the keyring holds andrewmrich and
+# smartwatermelon but NOT twistedmelonman. A personal repo resolves
+# desired=twistedmelonman, so switching to `desired` verbatim asks gh for an
+# account it does not have and the wrapper hard-fails — on the very calls the
+# alias exists to keep working. The target must be resolved to a login the
+# keyring actually holds. Remove with the alias (org-migration Step 6).
+#
+# This case needs a STRICTER stub than the shared one above: the shared stub
+# always exits 0, which would let a switch to a non-existent account look like
+# success. This one fails unless the requested user is really held, which is
+# what `gh auth switch` does.
+# Redefined via eval for the same reason the shared stub above is: only the
+# `command` override reaches it, which the linter cannot trace.
+_test_switch_strict_users=""
+eval '_test_command_stub() {
+  if [[ "$1" == "gh" && "$2" == "auth" && "$3" == "switch" ]]; then
+    local requested="${*: -1}"
+    printf "%s" "${requested}" >"${switch_log}"
+    local held
+    for held in ${_test_switch_strict_users}; do
+      [[ "${held}" == "${requested}" ]] && return 0
+    done
+    return 1
+  fi
+  builtin command "$@"
+}'
+
+assert_switch_target() {
+  local label="$1" current_user="$2" held_users="$3" repo_arg="$4" expected="$5"
+  rm -f "${switch_log}"
+  _test_switch_strict_users="${held_users}"
+  {
+    echo "github.com:"
+    echo "    users:"
+    local u
+    for u in ${held_users}; do
+      echo "        ${u}:"
+    done
+    echo "    user: ${current_user}"
+  } >"${HOME}/.config/gh/hosts.yml"
+  if ! _gh_wrapper_sync_identity --repo "${repo_arg}" pr list 2>/dev/null; then
+    echo "FAIL: ${label} — sync returned non-zero (switch to a login the keyring lacks)"
+    fail=1
+    return
+  fi
+  local got
+  got="$(cat "${switch_log}" 2>/dev/null || true)"
+  if [[ "${got}" == "${expected}" ]]; then
+    echo "PASS: ${label} (switched to ${expected})"
+  else
+    echo "FAIL: ${label} — expected switch to '${expected}', got '${got}'"
+    fail=1
+  fi
+}
+
+# Keyring holds andrewmrich + smartwatermelon; twistedmelonman does not exist
+# yet. A personal-org repo must switch to the held alias, not to the
+# not-yet-existent desired login.
+assert_switch_target "alias resolves switch target to a held login" \
+  "andrewmrich" "andrewmrich smartwatermelon" "smartwatermelon/dotfiles" "smartwatermelon"
+
+# Post-rename shape: once twistedmelonman exists it is preferred over the alias.
+assert_switch_target "held desired login wins over its alias" \
+  "andrewmrich" "andrewmrich smartwatermelon twistedmelonman" "smartwatermelon/dotfiles" "twistedmelonman"
+
+# Restore the permissive shared stub for the cases that follow.
+eval '_test_command_stub() {
+  if [[ "$1" == "gh" && "$2" == "auth" && "$3" == "switch" ]]; then
+    printf "%s" "${*: -1}" >"${switch_log}"
+    return 0
+  fi
+  builtin command "$@"
+}'
+
 # --- Tier 3: default ---------------------------------------------------------
 # An owner claimed by neither identity, with no Beacon context, defaults to
 # twistedmelonman.

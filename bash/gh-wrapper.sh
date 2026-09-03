@@ -210,6 +210,61 @@ _gh_wrapper_keyring_login() {
   awk '/^github\.com:/{f=1} f && /^ *user:/{print $2; exit}' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'"
 }
 
+# Every login the keyring holds for github.com, one per line: the keys of the
+# `users:` block. Those keys sit one indent level deeper than `users:` itself,
+# which is what separates them from siblings like `user:` and `git_protocol:`.
+# Empty when the block is absent (older hosts.yml files omit it).
+_gh_wrapper_keyring_users() {
+  awk '
+    /^github\.com:/ { host = 1; next }
+    /^[^[:space:]]/ { host = 0; users = 0; login_indent = 0; next }
+    host && match($0, /^[[:space:]]*users:[[:space:]]*$/) {
+      users = 1
+      login_indent = 0
+      users_indent = index($0, "u") - 1
+      next
+    }
+    users && match($0, /^[[:space:]]*[^[:space:]#][^:]*:/) {
+      indent = match($0, /[^[:space:]]/) - 1
+      if (indent <= users_indent) { users = 0; next }
+      # A login key sits at the first indent level inside the block. Anything
+      # deeper is that login`s own settings (oauth_token:, git_protocol:), not
+      # another account.
+      if (login_indent == 0) { login_indent = indent }
+      if (indent != login_indent) { next }
+      key = $0
+      sub(/^[[:space:]]*/, "", key)
+      sub(/:.*$/, "", key)
+      print key
+    }
+  ' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'"
+}
+
+# The login to hand `gh auth switch`. `desired` may not exist in the keyring
+# yet — during the rename window the account is still named by its alias — and
+# switching to an account gh does not have fails outright. Prefer `desired`
+# when held, else the first held login the alias table equates to it, else
+# `desired` unchanged so the caller still fails closed with its own message.
+_gh_wrapper_resolve_switch_target() {
+  local desired="$1"
+  local held_logins
+  held_logins="$(_gh_wrapper_keyring_users)" || held_logins=""
+
+  local held alias_match=""
+  while IFS= read -r held; do
+    [[ -z "${held}" ]] && continue
+    if [[ "${held,,}" == "${desired,,}" ]]; then
+      printf '%s' "${held}"
+      return 0
+    fi
+    if [[ -z "${alias_match}" ]] && _gh_wrapper_logins_equal "${desired}" "${held}"; then
+      alias_match="${held}"
+    fi
+  done <<<"${held_logins}"
+
+  printf '%s' "${alias_match:-${desired}}"
+}
+
 # gh has one active account per host (not per repo), unlike git+SSH which
 # already resolves the right identity per remote via ~/.ssh/config host
 # aliases. This keeps gh in sync with that same per-repo intent.
@@ -320,9 +375,14 @@ _gh_wrapper_sync_identity() {
   current="$(_gh_wrapper_keyring_login)"
 
   if [[ -n "${current}" ]] && ! _gh_wrapper_logins_equal "${desired}" "${current}"; then
-    if ! command gh auth switch --hostname github.com --user "${desired}" >/dev/null 2>&1; then
-      echo "[gh] ERROR: failed to switch identity to '${desired}' (repo owner: '${owner}') — refusing to run as '${current}' instead" >&2
-      echo "[gh] If '${desired}' is not authenticated on this machine, run: gh auth login --hostname github.com" >&2
+    # Not `desired` verbatim: during the rename window the keyring still holds
+    # the pre-rename login, and `gh auth switch` to an account it does not have
+    # fails. Resolve to a login gh actually holds.
+    local target
+    target="$(_gh_wrapper_resolve_switch_target "${desired}")"
+    if ! command gh auth switch --hostname github.com --user "${target}" >/dev/null 2>&1; then
+      echo "[gh] ERROR: failed to switch identity to '${target}' (repo owner: '${owner}') — refusing to run as '${current}' instead" >&2
+      echo "[gh] If '${target}' is not authenticated on this machine, run: gh auth login --hostname github.com" >&2
       echo "[gh] Failing closed rather than acting on '${owner}' as the wrong identity." >&2
       return 1
     fi
@@ -653,6 +713,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_logins_equal _gh_wrapper_keyring_login
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_logins_equal _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _GH_WRAPPER_LOGIN_ALIASES
 fi
