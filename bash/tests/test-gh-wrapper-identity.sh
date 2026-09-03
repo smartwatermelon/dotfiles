@@ -8,7 +8,8 @@
 #      (regression: smartwatermelon/dotfiles#159).
 #   2. The Beacon-context heuristic for owners claimed by neither identity
 #      (checkout under the beacon dir, or forked from beacon-biosignals).
-#   3. The smartwatermelon default for everything else.
+#   3. The twistedmelonman default for everything else (smartwatermelon is a
+#      temporary alias).
 set -euo pipefail
 
 unset CDPATH
@@ -131,26 +132,78 @@ mkdir -p "${HOME}/neutral-cwd"
 cd "${HOME}/neutral-cwd"
 
 # --- Tier 1: explicitly-claimed owners -------------------------------------
-# These win in both directions and must never depend on cwd.
-assert_desired "lowercase smartwatermelon" "smartwatermelon" "smartwatermelon/dotfiles" "smartwatermelon"
-assert_desired "lowercase nightowlstudiollc" "andrewmrich" "nightowlstudiollc/kebab-tax" "smartwatermelon"
-assert_desired "beacon-biosignals org" "smartwatermelon" "beacon-biosignals/somerepo" "andrewmrich"
+# These win in both directions and must never depend on cwd. "Wrong current"
+# fixtures use andrewmrich, not smartwatermelon: smartwatermelon is an alias
+# of twistedmelonman until the 2026-09 rename lands, so it never triggers a
+# switch (see the alias block below).
+assert_desired "lowercase smartwatermelon" "andrewmrich" "smartwatermelon/dotfiles" "twistedmelonman"
+assert_desired "lowercase nightowlstudiollc" "andrewmrich" "nightowlstudiollc/kebab-tax" "twistedmelonman"
+assert_desired "lowercase twistedmelonman" "andrewmrich" "twistedmelonman/old-archived" "twistedmelonman"
+assert_desired "already twistedmelonman stays" "twistedmelonman" "smartwatermelon/dotfiles" "twistedmelonman"
+assert_desired "beacon-biosignals org" "twistedmelonman" "beacon-biosignals/somerepo" "andrewmrich"
 # The git-pkgs-proxy case: a fork created during Beacon work, owned by
 # andrewmrich rather than the beacon-biosignals org.
-assert_desired "andrewmrich personal fork" "smartwatermelon" "andrewmrich/git-pkgs-proxy" "andrewmrich"
+assert_desired "andrewmrich personal fork" "twistedmelonman" "andrewmrich/git-pkgs-proxy" "andrewmrich"
 
-# Case-insensitivity across all four claimed owners
+# Case-insensitivity across all claimed owners
 # (regression: smartwatermelon/dotfiles#159).
-assert_desired "mixed-case SmartWatermelon" "andrewmrich" "SmartWatermelon/dotfiles" "smartwatermelon"
-assert_desired "upper-case NIGHTOWLSTUDIOLLC" "andrewmrich" "NIGHTOWLSTUDIOLLC/kebab-tax" "smartwatermelon"
-assert_desired "mixed-case Beacon-BioSignals" "smartwatermelon" "Beacon-BioSignals/somerepo" "andrewmrich"
-assert_desired "mixed-case AndrewMRich" "smartwatermelon" "AndrewMRich/git-pkgs-proxy" "andrewmrich"
+assert_desired "mixed-case SmartWatermelon" "andrewmrich" "SmartWatermelon/dotfiles" "twistedmelonman"
+assert_desired "upper-case NIGHTOWLSTUDIOLLC" "andrewmrich" "NIGHTOWLSTUDIOLLC/kebab-tax" "twistedmelonman"
+assert_desired "mixed-case TwistedMelonMan" "andrewmrich" "TwistedMelonMan/old-archived" "twistedmelonman"
+assert_desired "mixed-case Beacon-BioSignals" "twistedmelonman" "Beacon-BioSignals/somerepo" "andrewmrich"
+assert_desired "mixed-case AndrewMRich" "twistedmelonman" "AndrewMRich/git-pkgs-proxy" "andrewmrich"
+
+# --- Temporary alias (remove with the alias, dev-env org-migration Step 6) ---
+# Before the rename, both tokens still report smartwatermelon. That must be
+# accepted as twistedmelonman, in both directions the wrapper compares
+# (hosts.yml here; GH_TOKEN in test-gh-wrapper-gh-token-precedence.sh).
+assert_no_switch() {
+  local label="$1" current_user="$2" repo_arg="$3"
+  rm -f "${switch_log}"
+  cat >"${HOME}/.config/gh/hosts.yml" <<EOF
+github.com:
+    user: ${current_user}
+EOF
+  if ! _gh_wrapper_sync_identity --repo "${repo_arg}" pr list; then
+    echo "FAIL: ${label} — _gh_wrapper_sync_identity returned non-zero"
+    fail=1
+    return
+  fi
+  local got
+  got="$(cat "${switch_log}" 2>/dev/null || true)"
+  if [[ -z "${got}" ]]; then
+    echo "PASS: ${label} (no switch, ${current_user} accepted)"
+  else
+    echo "FAIL: ${label} — unexpected switch attempted to '${got}'"
+    fail=1
+  fi
+}
+assert_no_switch "alias: smartwatermelon accepted for twistedmelonman" "smartwatermelon" "smartwatermelon/dotfiles"
+assert_no_switch "alias: SmartWatermelon accepted case-insensitively" "SmartWatermelon" "nightowlstudiollc/kebab-tax"
+
+if _gh_wrapper_logins_equal twistedmelonman smartwatermelon; then
+  echo "PASS: logins_equal accepts the alias"
+else
+  echo "FAIL: logins_equal rejects the alias"
+  fail=1
+fi
+if _gh_wrapper_logins_equal smartwatermelon twistedmelonman; then
+  echo "FAIL: logins_equal is not one-directional"
+  fail=1
+else
+  echo "PASS: logins_equal is one-directional"
+fi
+if _gh_wrapper_logins_equal twistedmelonman andrewmrich; then
+  echo "FAIL: logins_equal accepted an unrelated login"
+  fail=1
+else
+  echo "PASS: logins_equal rejects an unrelated login"
+fi
 
 # --- Tier 3: default ---------------------------------------------------------
 # An owner claimed by neither identity, with no Beacon context, defaults to
-# smartwatermelon. This is the inversion of the old behavior, which defaulted
-# unclaimed owners to andrewmrich.
-assert_desired "unclaimed owner defaults to smartwatermelon" "andrewmrich" "someotherorg/somerepo" "smartwatermelon"
+# twistedmelonman.
+assert_desired "unclaimed owner defaults to twistedmelonman" "andrewmrich" "someotherorg/somerepo" "twistedmelonman"
 
 # --- Tier 2: Beacon-context heuristic ----------------------------------------
 # Only consulted for owners claimed by neither identity.
@@ -160,14 +213,14 @@ beacon_repo="${GH_WRAPPER_BEACON_DIR}/thirdparty-tool"
 mkdir -p "${beacon_repo}"
 git -C "${beacon_repo}" init -q
 assert_desired_in "${beacon_repo}" "unclaimed owner, checkout under beacon dir" \
-  "smartwatermelon" "someotherorg/thirdparty-tool" "andrewmrich"
+  "twistedmelonman" "someotherorg/thirdparty-tool" "andrewmrich"
 
 # A sibling dir sharing the prefix must NOT match.
 sibling_repo="${GH_WRAPPER_BEACON_DIR}-scratch/thirdparty-tool"
 mkdir -p "${sibling_repo}"
 git -C "${sibling_repo}" init -q
 assert_desired_in "${sibling_repo}" "prefix-sibling dir does not count as beacon" \
-  "andrewmrich" "someotherorg/thirdparty-tool" "smartwatermelon"
+  "andrewmrich" "someotherorg/thirdparty-tool" "twistedmelonman"
 
 # Signal 2: forked from the beacon-biosignals org, checkout anywhere.
 fork_repo="${HOME}/elsewhere/forked-tool"
@@ -175,7 +228,7 @@ mkdir -p "${fork_repo}"
 git -C "${fork_repo}" init -q
 git -C "${fork_repo}" remote add upstream "git@github.com:beacon-biosignals/forked-tool.git"
 assert_desired_in "${fork_repo}" "unclaimed owner, upstream is beacon-biosignals" \
-  "smartwatermelon" "someotherorg/forked-tool" "andrewmrich"
+  "twistedmelonman" "someotherorg/forked-tool" "andrewmrich"
 
 # An upstream pointing somewhere else must NOT match.
 other_fork="${HOME}/elsewhere/other-fork"
@@ -183,7 +236,7 @@ mkdir -p "${other_fork}"
 git -C "${other_fork}" init -q
 git -C "${other_fork}" remote add upstream "git@github.com:unrelated/other-fork.git"
 assert_desired_in "${other_fork}" "unrelated upstream does not count as beacon" \
-  "andrewmrich" "someotherorg/other-fork" "smartwatermelon"
+  "andrewmrich" "someotherorg/other-fork" "twistedmelonman"
 
 # --- Tier 1 beats Tier 2 -----------------------------------------------------
 # An explicitly-claimed owner is authoritative even from inside a beacon
@@ -191,7 +244,7 @@ assert_desired_in "${other_fork}" "unrelated upstream does not count as beacon" 
 # `gh -R smartwatermelon/dotfiles ...` meaning the same thing from any
 # directory (smartwatermelon/dotfiles#135).
 assert_desired_in "${beacon_repo}" "claimed owner beats beacon cwd" \
-  "andrewmrich" "smartwatermelon/dotfiles" "smartwatermelon"
+  "andrewmrich" "smartwatermelon/dotfiles" "twistedmelonman"
 
 cd "${HOME}/neutral-cwd"
 
@@ -204,7 +257,7 @@ assert_warns() {
   local out
   cat >"${HOME}/.config/gh/hosts.yml" <<EOF
 github.com:
-    user: smartwatermelon
+    user: twistedmelonman
 EOF
   # A separate `bash -c` process per case, not a subshell: the warning latches
   # via _GH_WRAPPER_BEACON_DIR_WARNED and the explicit-vs-default decision is

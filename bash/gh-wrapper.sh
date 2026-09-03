@@ -179,21 +179,52 @@ _gh_wrapper_is_beacon_context() {
   return 1
 }
 
+# TEMPORARY until the 2026-09 rename lands (dev-env
+# docs/superpowers/specs/2026-09-03-org-migration-design.md, Step 2). Remove
+# in the Step 6 follow-up together with every test case that names it. Both
+# logins are the same person: the personal account is renamed from
+# smartwatermelon to twistedmelonman, and until that happens every token
+# still reports the old name. Format: desired=alias[,desired=alias...].
+_GH_WRAPPER_LOGIN_ALIASES="${_GH_WRAPPER_LOGIN_ALIASES:-twistedmelonman=smartwatermelon}"
+
+# True when `actual` is `desired` or one of desired's aliases, case-
+# insensitively. One-directional: an alias never stands in for its own
+# desired value as a `desired` argument.
+_gh_wrapper_logins_equal() {
+  local desired="${1,,}" actual="${2,,}"
+  [[ "${desired}" == "${actual}" ]] && return 0
+  local IFS=','
+  local pair
+  for pair in ${_GH_WRAPPER_LOGIN_ALIASES}; do
+    pair="${pair,,}"
+    if [[ "${pair%%=*}" == "${desired}" && "${pair#*=}" == "${actual}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# The keyring login gh will use: the `user:` under `github.com:` in hosts.yml.
+# Empty when no host entry exists.
+_gh_wrapper_keyring_login() {
+  awk '/^github\.com:/{f=1} f && /^ *user:/{print $2; exit}' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'"
+}
+
 # gh has one active account per host (not per repo), unlike git+SSH which
 # already resolves the right identity per remote via ~/.ssh/config host
 # aliases. This keeps gh in sync with that same per-repo intent.
 #
 # Mapping, in precedence order:
 #   1. Owners explicitly claimed by an identity win outright, in BOTH
-#      directions — smartwatermelon/nightowlstudiollc -> smartwatermelon,
-#      beacon-biosignals/andrewmrich -> andrewmrich. An explicitly-owned repo
-#      means the same thing no matter which directory you invoke gh from,
-#      preserving the cwd-independence established in
+#      directions — smartwatermelon/nightowlstudiollc/twistedmelonman ->
+#      twistedmelonman, beacon-biosignals/andrewmrich -> andrewmrich. An
+#      explicitly-owned repo means the same thing no matter which directory
+#      you invoke gh from, preserving the cwd-independence established in
 #      smartwatermelon/dotfiles#135.
 #   2. Otherwise (an owner claimed by neither — a third-party org, an
 #      upstream you've been added to), consult the Beacon-context heuristic:
 #      checkout under the beacon dir, or forked from beacon-biosignals.
-#   3. Otherwise, default to smartwatermelon. This is the personal-default
+#   3. Otherwise, default to twistedmelonman. This is the personal-default
 #      environment; Beacon work is the specifically-marked exception.
 #
 # Local-only (reads/writes gh's config file, no network), so it's cheap to
@@ -206,20 +237,22 @@ _gh_wrapper_sync_identity() {
   owner="$(_gh_wrapper_resolve_owner "$@")"
   [[ -z "${owner}" ]] && return 0
 
-  # NOTE: the nightowlstudiollc -> smartwatermelon mapping below is asserted,
-  # not verified — nothing here confirms the smartwatermelon gh account is
-  # actually authorized against nightowlstudiollc repos. A `gh auth status`
-  # check (cross-referencing the authorized orgs for the current account)
-  # would be the way to confirm this mapping is still correct; that's left
-  # as a future enhancement rather than added here to avoid scope creep.
+  # smartwatermelon is the ORG (2026-09 migration); nightowlstudiollc is the
+  # other org; twistedmelonman is the personal account that owns both and
+  # keeps the archived repos and forks. All three resolve to the person.
+  #
+  # Still asserted, not verified: nothing here confirms the twistedmelonman
+  # gh account is actually authorized against either org's repos. A `gh auth
+  # status` check cross-referencing the account's authorized orgs would
+  # confirm it; left as a future enhancement rather than scope creep here.
   case "${owner,,}" in
-    smartwatermelon | nightowlstudiollc) desired="smartwatermelon" ;;
+    smartwatermelon | nightowlstudiollc | twistedmelonman) desired="twistedmelonman" ;;
     beacon-biosignals | andrewmrich) desired="andrewmrich" ;;
     *)
       if _gh_wrapper_is_beacon_context; then
         desired="andrewmrich"
       else
-        desired="smartwatermelon"
+        desired="twistedmelonman"
       fi
       ;;
   esac
@@ -275,7 +308,7 @@ _gh_wrapper_sync_identity() {
       return 1
     fi
 
-    if [[ "${token_login,,}" != "${desired,,}" ]]; then
+    if ! _gh_wrapper_logins_equal "${desired}" "${token_login}"; then
       echo "[gh] ERROR: GH_TOKEN authenticates as '${token_login}' but repo owner '${owner}' requires '${desired}'" >&2
       echo "[gh] GH_TOKEN takes precedence over 'gh auth switch', so this would" >&2
       echo "[gh] run as the wrong identity. Failing closed." >&2
@@ -284,9 +317,9 @@ _gh_wrapper_sync_identity() {
     fi
   fi
 
-  current=$(awk '/^github\.com:/{f=1} f && /^ *user:/{print $2; exit}' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'")
+  current="$(_gh_wrapper_keyring_login)"
 
-  if [[ -n "${current}" && "${current}" != "${desired}" ]]; then
+  if [[ -n "${current}" ]] && ! _gh_wrapper_logins_equal "${desired}" "${current}"; then
     if ! command gh auth switch --hostname github.com --user "${desired}" >/dev/null 2>&1; then
       echo "[gh] ERROR: failed to switch identity to '${desired}' (repo owner: '${owner}') — refusing to run as '${current}' instead" >&2
       echo "[gh] If '${desired}' is not authenticated on this machine, run: gh auth login --hostname github.com" >&2
@@ -452,7 +485,7 @@ _gh_wrapper_force_draft_for_off_org() {
     owner="$(_gh_wrapper_resolve_owner "$@")"
     if [[ -n "${owner}" ]]; then
       case "${owner,,}" in
-        smartwatermelon | nightowlstudiollc) ;; # in-org: no change
+        smartwatermelon | nightowlstudiollc | twistedmelonman) ;; # in-org: no change
         *)
           # Off-org target: force --draft. Don't bother deduplicating if the
           # caller already passed --draft (or --draft=false, which gh doesn't
@@ -620,6 +653,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit
-  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_logins_equal _gh_wrapper_keyring_login
+  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _GH_WRAPPER_LOGIN_ALIASES
 fi
