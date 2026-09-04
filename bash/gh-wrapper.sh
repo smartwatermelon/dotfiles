@@ -179,21 +179,107 @@ _gh_wrapper_is_beacon_context() {
   return 1
 }
 
+# TEMPORARY until the 2026-09 rename lands (dev-env
+# docs/superpowers/specs/2026-09-03-org-migration-design.md, Step 2). Remove
+# in the Step 6 follow-up together with every test case that names it. Both
+# logins are the same person: the personal account is renamed from
+# smartwatermelon to twistedmelonman, and until that happens every token
+# still reports the old name. Format: desired=alias[,desired=alias...].
+_GH_WRAPPER_LOGIN_ALIASES="${_GH_WRAPPER_LOGIN_ALIASES:-twistedmelonman=smartwatermelon}"
+
+# True when `actual` is `desired` or one of desired's aliases, case-
+# insensitively. One-directional: an alias never stands in for its own
+# desired value as a `desired` argument.
+_gh_wrapper_logins_equal() {
+  local desired="${1,,}" actual="${2,,}"
+  [[ "${desired}" == "${actual}" ]] && return 0
+  local IFS=','
+  local pair
+  for pair in ${_GH_WRAPPER_LOGIN_ALIASES}; do
+    pair="${pair,,}"
+    if [[ "${pair%%=*}" == "${desired}" && "${pair#*=}" == "${actual}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# The keyring login gh will use: the `user:` under `github.com:` in hosts.yml.
+# Empty when no host entry exists.
+_gh_wrapper_keyring_login() {
+  awk '/^github\.com:/{f=1} f && /^ *user:/{print $2; exit}' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'"
+}
+
+# Every login the keyring holds for github.com, one per line: the keys of the
+# `users:` block. Those keys sit one indent level deeper than `users:` itself,
+# which is what separates them from siblings like `user:` and `git_protocol:`.
+# Empty when the block is absent (older hosts.yml files omit it).
+_gh_wrapper_keyring_users() {
+  awk '
+    /^github\.com:/ { host = 1; next }
+    /^[^[:space:]]/ { host = 0; users = 0; login_indent = 0; next }
+    host && match($0, /^[[:space:]]*users:[[:space:]]*$/) {
+      users = 1
+      login_indent = 0
+      users_indent = index($0, "u") - 1
+      next
+    }
+    users && match($0, /^[[:space:]]*[^[:space:]#][^:]*:/) {
+      indent = match($0, /[^[:space:]]/) - 1
+      if (indent <= users_indent) { users = 0; next }
+      # A login key sits at the first indent level inside the block. Anything
+      # deeper is that login`s own settings (oauth_token:, git_protocol:), not
+      # another account.
+      if (login_indent == 0) { login_indent = indent }
+      if (indent != login_indent) { next }
+      key = $0
+      sub(/^[[:space:]]*/, "", key)
+      sub(/:.*$/, "", key)
+      print key
+    }
+  ' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'"
+}
+
+# The login to hand `gh auth switch`. `desired` may not exist in the keyring
+# yet — during the rename window the account is still named by its alias — and
+# switching to an account gh does not have fails outright. Prefer `desired`
+# when held, else the first held login the alias table equates to it, else
+# `desired` unchanged so the caller still fails closed with its own message.
+_gh_wrapper_resolve_switch_target() {
+  local desired="$1"
+  local held_logins
+  held_logins="$(_gh_wrapper_keyring_users)" || held_logins=""
+
+  local held alias_match=""
+  while IFS= read -r held; do
+    [[ -z "${held}" ]] && continue
+    if [[ "${held,,}" == "${desired,,}" ]]; then
+      printf '%s' "${held}"
+      return 0
+    fi
+    if [[ -z "${alias_match}" ]] && _gh_wrapper_logins_equal "${desired}" "${held}"; then
+      alias_match="${held}"
+    fi
+  done <<<"${held_logins}"
+
+  printf '%s' "${alias_match:-${desired}}"
+}
+
 # gh has one active account per host (not per repo), unlike git+SSH which
 # already resolves the right identity per remote via ~/.ssh/config host
 # aliases. This keeps gh in sync with that same per-repo intent.
 #
 # Mapping, in precedence order:
 #   1. Owners explicitly claimed by an identity win outright, in BOTH
-#      directions — smartwatermelon/nightowlstudiollc -> smartwatermelon,
-#      beacon-biosignals/andrewmrich -> andrewmrich. An explicitly-owned repo
-#      means the same thing no matter which directory you invoke gh from,
-#      preserving the cwd-independence established in
+#      directions — smartwatermelon/nightowlstudiollc/twistedmelonman ->
+#      twistedmelonman, beacon-biosignals/andrewmrich -> andrewmrich. An
+#      explicitly-owned repo means the same thing no matter which directory
+#      you invoke gh from, preserving the cwd-independence established in
 #      smartwatermelon/dotfiles#135.
 #   2. Otherwise (an owner claimed by neither — a third-party org, an
 #      upstream you've been added to), consult the Beacon-context heuristic:
 #      checkout under the beacon dir, or forked from beacon-biosignals.
-#   3. Otherwise, default to smartwatermelon. This is the personal-default
+#   3. Otherwise, default to twistedmelonman. This is the personal-default
 #      environment; Beacon work is the specifically-marked exception.
 #
 # Local-only (reads/writes gh's config file, no network), so it's cheap to
@@ -206,20 +292,22 @@ _gh_wrapper_sync_identity() {
   owner="$(_gh_wrapper_resolve_owner "$@")"
   [[ -z "${owner}" ]] && return 0
 
-  # NOTE: the nightowlstudiollc -> smartwatermelon mapping below is asserted,
-  # not verified — nothing here confirms the smartwatermelon gh account is
-  # actually authorized against nightowlstudiollc repos. A `gh auth status`
-  # check (cross-referencing the authorized orgs for the current account)
-  # would be the way to confirm this mapping is still correct; that's left
-  # as a future enhancement rather than added here to avoid scope creep.
+  # smartwatermelon is the ORG (2026-09 migration); nightowlstudiollc is the
+  # other org; twistedmelonman is the personal account that owns both and
+  # keeps the archived repos and forks. All three resolve to the person.
+  #
+  # Still asserted, not verified: nothing here confirms the twistedmelonman
+  # gh account is actually authorized against either org's repos. A `gh auth
+  # status` check cross-referencing the account's authorized orgs would
+  # confirm it; left as a future enhancement rather than scope creep here.
   case "${owner,,}" in
-    smartwatermelon | nightowlstudiollc) desired="smartwatermelon" ;;
+    smartwatermelon | nightowlstudiollc | twistedmelonman) desired="twistedmelonman" ;;
     beacon-biosignals | andrewmrich) desired="andrewmrich" ;;
     *)
       if _gh_wrapper_is_beacon_context; then
         desired="andrewmrich"
       else
-        desired="smartwatermelon"
+        desired="twistedmelonman"
       fi
       ;;
   esac
@@ -275,7 +363,7 @@ _gh_wrapper_sync_identity() {
       return 1
     fi
 
-    if [[ "${token_login,,}" != "${desired,,}" ]]; then
+    if ! _gh_wrapper_logins_equal "${desired}" "${token_login}"; then
       echo "[gh] ERROR: GH_TOKEN authenticates as '${token_login}' but repo owner '${owner}' requires '${desired}'" >&2
       echo "[gh] GH_TOKEN takes precedence over 'gh auth switch', so this would" >&2
       echo "[gh] run as the wrong identity. Failing closed." >&2
@@ -284,12 +372,17 @@ _gh_wrapper_sync_identity() {
     fi
   fi
 
-  current=$(awk '/^github\.com:/{f=1} f && /^ *user:/{print $2; exit}' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'")
+  current="$(_gh_wrapper_keyring_login)"
 
-  if [[ -n "${current}" && "${current}" != "${desired}" ]]; then
-    if ! command gh auth switch --hostname github.com --user "${desired}" >/dev/null 2>&1; then
-      echo "[gh] ERROR: failed to switch identity to '${desired}' (repo owner: '${owner}') — refusing to run as '${current}' instead" >&2
-      echo "[gh] If '${desired}' is not authenticated on this machine, run: gh auth login --hostname github.com" >&2
+  if [[ -n "${current}" ]] && ! _gh_wrapper_logins_equal "${desired}" "${current}"; then
+    # Not `desired` verbatim: during the rename window the keyring still holds
+    # the pre-rename login, and `gh auth switch` to an account it does not have
+    # fails. Resolve to a login gh actually holds.
+    local target
+    target="$(_gh_wrapper_resolve_switch_target "${desired}")"
+    if ! command gh auth switch --hostname github.com --user "${target}" >/dev/null 2>&1; then
+      echo "[gh] ERROR: failed to switch identity to '${target}' (repo owner: '${owner}') — refusing to run as '${current}' instead" >&2
+      echo "[gh] If '${target}' is not authenticated on this machine, run: gh auth login --hostname github.com" >&2
       echo "[gh] Failing closed rather than acting on '${owner}' as the wrong identity." >&2
       return 1
     fi
@@ -452,7 +545,7 @@ _gh_wrapper_force_draft_for_off_org() {
     owner="$(_gh_wrapper_resolve_owner "$@")"
     if [[ -n "${owner}" ]]; then
       case "${owner,,}" in
-        smartwatermelon | nightowlstudiollc) ;; # in-org: no change
+        smartwatermelon | nightowlstudiollc | twistedmelonman) ;; # in-org: no change
         *)
           # Off-org target: force --draft. Don't bother deduplicating if the
           # caller already passed --draft (or --draft=false, which gh doesn't
@@ -471,6 +564,209 @@ _gh_wrapper_force_draft_for_off_org() {
   # zero bytes of output, matching `mapfile -d ''`'s empty-array behavior.
   [[ "$#" -gt 0 ]] && printf '%s\0' "$@"
   return 0
+}
+
+# --- F4: scope-error hint ------------------------------------------------------
+# GH_TOKEN (the CCCLI PAT) and the keyring token are the same login; only the
+# scopes differ. When gh fails because the active token lacks a scope, say
+# exactly how to re-run the one command with the other token. Detection is
+# gh's own ScopesSuggestion text, so there is no command classifier to get
+# wrong. Design: dev-env docs/superpowers/specs/2026-09-03-org-migration-design.md.
+#
+# Never widen the PAT: it is exported into every session, so a scope added
+# there applies to every call rather than the one that needed it.
+
+# Print the scope named in a captured stderr file, or nothing. The character
+# class accepts either quote style, so the hint keeps working whichever one gh
+# emits; pinning a single one would silently disable it if that ever changed.
+# Measured against gh 2.x (2026-09), which uses "...".
+_gh_wrapper_scope_from_file() {
+  grep -oE "needs the [\"'][A-Za-z0-9:_]+[\"'] scope" "$1" 2>/dev/null \
+    | head -1 | sed -E "s/needs the [\"']([^\"']+)[\"'] scope/\1/"
+}
+
+# Re-quote argv for display, replacing the VALUE of any flag that routinely
+# carries a secret with <redacted>. The hint is printed to stderr, which lands
+# in terminal scrollback, CI logs and transcripts — echoing `--body ghp_...`
+# back would copy a live credential into all three. Redaction is by flag name,
+# not by pattern-matching the value: guessing what a secret looks like fails
+# open on every format not anticipated, whereas the flag says outright that
+# whatever follows it is a value the caller chose to pass secretly.
+#
+# Flags covered (gh's real pairings: -b/--body, -F/--field, -f/--raw-field,
+# -H/--header) in all three spellings pflag accepts: `--body VALUE` and
+# `-b VALUE` (value in the next argument), `--body=VALUE` (value after `=`),
+# and the stuck short form `-bVALUE` (value glued to the flag letter). A
+# literal `--` ends flag parsing, as in the other argv scanners in this file.
+#
+# For the key=value flags (-f/-F/--field/--raw-field) only the part after the
+# first `=` is redacted, so `-f body=SECRET` prints as `-f body=<redacted>`:
+# the key names the API field and is not secret, and keeping it leaves the
+# suggested command recognizable. A value with no `=` is redacted whole.
+_gh_wrapper_redact_argv() {
+  local out="" arg redact_next="" past_dashdash=0
+  for arg in "$@"; do
+    if [[ -n "${redact_next}" ]]; then
+      out+="$(_gh_wrapper_redact_value "${redact_next}" "${arg}") "
+      redact_next=""
+      continue
+    fi
+    if [[ "${past_dashdash}" == "1" ]]; then
+      out+="$(printf '%q ' "${arg}")"
+      continue
+    fi
+    case "${arg}" in
+      --)
+        past_dashdash=1
+        out+="-- "
+        ;;
+      -b | --body | -H | --header)
+        redact_next=whole
+        out+="$(printf '%q ' "${arg}")"
+        ;;
+      -f | -F | --field | --raw-field)
+        redact_next=keyed
+        out+="$(printf '%q ' "${arg}")"
+        ;;
+      --body=* | --header=*)
+        # %q with no trailing space: the `=` must abut the flag name, and
+        # `printf '%q '` would wedge a space in between.
+        out+="$(printf '%q' "${arg%%=*}")=$(_gh_wrapper_redact_value whole "${arg#*=}") "
+        ;;
+      --field=* | --raw-field=*)
+        out+="$(printf '%q' "${arg%%=*}")=$(_gh_wrapper_redact_value keyed "${arg#*=}") "
+        ;;
+      -b?* | -H?*)
+        out+="${arg:0:2}$(_gh_wrapper_redact_value whole "${arg:2}") "
+        ;;
+      -f?* | -F?*)
+        out+="${arg:0:2}$(_gh_wrapper_redact_value keyed "${arg:2}") "
+        ;;
+      *) out+="$(printf '%q ' "${arg}")" ;;
+    esac
+  done
+  printf '%s' "${out% }"
+}
+
+# Redact one flag value. mode=whole replaces all of it; mode=keyed keeps a
+# leading `key=` and replaces what follows (or the whole value if it has no
+# `=`). The kept key is re-quoted so the result stays pasteable.
+_gh_wrapper_redact_value() {
+  local mode="$1" value="$2"
+  if [[ "${mode}" == "keyed" && "${value}" == *=* ]]; then
+    printf '%q=<redacted>' "${value%%=*}"
+  else
+    printf '<redacted>'
+  fi
+}
+
+# Print the hint for `scope`, quoting the original argv back so the suggested
+# command can be pasted verbatim (secret-bearing flag values excepted — see
+# _gh_wrapper_redact_argv).
+_gh_wrapper_print_scope_hint() {
+  local scope="$1"
+  shift
+  local cmd
+  cmd="$(_gh_wrapper_redact_argv "$@")"
+  # gh reads GH_TOKEN first, then GITHUB_TOKEN. Name whichever is actually set:
+  # telling someone to unset GH_TOKEN when GITHUB_TOKEN is what authenticated
+  # them is advice that cannot work, and `gh auth refresh` is equally useless
+  # here — it rewrites the keyring token, which an env-var token overrides.
+  # The caller only reaches this function when one of the two is set.
+  local token_var="GH_TOKEN"
+  if [[ -z "${GH_TOKEN:-}" ]]; then
+    token_var="GITHUB_TOKEN"
+  fi
+  local keyring
+  keyring="$(_gh_wrapper_keyring_login)"
+  # The login stays on the same line as its label: a reader grepping the
+  # hint for the account name should find it next to the word naming it,
+  # not wrapped onto the following line.
+  echo "[gh] ${token_var} is set and lacks the '${scope}' scope." >&2
+  echo "[gh] The keyring identity for ${keyring:-<none in hosts.yml>} has it." >&2
+  echo "[gh] Re-run this one command without ${token_var}:" >&2
+  echo "[gh]   env -u ${token_var} gh ${cmd}" >&2
+  echo "[gh] (Do not add the scope to the CCCLI PAT — it is exported into every session.)" >&2
+}
+
+# Run the real gh. stderr goes to the terminal live AND to a temp file; stdout
+# is untouched. On non-zero exit, a scope error in the file triggers the hint.
+# The real exit code is returned.
+#
+# Not `exec`: the hint needs gh's exit status and stderr after it returns.
+# Only called when an env-var token is set (see the standalone branch): the
+# tee pipe costs gh's stderr its TTY and can reorder stderr against stdout,
+# which is acceptable in an agent session and not at a human's terminal.
+_gh_wrapper_run_with_scope_hint() {
+  local real_gh="$1"
+  shift
+  local errfile rc=0
+  # No temp file means no detection, but the command itself must still run —
+  # degrade to a plain passthrough rather than failing the call.
+  if ! errfile="$(mktemp "${TMPDIR:-/tmp}/gh-wrapper-stderr.XXXXXX")"; then
+    "${real_gh}" "$@"
+    return $?
+  fi
+  # A signal that kills the wrapper mid-run skips the rm -f at the bottom and
+  # leaves one temp file behind per interrupted run.
+  #
+  # RETURN alone does NOT fix that: measured, a RETURN trap does not fire when
+  # the shell is killed by SIGTERM — the process dies without unwinding the
+  # function. An explicit signal trap is required. RETURN is kept for the
+  # ordinary paths (including the `return` below), and the signal handler
+  # re-raises after cleanup so the caller still sees a signal death (128+n)
+  # rather than a normal exit.
+  #
+  # The handler also forwards the signal to gh. Before F4 the wrapper exec'd
+  # gh, so a signal aimed at "the gh process" hit gh. Now that pid is the
+  # wrapper's; without forwarding, gh would run on as an orphan after the
+  # wrapper died. Ctrl-C already reaches the whole foreground process group,
+  # so this matters for a targeted kill (`timeout gh ...`, `kill <pid>`).
+  #
+  # gh runs in the BACKGROUND and the wrapper `wait`s for it. This is not
+  # optional: bash defers a trapped signal until a foreground command
+  # finishes (measured — a SIGTERM to the wrapper during a foreground
+  # `gh | tee` pipeline was not acted on until gh exited on its own, so the
+  # handler could neither forward nor clean up). Only `wait` returns at once
+  # on a trapped signal, running the handler immediately. The explicit `<&0`
+  # is defensive: only a job-control (interactive) shell gives a background
+  # child /dev/null as stdin, and this path runs non-interactively — but the
+  # function is exported, so it is kept correct for a sourced caller too.
+  # Non-interactive bash starts background children with SIGINT ignored (Go
+  # leaves an ignored signal ignored), so INT is forwarded as TERM. `kill` is
+  # guarded because `set -e` applies inside the handler.
+  #
+  # stderr goes through a process substitution running tee: gh writes to a
+  # dynamically allocated fd ({errfd}, so a repeat call in one shell cannot
+  # clobber a still-open fd and orphan the previous tee), tee copies to the
+  # file and the real stderr. gh gets the fd closed so it does not inherit
+  # the write end. After gh exits the fd is closed and tee is waited for, so
+  # the file is complete before it is read. tee buffers, so a PARTIAL-line
+  # write to stderr — gh's interactive prompts, which deliberately omit the
+  # trailing newline — can surface after stdout that was written later.
+  # Whole lines are unaffected, and stdout bypasses the pipe entirely.
+  local gh_pid="" tee_pid="" errfd=""
+  trap 'rm -f "${errfile}"' RETURN
+  trap '[[ -n "${gh_pid}" ]] && kill -TERM "${gh_pid}" 2>/dev/null; rm -f "${errfile}"; trap - TERM HUP INT; kill -s TERM $$' TERM HUP INT
+  exec {errfd}> >(tee "${errfile}" >&2 || true)
+  tee_pid=$!
+  "${real_gh}" "$@" 2>&"${errfd}" {errfd}>&- <&0 &
+  gh_pid=$!
+  # `|| rc=$?` keeps `set -e` (standalone mode) from aborting on a failing gh
+  # before rc is read.
+  wait "${gh_pid}" || rc=$?
+  gh_pid=""
+  exec {errfd}>&-
+  wait "${tee_pid}" 2>/dev/null || true
+  if [[ "${rc}" -ne 0 ]]; then
+    local scope
+    scope="$(_gh_wrapper_scope_from_file "${errfile}")"
+    if [[ -n "${scope}" ]]; then
+      _gh_wrapper_print_scope_hint "${scope}" "$@"
+    fi
+  fi
+  rm -f "${errfile}"
+  return "${rc}"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
@@ -530,15 +826,15 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     fi
   fi
 
-  # Only needed for the final exec below — computed here (after the
+  # Only needed for the final gh invocation below — computed here (after the
   # _GH_REVIEW_DONE-guarded checks above) rather than unconditionally at the
   # top of this block, so we don't do a needless PATH scan before knowing
   # this call is going to pass those checks.
   REAL_GH="$(_gh_wrapper_find_real_gh)"
   # Defensive: _gh_wrapper_find_real_gh currently fails hard on lookup
   # failure (and set -e aborts the assignment), but if it ever returns 0
-  # with empty output we'd otherwise exec "" "$@" and produce a confusing
-  # low-level exec error. Check explicitly instead.
+  # with empty output we'd otherwise run "" "$@" and produce a confusing
+  # low-level "command not found" error. Check explicitly instead.
   if [[ -z "${REAL_GH}" ]]; then
     echo "[gh] ERROR: could not locate real gh binary on PATH" >&2
     exit 1
@@ -550,7 +846,27 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     source "${CLAUDE_GH_TOKEN_ROUTER}" "$@"
   fi
 
-  exec "${REAL_GH}" "$@"
+  # The F4 scope hint exists for one situation: an env-var token (GH_TOKEN, or
+  # GITHUB_TOKEN as gh's fallback) is overriding the keyring and lacks a scope
+  # the keyring token has. Only then is there anything to say beyond what gh
+  # already prints (`gh auth refresh -s <scope>`). And the hint is for an
+  # agent session, which cannot act on gh's own message: a human reading a
+  # terminal can. So stderr is captured only when BOTH hold — an env token is
+  # set AND stderr is not a terminal. Capturing costs gh its stderr TTY (colors,
+  # and the interactive prompts of `gh auth login` / `gh pr create`, which
+  # render on stderr) and lets tee reorder stderr against stdout; a human with
+  # GH_TOKEN exported in an interactive shell must not pay that on every call.
+  #
+  # Otherwise, exec as before: gh owns the terminal outright and the wrapper
+  # process is gone. Only this standalone path runs the hint — function mode
+  # reaches it through `command gh`, which lands right here. If ~/.local/bin/gh
+  # is not on PATH, no hint is printed; that is the documented limit.
+  if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]] || [[ -t 2 ]]; then
+    exec "${REAL_GH}" "$@"
+  fi
+  _gh_wrapper_rc=0
+  _gh_wrapper_run_with_scope_hint "${REAL_GH}" "$@" || _gh_wrapper_rc=$?
+  exit "${_gh_wrapper_rc}"
 else
   # --- Function-definition mode (sourced from functions.sh) ---
   gh() {
@@ -620,6 +936,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit
-  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_logins_equal _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value
+  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _GH_WRAPPER_LOGIN_ALIASES
 fi

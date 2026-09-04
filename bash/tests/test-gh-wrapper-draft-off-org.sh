@@ -60,6 +60,10 @@ assert_args "off-org explicit --repo=" 1 pr create --repo=someoutsideorg/foo --t
 # nightowlstudiollc counts as in-org: no draft forced.
 assert_args "nightowlstudiollc explicit -R" 0 pr create -R nightowlstudiollc/somerepo --title x
 
+# twistedmelonman is the personal account that keeps the archived repos and
+# forks after the 2026-09 org migration: in-org, no draft forced.
+assert_args "twistedmelonman explicit --repo" 0 pr create --repo twistedmelonman/old-archived --title x
+
 # Case-insensitive owner match, mirroring _gh_wrapper_sync_identity's
 # regression coverage for smartwatermelon/dotfiles#159.
 assert_args "mixed-case in-org owner" 0 pr create --repo SmartWatermelon/dotfiles --title x

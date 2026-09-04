@@ -28,7 +28,7 @@ export HOME="${WORKDIR}/home"
 mkdir -p "${HOME}/.config/gh"
 cat >"${HOME}/.config/gh/hosts.yml" <<'YAML'
 github.com:
-    user: smartwatermelon
+    user: twistedmelonman
     oauth_token: fake
 YAML
 
@@ -72,11 +72,21 @@ else
 fi
 
 # Case 3: GH_TOKEN matching the resolved identity -> proceeds.
-if _sync_under_env GH_TOKEN="fake-token-for-smartwatermelon" \
-  CLAUDE_GH_TOKEN_LOGIN="smartwatermelon"; then
+if _sync_under_env GH_TOKEN="fake-token-for-twistedmelonman" \
+  CLAUDE_GH_TOKEN_LOGIN="twistedmelonman"; then
   _pass "matching GH_TOKEN: proceeds"
 else
   _fail "matching GH_TOKEN: should proceed"
+fi
+
+# Case 3b: GH_TOKEN still reporting the pre-rename login. Accepted through the
+# temporary alias (dev-env org-migration design, "Temporary login alias").
+# Delete this case together with the alias.
+if _sync_under_env GH_TOKEN="fake-token-for-smartwatermelon" \
+  CLAUDE_GH_TOKEN_LOGIN="smartwatermelon"; then
+  _pass "aliased GH_TOKEN (smartwatermelon): proceeds"
+else
+  _fail "aliased GH_TOKEN (smartwatermelon): should proceed via alias"
 fi
 
 # Case 4: expired or revoked GH_TOKEN, with CLAUDE_GH_TOKEN_LOGIN unset so the
