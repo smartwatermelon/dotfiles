@@ -585,24 +585,69 @@ _gh_wrapper_scope_from_file() {
     | head -1 | sed -E "s/needs the [\"']([^\"']+)[\"'] scope/\1/"
 }
 
+# Re-quote argv for display, replacing the VALUE of any flag that routinely
+# carries a secret with <redacted>. The hint is printed to stderr, which lands
+# in terminal scrollback, CI logs and transcripts — echoing `--body ghp_...`
+# back would copy a live credential into all three. Redaction is by flag name,
+# not by pattern-matching the value: guessing what a secret looks like fails
+# open on every format not anticipated, whereas the flag says outright that
+# whatever follows it is a value the caller chose to pass secretly.
+#
+# Both spellings of each flag are handled: `--body VALUE` (value in the next
+# argument) and `--body=VALUE` (value in the same token).
+_gh_wrapper_redact_argv() {
+  local out="" arg redact_next=0
+  for arg in "$@"; do
+    if [[ "${redact_next}" == "1" ]]; then
+      out+="<redacted> "
+      redact_next=0
+      continue
+    fi
+    case "${arg}" in
+      -b | --body | -f | --field | -F | --raw-field | -H | --header)
+        redact_next=1
+        out+="$(printf '%q ' "${arg}")"
+        ;;
+      --body=* | --field=* | --raw-field=* | --header=*)
+        # %q with no trailing space: the `=` must abut the flag name, and
+        # `printf '%q '` would wedge a space in between.
+        out+="$(printf '%q' "${arg%%=*}")=<redacted> "
+        ;;
+      *) out+="$(printf '%q ' "${arg}")" ;;
+    esac
+  done
+  printf '%s' "${out% }"
+}
+
 # Print the hint for `scope`, quoting the original argv back so the suggested
-# command can be pasted verbatim.
+# command can be pasted verbatim (secret-bearing flag values excepted — see
+# _gh_wrapper_redact_argv).
 _gh_wrapper_print_scope_hint() {
   local scope="$1"
   shift
   local cmd
-  cmd="$(printf '%q ' "$@")"
-  cmd="${cmd% }"
+  cmd="$(_gh_wrapper_redact_argv "$@")"
+  # gh reads GH_TOKEN first, then GITHUB_TOKEN. Branch on whichever is actually
+  # set and name THAT variable in the suggestion: telling someone to unset
+  # GH_TOKEN when GITHUB_TOKEN is what authenticated them is advice that cannot
+  # work, and `gh auth refresh` is equally useless there — it rewrites the
+  # keyring token, which an env-var token overrides anyway.
+  local token_var=""
   if [[ -n "${GH_TOKEN:-}" ]]; then
+    token_var="GH_TOKEN"
+  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    token_var="GITHUB_TOKEN"
+  fi
+  if [[ -n "${token_var}" ]]; then
     local keyring
     keyring="$(_gh_wrapper_keyring_login)"
     # The login stays on the same line as its label: a reader grepping the
     # hint for the account name should find it next to the word naming it,
     # not wrapped onto the following line.
-    echo "[gh] GH_TOKEN is set and lacks the '${scope}' scope." >&2
+    echo "[gh] ${token_var} is set and lacks the '${scope}' scope." >&2
     echo "[gh] The keyring identity for ${keyring:-<none in hosts.yml>} has it." >&2
-    echo "[gh] Re-run this one command without GH_TOKEN:" >&2
-    echo "[gh]   env -u GH_TOKEN gh ${cmd}" >&2
+    echo "[gh] Re-run this one command without ${token_var}:" >&2
+    echo "[gh]   env -u ${token_var} gh ${cmd}" >&2
     echo "[gh] (Do not add the scope to the CCCLI PAT — it is exported into every session.)" >&2
   else
     echo "[gh] The active gh token lacks the '${scope}' scope. Add it to the keyring token:" >&2
@@ -626,8 +671,24 @@ _gh_wrapper_run_with_scope_hint() {
     "${real_gh}" "$@"
     return $?
   fi
+  # A signal that kills the wrapper mid-run skips the rm -f at the bottom and
+  # leaves one temp file behind per interrupted run.
+  #
+  # RETURN alone does NOT fix that: measured, a RETURN trap does not fire when
+  # the shell is killed by SIGTERM — the process dies without unwinding the
+  # function. An explicit signal trap is required. RETURN is kept for the
+  # ordinary paths (including the `return` below), and the signal handler
+  # re-raises after cleanup so the caller still sees a signal death (128+n)
+  # rather than a normal exit.
+  trap 'rm -f "${errfile}"' RETURN
+  trap 'rm -f "${errfile}"; trap - TERM HUP INT; kill -s TERM $$' TERM HUP INT
   # `|| true` keeps `set -e` (standalone mode) from aborting on the failing
   # pipeline before rc is read.
+  #
+  # tee buffers, so a PARTIAL-line write to stderr — gh's interactive prompts,
+  # which deliberately omit the trailing newline — can surface after stdout
+  # that was written later. Whole lines are unaffected, and stdout bypasses the
+  # pipe entirely on fd 3.
   {
     "${real_gh}" "$@" 2>&1 1>&3 3>&- | tee "${errfile}" >&2
     rc="${PIPESTATUS[0]}"
@@ -797,6 +858,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_logins_equal _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_logins_equal _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _GH_WRAPPER_LOGIN_ALIASES
 fi

@@ -35,7 +35,11 @@ github.com:
     user: twistedmelonman
     oauth_token: fake
 YAML
-unset GH_TOKEN
+# GH_TOKEN and GITHUB_TOKEN both authenticate gh (in that precedence order) and
+# GH_HOST redirects which host it talks to; any of the three leaking in from the
+# caller's environment would change what the hint says. Clear all three so each
+# case below controls them explicitly.
+unset GH_TOKEN GH_HOST GITHUB_TOKEN
 # The wrapper's F3 guard resolves GH_TOKEN's login through `gh api user` when
 # this is unset; that would hit the stub and fail. Pin it so no case here
 # depends on identity resolution — the scope hint is the thing under test.
@@ -80,9 +84,25 @@ exit 0
 STUB
 chmod +x "${STUBS}"/*/gh
 
+# The wrapper's stderr temp files land in ${TMPDIR}. Point that at a sandbox so
+# the leak assertions below observe only this test's files, and cannot be
+# fooled by an unrelated process's leftovers in the shared /tmp.
+export TMPDIR="${WORKDIR}/tmp"
+mkdir -p "${TMPDIR}"
+
+# Count the wrapper's stderr temp files currently in the sandboxed TMPDIR.
+_errfile_count() {
+  find "${TMPDIR}" -maxdepth 1 -name 'gh-wrapper-stderr.*' 2>/dev/null | wc -l | tr -d ' '
+}
+
 # Run the wrapper in standalone mode from a non-repo cwd (owner resolution
 # yields nothing, so no identity switch is attempted) with the given stub
 # first on PATH after the wrapper. Captures stdout and stderr separately.
+#
+# The wrapper is invoked as `bash "${WRAPPER}"` — the repo file directly, NOT
+# ~/.local/bin/gh. Going through the installed symlink makes
+# _gh_wrapper_find_real_gh resolve `gh` back to the wrapper itself, which
+# re-enters and never reaches the code under test.
 _run() {
   local stub="$1"
   shift
@@ -166,10 +186,108 @@ else
 fi
 
 # --- Case 5: no stray temp files --------------------------------------------
-if compgen -G "${TMPDIR:-/tmp}/gh-wrapper-stderr.*" >/dev/null; then
-  _fail "temp stderr files left behind"
-else
+leftover="$(_errfile_count)"
+if [[ "${leftover}" == "0" ]]; then
   _pass "temp stderr files cleaned up"
+else
+  _fail "temp stderr files left behind: ${leftover}"
+fi
+
+# --- Case 6: secret-bearing flag values are redacted from the hint -----------
+# The hint goes to stderr, which lands in scrollback, CI logs and transcripts.
+# Echoing back `--body <token>` would copy a live credential into all three.
+SECRET="totally-not-a-real-secret-value-9271"
+GH_TOKEN="fixture-token" _run scope secret set FOO --body "${SECRET}" --org smartwatermelon
+err="$(cat "${WORKDIR}/err")"
+if [[ "${err}" == *"<redacted>"* ]]; then
+  _pass "redaction: hint shows <redacted> for --body"
+else
+  _fail "redaction: expected <redacted>, got: ${err}"
+fi
+if [[ "${err}" == *"${SECRET}"* ]]; then
+  _fail "redaction: SECRET LEAKED into the hint: ${err}"
+else
+  _pass "redaction: secret value never appears in the hint"
+fi
+# The non-secret parts must survive, or the suggestion is not runnable.
+if [[ "${err}" == *"gh secret set FOO"* && "${err}" == *"--org smartwatermelon"* ]]; then
+  _pass "redaction: non-secret arguments preserved"
+else
+  _fail "redaction: non-secret arguments mangled, got: ${err}"
+fi
+
+# --with-equals spelling must redact too.
+GH_TOKEN="fixture-token" _run scope api -X POST /x --field="${SECRET}"
+err="$(cat "${WORKDIR}/err")"
+if [[ "${err}" != *"${SECRET}"* && "${err}" == *"--field=<redacted>"* ]]; then
+  _pass "redaction: --field=VALUE spelling redacted"
+else
+  _fail "redaction: --field=VALUE not redacted, got: ${err}"
+fi
+
+# --- Case 7: GITHUB_TOKEN (no GH_TOKEN) names the right variable -------------
+# gh reads GH_TOKEN first, then GITHUB_TOKEN. Suggesting `gh auth refresh` here
+# would be useless: an env-var token overrides the keyring token it rewrites.
+GITHUB_TOKEN="fixture-token" _run scope secret set FOO --org smartwatermelon
+err="$(cat "${WORKDIR}/err")"
+if [[ "${err}" == *"env -u GITHUB_TOKEN"* ]]; then
+  _pass "GITHUB_TOKEN: hint names GITHUB_TOKEN in the re-run"
+else
+  _fail "GITHUB_TOKEN: expected 'env -u GITHUB_TOKEN', got: ${err}"
+fi
+if [[ "${err}" == *"env -u GH_TOKEN "* ]]; then
+  _fail "GITHUB_TOKEN: wrongly told the user to unset GH_TOKEN"
+else
+  _pass "GITHUB_TOKEN: does not name the unset GH_TOKEN"
+fi
+
+# --- Case 8: no temp-file leak when the wrapper is signalled mid-run ---------
+# SIGTERM/SIGHUP skip the function's trailing rm -f; only a RETURN trap cleans
+# up. SIGINT already unwound correctly, so TERM is the case that regressed.
+mkdir -p "${STUBS}/sleeper"
+cat >"${STUBS}/sleeper/gh" <<'STUB'
+#!/usr/bin/env bash
+echo 'starting' >&2
+sleep 30
+STUB
+chmod +x "${STUBS}/sleeper/gh"
+
+leak_before="$(_errfile_count)"
+# `exec` so the backgrounded pid IS the wrapper. Without it the pid belongs to
+# the subshell, and signalling that leaves the wrapper running untouched — the
+# trap never fires and the test reports a leak that is really a mis-aimed kill.
+(
+  cd "${HOME}/neutral-cwd" || exit 99
+  PATH="${STUBS}/sleeper:${PATH}" exec bash "${WRAPPER}" api user \
+    >/dev/null 2>&1
+) &
+sleeper_pid=$!
+# Wait for the errfile to actually exist before signalling. Without this the
+# test can kill the wrapper before mktemp runs and pass for the wrong reason —
+# a clean result would then prove nothing.
+saw_errfile=0
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  now="$(_errfile_count)"
+  if [[ "${now}" != "${leak_before}" ]]; then
+    saw_errfile=1
+    break
+  fi
+  sleep 0.25
+done
+kill -TERM "${sleeper_pid}" 2>/dev/null
+wait "${sleeper_pid}" 2>/dev/null
+sleep 0.3
+
+if [[ "${saw_errfile}" == "1" ]]; then
+  _pass "SIGTERM leak: errfile observed mid-run (assertion is meaningful)"
+else
+  _fail "SIGTERM leak: errfile never appeared; the check below proves nothing"
+fi
+leak_after="$(_errfile_count)"
+if [[ "${leak_after}" == "0" ]]; then
+  _pass "SIGTERM leak: no temp file left behind after SIGTERM"
+else
+  _fail "SIGTERM leak: ${leak_after} temp file(s) left behind after SIGTERM"
 fi
 
 if [[ ${fail} -eq 0 ]]; then
