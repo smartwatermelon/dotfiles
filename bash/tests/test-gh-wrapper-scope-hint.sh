@@ -187,6 +187,34 @@ if [[ "${out}" == *"gh-wrapper.sh"* ]]; then
 else
   _fail "env token set: expected the wrapper as parent, got: ${out}"
 fi
+# Env token set BUT stderr is a terminal -> still exec. The hint is for an
+# agent session; a human with GH_TOKEN exported in an interactive shell would
+# otherwise lose gh's stderr TTY on every call, and `gh auth login` / `gh pr
+# create` render their prompts on stderr. The pty comes from script(1): BSD
+# script runs the command directly on a fresh pty (the suite runs on macOS —
+# run-tests.sh and CI both require it). The stub reports what gh sees.
+mkdir -p "${STUBS}/tty2"
+cat >"${STUBS}/tty2/gh" <<'STUB'
+#!/usr/bin/env bash
+if [[ -t 2 ]]; then echo STDERR_IS_TTY; else echo STDERR_NOT_TTY; fi
+exit 0
+STUB
+chmod +x "${STUBS}/tty2/gh"
+host_os="$(uname)"
+if [[ "${host_os}" == "Darwin" ]] && command -v script >/dev/null 2>&1; then
+  out="$(
+    cd "${HOME}/neutral-cwd" || exit 99
+    GH_TOKEN="fixture-token" PATH="${STUBS}/tty2:${PATH}" \
+      script -q /dev/null bash "${WRAPPER}" api user </dev/null 2>/dev/null | tr -d '\r'
+  )"
+  if [[ "${out}" == *"STDERR_IS_TTY"* ]]; then
+    _pass "env token set, stderr is a tty: wrapper execs gh (gh keeps its stderr tty)"
+  else
+    _fail "env token set, stderr is a tty: gh lost its stderr tty, stub saw: ${out}"
+  fi
+else
+  _fail "env token set, stderr is a tty: no BSD script(1) available to allocate a pty"
+fi
 
 # --- Case 3: negative control, non-scope 403 -> no hint -----------------------
 GH_TOKEN="fixture-token" _run plain403 pr list --repo smartwatermelon/dotfiles

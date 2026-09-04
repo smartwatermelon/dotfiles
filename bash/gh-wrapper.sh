@@ -728,31 +728,35 @@ _gh_wrapper_run_with_scope_hint() {
   # finishes (measured — a SIGTERM to the wrapper during a foreground
   # `gh | tee` pipeline was not acted on until gh exited on its own, so the
   # handler could neither forward nor clean up). Only `wait` returns at once
-  # on a trapped signal, running the handler immediately. A background
-  # child gets /dev/null as stdin unless told otherwise, hence the explicit
-  # `<&0`; and non-interactive bash starts background children with SIGINT
-  # ignored (Go leaves an ignored signal ignored), so INT is forwarded as
-  # TERM. `kill` is guarded because `set -e` applies inside the handler.
+  # on a trapped signal, running the handler immediately. The explicit `<&0`
+  # is defensive: only a job-control (interactive) shell gives a background
+  # child /dev/null as stdin, and this path runs non-interactively — but the
+  # function is exported, so it is kept correct for a sourced caller too.
+  # Non-interactive bash starts background children with SIGINT ignored (Go
+  # leaves an ignored signal ignored), so INT is forwarded as TERM. `kill` is
+  # guarded because `set -e` applies inside the handler.
   #
-  # stderr goes through a process substitution running tee: gh writes to
-  # fd 4, tee copies to the file and the real stderr. After gh exits the fd
-  # is closed and tee is waited for, so the file is complete before it is
-  # read. tee buffers, so a PARTIAL-line write to stderr — gh's interactive
-  # prompts, which deliberately omit the trailing newline — can surface after
-  # stdout that was written later. Whole lines are unaffected, and stdout
-  # bypasses the pipe entirely.
-  local gh_pid="" tee_pid=""
+  # stderr goes through a process substitution running tee: gh writes to a
+  # dynamically allocated fd ({errfd}, so a repeat call in one shell cannot
+  # clobber a still-open fd and orphan the previous tee), tee copies to the
+  # file and the real stderr. gh gets the fd closed so it does not inherit
+  # the write end. After gh exits the fd is closed and tee is waited for, so
+  # the file is complete before it is read. tee buffers, so a PARTIAL-line
+  # write to stderr — gh's interactive prompts, which deliberately omit the
+  # trailing newline — can surface after stdout that was written later.
+  # Whole lines are unaffected, and stdout bypasses the pipe entirely.
+  local gh_pid="" tee_pid="" errfd=""
   trap 'rm -f "${errfile}"' RETURN
   trap '[[ -n "${gh_pid}" ]] && kill -TERM "${gh_pid}" 2>/dev/null; rm -f "${errfile}"; trap - TERM HUP INT; kill -s TERM $$' TERM HUP INT
-  exec 4> >(tee "${errfile}" >&2 || true)
+  exec {errfd}> >(tee "${errfile}" >&2 || true)
   tee_pid=$!
-  "${real_gh}" "$@" 2>&4 4>&- <&0 &
+  "${real_gh}" "$@" 2>&"${errfd}" {errfd}>&- <&0 &
   gh_pid=$!
   # `|| rc=$?` keeps `set -e` (standalone mode) from aborting on a failing gh
   # before rc is read.
   wait "${gh_pid}" || rc=$?
   gh_pid=""
-  exec 4>&-
+  exec {errfd}>&-
   wait "${tee_pid}" 2>/dev/null || true
   if [[ "${rc}" -ne 0 ]]; then
     local scope
@@ -845,17 +849,19 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   # The F4 scope hint exists for one situation: an env-var token (GH_TOKEN, or
   # GITHUB_TOKEN as gh's fallback) is overriding the keyring and lacks a scope
   # the keyring token has. Only then is there anything to say beyond what gh
-  # already prints (`gh auth refresh -s <scope>`). So only then is stderr
-  # captured — capturing costs gh its stderr TTY (colors, prompt rendering)
-  # and lets tee reorder stderr against stdout, which a human at a terminal
-  # notices and an agent session with GH_TOKEN exported does not.
+  # already prints (`gh auth refresh -s <scope>`). And the hint is for an
+  # agent session, which cannot act on gh's own message: a human reading a
+  # terminal can. So stderr is captured only when BOTH hold — an env token is
+  # set AND stderr is not a terminal. Capturing costs gh its stderr TTY (colors,
+  # and the interactive prompts of `gh auth login` / `gh pr create`, which
+  # render on stderr) and lets tee reorder stderr against stdout; a human with
+  # GH_TOKEN exported in an interactive shell must not pay that on every call.
   #
-  # With no env token, exec as before: gh owns the terminal outright and the
-  # wrapper process is gone. Only this standalone path runs the hint — function
-  # mode reaches it through `command gh`, which lands right here. If
-  # ~/.local/bin/gh is not on PATH, no hint is printed; that is the documented
-  # limit.
-  if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
+  # Otherwise, exec as before: gh owns the terminal outright and the wrapper
+  # process is gone. Only this standalone path runs the hint — function mode
+  # reaches it through `command gh`, which lands right here. If ~/.local/bin/gh
+  # is not on PATH, no hint is printed; that is the documented limit.
+  if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]] || [[ -t 2 ]]; then
     exec "${REAL_GH}" "$@"
   fi
   _gh_wrapper_rc=0
