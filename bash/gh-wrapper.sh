@@ -593,30 +593,71 @@ _gh_wrapper_scope_from_file() {
 # open on every format not anticipated, whereas the flag says outright that
 # whatever follows it is a value the caller chose to pass secretly.
 #
-# Both spellings of each flag are handled: `--body VALUE` (value in the next
-# argument) and `--body=VALUE` (value in the same token).
+# Flags covered (gh's real pairings: -b/--body, -F/--field, -f/--raw-field,
+# -H/--header) in all three spellings pflag accepts: `--body VALUE` and
+# `-b VALUE` (value in the next argument), `--body=VALUE` (value after `=`),
+# and the stuck short form `-bVALUE` (value glued to the flag letter). A
+# literal `--` ends flag parsing, as in the other argv scanners in this file.
+#
+# For the key=value flags (-f/-F/--field/--raw-field) only the part after the
+# first `=` is redacted, so `-f body=SECRET` prints as `-f body=<redacted>`:
+# the key names the API field and is not secret, and keeping it leaves the
+# suggested command recognizable. A value with no `=` is redacted whole.
 _gh_wrapper_redact_argv() {
-  local out="" arg redact_next=0
+  local out="" arg redact_next="" past_dashdash=0
   for arg in "$@"; do
-    if [[ "${redact_next}" == "1" ]]; then
-      out+="<redacted> "
-      redact_next=0
+    if [[ -n "${redact_next}" ]]; then
+      out+="$(_gh_wrapper_redact_value "${redact_next}" "${arg}") "
+      redact_next=""
+      continue
+    fi
+    if [[ "${past_dashdash}" == "1" ]]; then
+      out+="$(printf '%q ' "${arg}")"
       continue
     fi
     case "${arg}" in
-      -b | --body | -f | --field | -F | --raw-field | -H | --header)
-        redact_next=1
+      --)
+        past_dashdash=1
+        out+="-- "
+        ;;
+      -b | --body | -H | --header)
+        redact_next=whole
         out+="$(printf '%q ' "${arg}")"
         ;;
-      --body=* | --field=* | --raw-field=* | --header=*)
+      -f | -F | --field | --raw-field)
+        redact_next=keyed
+        out+="$(printf '%q ' "${arg}")"
+        ;;
+      --body=* | --header=*)
         # %q with no trailing space: the `=` must abut the flag name, and
         # `printf '%q '` would wedge a space in between.
-        out+="$(printf '%q' "${arg%%=*}")=<redacted> "
+        out+="$(printf '%q' "${arg%%=*}")=$(_gh_wrapper_redact_value whole "${arg#*=}") "
+        ;;
+      --field=* | --raw-field=*)
+        out+="$(printf '%q' "${arg%%=*}")=$(_gh_wrapper_redact_value keyed "${arg#*=}") "
+        ;;
+      -b?* | -H?*)
+        out+="${arg:0:2}$(_gh_wrapper_redact_value whole "${arg:2}") "
+        ;;
+      -f?* | -F?*)
+        out+="${arg:0:2}$(_gh_wrapper_redact_value keyed "${arg:2}") "
         ;;
       *) out+="$(printf '%q ' "${arg}")" ;;
     esac
   done
   printf '%s' "${out% }"
+}
+
+# Redact one flag value. mode=whole replaces all of it; mode=keyed keeps a
+# leading `key=` and replaces what follows (or the whole value if it has no
+# `=`). The kept key is re-quoted so the result stays pasteable.
+_gh_wrapper_redact_value() {
+  local mode="$1" value="$2"
+  if [[ "${mode}" == "keyed" && "${value}" == *=* ]]; then
+    printf '%q=<redacted>' "${value%%=*}"
+  else
+    printf '<redacted>'
+  fi
 }
 
 # Print the hint for `scope`, quoting the original argv back so the suggested
@@ -858,6 +899,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_logins_equal _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_logins_equal _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _GH_WRAPPER_LOGIN_ALIASES
 fi

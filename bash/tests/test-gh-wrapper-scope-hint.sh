@@ -216,13 +216,39 @@ else
   _fail "redaction: non-secret arguments mangled, got: ${err}"
 fi
 
-# --with-equals spelling must redact too.
-GH_TOKEN="fixture-token" _run scope api -X POST /x --field="${SECRET}"
+# --with-equals spelling must redact too; a key=value field keeps its key.
+GH_TOKEN="fixture-token" _run scope api -X POST /x --field="body=${SECRET}"
 err="$(cat "${WORKDIR}/err")"
-if [[ "${err}" != *"${SECRET}"* && "${err}" == *"--field=<redacted>"* ]]; then
-  _pass "redaction: --field=VALUE spelling redacted"
+if [[ "${err}" != *"${SECRET}"* && "${err}" == *"--field=body=<redacted>"* ]]; then
+  _pass "redaction: --field=key=VALUE keeps the key, redacts the value"
 else
-  _fail "redaction: --field=VALUE not redacted, got: ${err}"
+  _fail "redaction: --field=key=VALUE not redacted as expected, got: ${err}"
+fi
+
+# Stuck short flags (-bVALUE, -fkey=VALUE) are valid pflag syntax and were the
+# leak the first fix round missed: an exact-token `case` never saw them.
+GH_TOKEN="fixture-token" _run scope secret set FOO "-b${SECRET}" --org smartwatermelon
+err="$(cat "${WORKDIR}/err")"
+if [[ "${err}" != *"${SECRET}"* && "${err}" == *" -b<redacted> "* ]]; then
+  _pass "redaction: stuck -bVALUE redacted"
+else
+  _fail "redaction: stuck -bVALUE leaked or mangled, got: ${err}"
+fi
+GH_TOKEN="fixture-token" _run scope api -X POST /x "-fquery=${SECRET}"
+err="$(cat "${WORKDIR}/err")"
+if [[ "${err}" != *"${SECRET}"* && "${err}" == *" -fquery=<redacted>"* ]]; then
+  _pass "redaction: stuck -fkey=VALUE keeps the key, redacts the value"
+else
+  _fail "redaction: stuck -fkey=VALUE leaked or mangled, got: ${err}"
+fi
+
+# A positional after `--` is never a flag, even if it spells one.
+GH_TOKEN="fixture-token" _run scope api /x -- --body
+err="$(cat "${WORKDIR}/err")"
+if [[ "${err}" == *"gh api /x -- --body"* && "${err}" != *"<redacted>"* ]]; then
+  _pass "redaction: -- ends flag parsing"
+else
+  _fail "redaction: -- not honored, got: ${err}"
 fi
 
 # --- Case 7: GITHUB_TOKEN (no GH_TOKEN) names the right variable -------------
