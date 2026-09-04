@@ -34,7 +34,7 @@ mkdir -p "${HOME}/.config/gh"
 # fixture owner each case resolves. That guard is correct; inheriting the
 # ambient token here is not. Sandbox it the same way HOME is sandboxed, so the
 # cases exercise the hosts.yml path they are written to test.
-unset GH_TOKEN CLAUDE_GH_TOKEN_LOGIN
+unset GH_TOKEN GITHUB_TOKEN CLAUDE_GH_TOKEN_LOGIN
 
 # git init inside the sandboxed HOME must not pick up interactive prompts.
 export GIT_CONFIG_GLOBAL="${HOME}/.gitconfig"

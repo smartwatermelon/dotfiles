@@ -668,40 +668,35 @@ _gh_wrapper_print_scope_hint() {
   shift
   local cmd
   cmd="$(_gh_wrapper_redact_argv "$@")"
-  # gh reads GH_TOKEN first, then GITHUB_TOKEN. Branch on whichever is actually
-  # set and name THAT variable in the suggestion: telling someone to unset
-  # GH_TOKEN when GITHUB_TOKEN is what authenticated them is advice that cannot
-  # work, and `gh auth refresh` is equally useless there — it rewrites the
-  # keyring token, which an env-var token overrides anyway.
-  local token_var=""
-  if [[ -n "${GH_TOKEN:-}" ]]; then
-    token_var="GH_TOKEN"
-  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  # gh reads GH_TOKEN first, then GITHUB_TOKEN. Name whichever is actually set:
+  # telling someone to unset GH_TOKEN when GITHUB_TOKEN is what authenticated
+  # them is advice that cannot work, and `gh auth refresh` is equally useless
+  # here — it rewrites the keyring token, which an env-var token overrides.
+  # The caller only reaches this function when one of the two is set.
+  local token_var="GH_TOKEN"
+  if [[ -z "${GH_TOKEN:-}" ]]; then
     token_var="GITHUB_TOKEN"
   fi
-  if [[ -n "${token_var}" ]]; then
-    local keyring
-    keyring="$(_gh_wrapper_keyring_login)"
-    # The login stays on the same line as its label: a reader grepping the
-    # hint for the account name should find it next to the word naming it,
-    # not wrapped onto the following line.
-    echo "[gh] ${token_var} is set and lacks the '${scope}' scope." >&2
-    echo "[gh] The keyring identity for ${keyring:-<none in hosts.yml>} has it." >&2
-    echo "[gh] Re-run this one command without ${token_var}:" >&2
-    echo "[gh]   env -u ${token_var} gh ${cmd}" >&2
-    echo "[gh] (Do not add the scope to the CCCLI PAT — it is exported into every session.)" >&2
-  else
-    echo "[gh] The active gh token lacks the '${scope}' scope. Add it to the keyring token:" >&2
-    echo "[gh]   gh auth refresh -h github.com -s ${scope}" >&2
-    echo "[gh] then re-run: gh ${cmd}" >&2
-  fi
+  local keyring
+  keyring="$(_gh_wrapper_keyring_login)"
+  # The login stays on the same line as its label: a reader grepping the
+  # hint for the account name should find it next to the word naming it,
+  # not wrapped onto the following line.
+  echo "[gh] ${token_var} is set and lacks the '${scope}' scope." >&2
+  echo "[gh] The keyring identity for ${keyring:-<none in hosts.yml>} has it." >&2
+  echo "[gh] Re-run this one command without ${token_var}:" >&2
+  echo "[gh]   env -u ${token_var} gh ${cmd}" >&2
+  echo "[gh] (Do not add the scope to the CCCLI PAT — it is exported into every session.)" >&2
 }
 
 # Run the real gh. stderr goes to the terminal live AND to a temp file; stdout
-# is untouched (fd 3 carries it around the pipe). On non-zero exit, a scope
-# error in the file triggers the hint. The real exit code is returned.
+# is untouched. On non-zero exit, a scope error in the file triggers the hint.
+# The real exit code is returned.
 #
 # Not `exec`: the hint needs gh's exit status and stderr after it returns.
+# Only called when an env-var token is set (see the standalone branch): the
+# tee pipe costs gh's stderr its TTY and can reorder stderr against stdout,
+# which is acceptable in an agent session and not at a human's terminal.
 _gh_wrapper_run_with_scope_hint() {
   local real_gh="$1"
   shift
@@ -721,19 +716,44 @@ _gh_wrapper_run_with_scope_hint() {
   # ordinary paths (including the `return` below), and the signal handler
   # re-raises after cleanup so the caller still sees a signal death (128+n)
   # rather than a normal exit.
-  trap 'rm -f "${errfile}"' RETURN
-  trap 'rm -f "${errfile}"; trap - TERM HUP INT; kill -s TERM $$' TERM HUP INT
-  # `|| true` keeps `set -e` (standalone mode) from aborting on the failing
-  # pipeline before rc is read.
   #
-  # tee buffers, so a PARTIAL-line write to stderr — gh's interactive prompts,
-  # which deliberately omit the trailing newline — can surface after stdout
-  # that was written later. Whole lines are unaffected, and stdout bypasses the
-  # pipe entirely on fd 3.
-  {
-    "${real_gh}" "$@" 2>&1 1>&3 3>&- | tee "${errfile}" >&2
-    rc="${PIPESTATUS[0]}"
-  } 3>&1 || true
+  # The handler also forwards the signal to gh. Before F4 the wrapper exec'd
+  # gh, so a signal aimed at "the gh process" hit gh. Now that pid is the
+  # wrapper's; without forwarding, gh would run on as an orphan after the
+  # wrapper died. Ctrl-C already reaches the whole foreground process group,
+  # so this matters for a targeted kill (`timeout gh ...`, `kill <pid>`).
+  #
+  # gh runs in the BACKGROUND and the wrapper `wait`s for it. This is not
+  # optional: bash defers a trapped signal until a foreground command
+  # finishes (measured — a SIGTERM to the wrapper during a foreground
+  # `gh | tee` pipeline was not acted on until gh exited on its own, so the
+  # handler could neither forward nor clean up). Only `wait` returns at once
+  # on a trapped signal, running the handler immediately. A background
+  # child gets /dev/null as stdin unless told otherwise, hence the explicit
+  # `<&0`; and non-interactive bash starts background children with SIGINT
+  # ignored (Go leaves an ignored signal ignored), so INT is forwarded as
+  # TERM. `kill` is guarded because `set -e` applies inside the handler.
+  #
+  # stderr goes through a process substitution running tee: gh writes to
+  # fd 4, tee copies to the file and the real stderr. After gh exits the fd
+  # is closed and tee is waited for, so the file is complete before it is
+  # read. tee buffers, so a PARTIAL-line write to stderr — gh's interactive
+  # prompts, which deliberately omit the trailing newline — can surface after
+  # stdout that was written later. Whole lines are unaffected, and stdout
+  # bypasses the pipe entirely.
+  local gh_pid="" tee_pid=""
+  trap 'rm -f "${errfile}"' RETURN
+  trap '[[ -n "${gh_pid}" ]] && kill -TERM "${gh_pid}" 2>/dev/null; rm -f "${errfile}"; trap - TERM HUP INT; kill -s TERM $$' TERM HUP INT
+  exec 4> >(tee "${errfile}" >&2 || true)
+  tee_pid=$!
+  "${real_gh}" "$@" 2>&4 4>&- <&0 &
+  gh_pid=$!
+  # `|| rc=$?` keeps `set -e` (standalone mode) from aborting on a failing gh
+  # before rc is read.
+  wait "${gh_pid}" || rc=$?
+  gh_pid=""
+  exec 4>&-
+  wait "${tee_pid}" 2>/dev/null || true
   if [[ "${rc}" -ne 0 ]]; then
     local scope
     scope="$(_gh_wrapper_scope_from_file "${errfile}")"
@@ -822,11 +842,22 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     source "${CLAUDE_GH_TOKEN_ROUTER}" "$@"
   fi
 
-  # Not exec: the F4 scope hint needs gh's exit status and stderr after it
-  # returns, so the process has to outlive the call. Only this standalone path
-  # runs the hint — function mode reaches it through `command gh`, which lands
-  # right here. If ~/.local/bin/gh is not on PATH, no hint is printed; that is
-  # the documented limit.
+  # The F4 scope hint exists for one situation: an env-var token (GH_TOKEN, or
+  # GITHUB_TOKEN as gh's fallback) is overriding the keyring and lacks a scope
+  # the keyring token has. Only then is there anything to say beyond what gh
+  # already prints (`gh auth refresh -s <scope>`). So only then is stderr
+  # captured — capturing costs gh its stderr TTY (colors, prompt rendering)
+  # and lets tee reorder stderr against stdout, which a human at a terminal
+  # notices and an agent session with GH_TOKEN exported does not.
+  #
+  # With no env token, exec as before: gh owns the terminal outright and the
+  # wrapper process is gone. Only this standalone path runs the hint — function
+  # mode reaches it through `command gh`, which lands right here. If
+  # ~/.local/bin/gh is not on PATH, no hint is printed; that is the documented
+  # limit.
+  if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
+    exec "${REAL_GH}" "$@"
+  fi
   _gh_wrapper_rc=0
   _gh_wrapper_run_with_scope_hint "${REAL_GH}" "$@" || _gh_wrapper_rc=$?
   exit "${_gh_wrapper_rc}"

@@ -150,18 +150,42 @@ else
   _fail "scope error: stdout lost, got: ${out}"
 fi
 
-# --- Case 2: scope error WITHOUT GH_TOKEN -> gh auth refresh hint -------------
+# --- Case 2: scope error WITHOUT an env token -> plain passthrough, no hint ---
+# With no GH_TOKEN/GITHUB_TOKEN there is no escape hatch to suggest: gh's own
+# stderr already says `gh auth refresh -s admin:org`. The wrapper must exec gh
+# untouched so a human at a terminal keeps gh's stderr TTY and ordering.
 _run scope secret set CLAUDE_CODE_OAUTH_TOKEN --org smartwatermelon
+rc=$?
 err="$(cat "${WORKDIR}/err")"
-if [[ "${err}" == *"gh auth refresh -h github.com -s admin:org"* && "${err}" == *"[gh]"* ]]; then
-  _pass "scope error, no GH_TOKEN: refresh hint"
+if [[ "${rc}" -eq 4 && "${err}" == *'needs the "admin:org" scope'* && "${err}" != *"[gh]"* ]]; then
+  _pass "scope error, no env token: gh's stderr passes through, no wrapper hint"
 else
-  _fail "scope error, no GH_TOKEN: expected refresh hint, got: ${err}"
+  _fail "scope error, no env token: expected untouched stderr and rc 4, got rc=${rc}: ${err}"
 fi
-if [[ "${err}" == *"env -u GH_TOKEN"* ]]; then
-  _fail "scope error, no GH_TOKEN: must not suggest env -u"
+# The no-token path must exec, not fork-and-wait: the stub reports whether its
+# parent is still the wrapper (bash reading gh-wrapper.sh) or the test's
+# subshell. A stderr TTY check would be the direct test, but the suite has no
+# pty; the exec check proves the same thing one level up.
+mkdir -p "${STUBS}/ppid"
+cat >"${STUBS}/ppid/gh" <<'STUB'
+#!/usr/bin/env bash
+ps -o command= -p "${PPID}" 2>/dev/null
+exit 0
+STUB
+chmod +x "${STUBS}/ppid/gh"
+_run ppid api user
+out="$(cat "${WORKDIR}/out")"
+if [[ "${out}" != *"gh-wrapper.sh"* ]]; then
+  _pass "no env token: wrapper execs gh (parent is not the wrapper)"
 else
-  _pass "scope error, no GH_TOKEN: does not suggest env -u"
+  _fail "no env token: wrapper did not exec, parent is: ${out}"
+fi
+GH_TOKEN="fixture-token" _run ppid api user
+out="$(cat "${WORKDIR}/out")"
+if [[ "${out}" == *"gh-wrapper.sh"* ]]; then
+  _pass "env token set: wrapper stays resident to read gh's exit (control)"
+else
+  _fail "env token set: expected the wrapper as parent, got: ${out}"
 fi
 
 # --- Case 3: negative control, non-scope 403 -> no hint -----------------------
@@ -270,21 +294,29 @@ fi
 # --- Case 8: no temp-file leak when the wrapper is signalled mid-run ---------
 # SIGTERM/SIGHUP skip the function's trailing rm -f; only a RETURN trap cleans
 # up. SIGINT already unwound correctly, so TERM is the case that regressed.
+#
+# The stub records its own pid so the test can also prove the wrapper forwarded
+# the signal: before F4 the wrapper exec'd gh, so "kill the gh process" killed
+# gh. Now that pid is the wrapper's, and gh must not survive it as an orphan.
 mkdir -p "${STUBS}/sleeper"
 cat >"${STUBS}/sleeper/gh" <<'STUB'
 #!/usr/bin/env bash
+echo "$$" >"${OM_SLEEPER_PIDFILE:?}"
 echo 'starting' >&2
 sleep 30
 STUB
 chmod +x "${STUBS}/sleeper/gh"
+export OM_SLEEPER_PIDFILE="${WORKDIR}/sleeper.pid"
+rm -f "${OM_SLEEPER_PIDFILE}"
 
 leak_before="$(_errfile_count)"
 # `exec` so the backgrounded pid IS the wrapper. Without it the pid belongs to
 # the subshell, and signalling that leaves the wrapper running untouched — the
 # trap never fires and the test reports a leak that is really a mis-aimed kill.
+# GH_TOKEN is set because only the env-token path captures stderr at all.
 (
   cd "${HOME}/neutral-cwd" || exit 99
-  PATH="${STUBS}/sleeper:${PATH}" exec bash "${WRAPPER}" api user \
+  PATH="${STUBS}/sleeper:${PATH}" GH_TOKEN="fixture-token" exec bash "${WRAPPER}" api user \
     >/dev/null 2>&1
 ) &
 sleeper_pid=$!
@@ -301,6 +333,25 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
   sleep 0.25
 done
 kill -TERM "${sleeper_pid}" 2>/dev/null
+# Bounded: a plain `wait` here passes for the wrong reason. bash defers a
+# trapped signal while a FOREGROUND command runs, so a wrapper that runs gh in
+# the foreground only acts on the SIGTERM after gh's own 30s exit — by which
+# time the cleanup and "forward" look fine. Measured against 42a5502: every
+# assertion below passed, 30s late. The wrapper must be gone within 3s.
+wrapper_gone=0
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  if ! kill -0 "${sleeper_pid}" 2>/dev/null; then
+    wrapper_gone=1
+    break
+  fi
+  sleep 0.25
+done
+if [[ "${wrapper_gone}" == "1" ]]; then
+  _pass "SIGTERM prompt: wrapper acted on the signal within 3s"
+else
+  _fail "SIGTERM prompt: wrapper still alive 3s after SIGTERM (trap deferred behind a foreground gh)"
+  kill -KILL "${sleeper_pid}" 2>/dev/null
+fi
 wait "${sleeper_pid}" 2>/dev/null
 sleep 0.3
 
@@ -314,6 +365,13 @@ if [[ "${leak_after}" == "0" ]]; then
   _pass "SIGTERM leak: no temp file left behind after SIGTERM"
 else
   _fail "SIGTERM leak: ${leak_after} temp file(s) left behind after SIGTERM"
+fi
+gh_pid="$(cat "${OM_SLEEPER_PIDFILE}" 2>/dev/null)"
+if [[ -n "${gh_pid}" ]] && ! kill -0 "${gh_pid}" 2>/dev/null; then
+  _pass "SIGTERM forward: gh did not survive the wrapper as an orphan"
+else
+  _fail "SIGTERM forward: gh (pid ${gh_pid:-unknown}) still running after the wrapper died"
+  kill -TERM "${gh_pid}" 2>/dev/null
 fi
 
 if [[ ${fail} -eq 0 ]]; then
