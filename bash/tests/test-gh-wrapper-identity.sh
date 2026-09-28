@@ -228,6 +228,19 @@ assert_identity_for "unclaimed owner, upstream is beacon" "${fork_repo}" "someot
 assert_identity_for "unclaimed owner outside both" "${HOME}/neutral-cwd" "someotherorg" "twistedmelonman"
 assert_identity_for "claimed owner beats beacon cwd" "${beacon_repo}" "smartwatermelon" "twistedmelonman"
 
+# --- Exported helper survives a subshell that never sourced the file ---------
+# gh-wrapper.sh export -f's gh() and every helper it calls, so a subshell that
+# inherits the exported functions but did not source the file (BASH_ENV unset)
+# still works. A helper missing from that export list only fails there, never
+# in the sourcing tests above. Fresh process: only inherited functions exist.
+exported_out="$(env -u BASH_ENV bash -c '_gh_wrapper_identity_for_owner beacon-biosignals' 2>&1 || true)"
+if [[ "${exported_out}" == "andrewmrich" ]]; then
+  echo "PASS: identity_for is exported into a non-sourcing subshell (andrewmrich)"
+else
+  echo "FAIL: identity_for is exported into a non-sourcing subshell — got '${exported_out}'"
+  fail=1
+fi
+
 # --- --owner (gh search etc.) ------------------------------------------------
 # A single --owner names the owner the call acts on, so it must beat a Beacon
 # cwd remote; -R still beats --owner; an owner list falls back to cwd.
