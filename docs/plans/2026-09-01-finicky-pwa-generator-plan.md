@@ -1,5 +1,9 @@
 # Finicky PWA Config Generator Implementation Plan
 
+**Obsolete (2026-09-28).** Finicky was removed from this machine and from
+these dotfiles. The generator, template, and test this document describes
+no longer exist. Kept for reference only.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Generate `~/.config/finicky/finicky.js` per machine so only PWAs that are actually installed get handlers, and restart Finicky when the file changes.
