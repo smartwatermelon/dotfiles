@@ -283,6 +283,35 @@ _gh_wrapper_owner_token_var() {
   esac
 }
 
+# Pure owner -> gh identity mapping. Prints "andrewmrich" or "twistedmelonman"
+# on stdout. No gh calls, no writes to gh state; the only input beyond the
+# argument is the current directory, read by _gh_wrapper_is_beacon_context for
+# the Beacon fallback. Other scripts may source this file and call it.
+# See the mapping notes above _gh_wrapper_sync_identity for precedence.
+_gh_wrapper_identity_for_owner() {
+  local owner="$1"
+
+  # smartwatermelon is the ORG (2026-09 migration); nightowlstudiollc is the
+  # other org; twistedmelonman is the personal account that owns both and
+  # keeps the archived repos and forks. All three resolve to the person.
+  #
+  # Still asserted, not verified: nothing here confirms the twistedmelonman
+  # gh account is actually authorized against either org's repos. A `gh auth
+  # status` check cross-referencing the account's authorized orgs would
+  # confirm it; left as a future enhancement rather than scope creep here.
+  case "${owner,,}" in
+    smartwatermelon | nightowlstudiollc | twistedmelonman) printf '%s\n' "twistedmelonman" ;;
+    beacon-biosignals | andrewmrich) printf '%s\n' "andrewmrich" ;;
+    *)
+      if _gh_wrapper_is_beacon_context; then
+        printf '%s\n' "andrewmrich"
+      else
+        printf '%s\n' "twistedmelonman"
+      fi
+      ;;
+  esac
+}
+
 # gh has one active account per host (not per repo), unlike git+SSH which
 # already resolves the right identity per remote via ~/.ssh/config host
 # aliases. This keeps gh in sync with that same per-repo intent.
@@ -322,25 +351,7 @@ _gh_wrapper_sync_identity() {
   owner="$(_gh_wrapper_resolve_owner "$@")"
   [[ -z "${owner}" ]] && return 0
 
-  # smartwatermelon is the ORG (2026-09 migration); nightowlstudiollc is the
-  # other org; twistedmelonman is the personal account that owns both and
-  # keeps the archived repos and forks. All three resolve to the person.
-  #
-  # Still asserted, not verified: nothing here confirms the twistedmelonman
-  # gh account is actually authorized against either org's repos. A `gh auth
-  # status` check cross-referencing the account's authorized orgs would
-  # confirm it; left as a future enhancement rather than scope creep here.
-  case "${owner,,}" in
-    smartwatermelon | nightowlstudiollc | twistedmelonman) desired="twistedmelonman" ;;
-    beacon-biosignals | andrewmrich) desired="andrewmrich" ;;
-    *)
-      if _gh_wrapper_is_beacon_context; then
-        desired="andrewmrich"
-      else
-        desired="twistedmelonman"
-      fi
-      ;;
-  esac
+  desired="$(_gh_wrapper_identity_for_owner "${owner}")"
 
   # The owner's own token, when one is set, is the answer outright: it was
   # issued for this owner, so there is no identity left to check and no

@@ -204,6 +204,30 @@ assert_desired_in "${beacon_repo}" "claimed owner beats beacon cwd" \
 
 cd "${HOME}/neutral-cwd"
 
+# --- _gh_wrapper_identity_for_owner (pure mapping) ---------------------------
+# Called directly, with no hosts.yml and no gh stub involved. Another script
+# may source gh-wrapper.sh and call this, so it must print the identity and
+# nothing else.
+assert_identity_for() {
+  local label="$1" dir="$2" owner="$3" expected="$4" got
+  got="$(cd "${dir}" && _gh_wrapper_identity_for_owner "${owner}" 2>/dev/null)" || true
+  if [[ "${got}" == "${expected}" ]]; then
+    echo "PASS: identity_for ${label} (${expected})"
+  else
+    echo "FAIL: identity_for ${label} — expected '${expected}', got '${got}'"
+    fail=1
+  fi
+}
+assert_identity_for "beacon-biosignals" "${HOME}/neutral-cwd" "beacon-biosignals" "andrewmrich"
+assert_identity_for "AndrewMRich" "${HOME}/neutral-cwd" "AndrewMRich" "andrewmrich"
+assert_identity_for "smartwatermelon" "${HOME}/neutral-cwd" "smartwatermelon" "twistedmelonman"
+assert_identity_for "NightOwlStudioLLC" "${HOME}/neutral-cwd" "NightOwlStudioLLC" "twistedmelonman"
+assert_identity_for "twistedmelonman" "${HOME}/neutral-cwd" "twistedmelonman" "twistedmelonman"
+assert_identity_for "unclaimed owner under beacon dir" "${beacon_repo}" "someotherorg" "andrewmrich"
+assert_identity_for "unclaimed owner, upstream is beacon" "${fork_repo}" "someotherorg" "andrewmrich"
+assert_identity_for "unclaimed owner outside both" "${HOME}/neutral-cwd" "someotherorg" "twistedmelonman"
+assert_identity_for "claimed owner beats beacon cwd" "${beacon_repo}" "smartwatermelon" "twistedmelonman"
+
 # --- --owner (gh search etc.) ------------------------------------------------
 # A single --owner names the owner the call acts on, so it must beat a Beacon
 # cwd remote; -R still beats --owner; an owner list falls back to cwd.
