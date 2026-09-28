@@ -1,5 +1,9 @@
 # Finicky PWA config generator — design
 
+**Obsolete (2026-09-28).** Finicky was removed from this machine and from
+these dotfiles. The generator, template, and test this document describes
+no longer exist. Kept for reference only.
+
 **Date:** 2026-09-01
 **Follows:** smartwatermelon/dotfiles#295 (GitHub deep links in the PWA)
 

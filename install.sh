@@ -198,7 +198,7 @@ source "${REPO_DIR}/git/hooks/lib-symlink-exclusions.sh"
 
 # Known config directories that should be symlinked into ~/.config.
 # Any top-level path not in this list AND not excluded triggers a warning.
-_KNOWN_CONFIG_DIRS="bash btop dig finicky gh git liquidpromptrc markdownlint-cli pre-commit s shellcheck tidy vim yamllint yt-dlp zizmor"
+_KNOWN_CONFIG_DIRS="bash btop dig gh git liquidpromptrc markdownlint-cli pre-commit s shellcheck tidy vim yamllint yt-dlp zizmor"
 
 _is_known_config_path() {
   local top_level
@@ -253,28 +253,6 @@ while IFS= read -r file; do
     _ensure_symlink "${target}" "${link}"
   fi
 done < <(git -C "${REPO_DIR}" ls-files)
-
-# ============================================================================
-# 3b. GENERATED CONFIGS
-# ============================================================================
-# finicky.js is generated per machine from finicky.template.js plus the
-# Chrome PWAs installed here; a handler for a PWA that is missing would drop
-# URLs. The generator restarts Finicky when the file changes, because
-# Finicky's watcher does not survive the file being replaced.
-#
-# Ruling: the generator is an optional convenience, not a hard requirement —
-# a failure leaves the previous finicky.js intact, so it must warn loudly
-# but NOT enter failures (which would abort the rest of the sync for no gain).
-_info "Generating Finicky config from installed Chrome PWAs..."
-if [[ "${DRY_RUN}" == true ]]; then
-  if ! bash "${REPO_DIR}/finicky/generate-config.sh" --dry-run; then
-    _warn "Finicky config generation (dry-run) failed — see messages above"
-  fi
-elif bash "${REPO_DIR}/finicky/generate-config.sh"; then
-  installed+=("generated:${HOME}/.config/finicky/finicky.js")
-else
-  _warn "Finicky config generation failed — see messages above"
-fi
 
 # ============================================================================
 # 4. HOME SYMLINKS (~/.<file> → ~/.config/<path>)
