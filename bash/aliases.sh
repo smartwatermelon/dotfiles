@@ -39,6 +39,8 @@ alias my-issues='my_issues' # open issues across my orgs (functions.sh)
 if [[ -f "${HOME}/.local/bin/claude-wrapper" ]]; then
   alias claude='${HOME}/.local/bin/claude-wrapper'
   alias clauded="claude --dangerously-skip-permissions"
+  alias megaclaude="BUDGET_SESSION_TOKENS=50000000 BUDGET_SUBAGENT_TOKENS=12000000 claude"
+  alias megaclauded="BUDGET_SESSION_TOKENS=50000000 BUDGET_SUBAGENT_TOKENS=12000000 clauded"
 else
   alias claude='/usr/bin/caffeinate -i ${HOME}/.local/bin/claude'
   alias clauded="claude --dangerously-skip-permissions"
