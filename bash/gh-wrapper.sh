@@ -838,9 +838,10 @@ _gh_wrapper_approval_gate() {
     [[ -n "${reason}" ]] || return 0
   fi
 
-  local rerun="gh ${sub} ${subsub} --title t --body-file ${HOME}/.claude/gate-review/approved/<label>"
+  # gate-review keeps approvals per repo and branch (claude-config#623).
+  local rerun="gh ${sub} ${subsub} --title t --body-file ${HOME}/.claude/gate-review/approved/<repo>-<branch>/<label>"
   [[ "${sub}" == "api" ]] \
-    && rerun="gh api ${subsub} -F body=@${HOME}/.claude/gate-review/approved/<label>"
+    && rerun="gh api ${subsub} -F body=@${HOME}/.claude/gate-review/approved/<repo>-<branch>/<label>"
 
   {
     echo "[gh] 🛑 BLOCKED: ${sub} ${subsub} body has not been visually approved."

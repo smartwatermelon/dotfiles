@@ -269,6 +269,28 @@ else
   echo "SKIP: suspension cases — ${REAL_GATE} has no 'suspended' subcommand"
 fi
 
+# --- per-repo approvals (claude-config#623) -----------------------------------
+# gate-review keeps approvals in approved/<repo>-<branch>/. The block message
+# must point there, not at the old flat approved/<label>.
+hint="$(_gh_wrapper_approval_gate pr create --title t --body-file "${UNAPPROVED}" 2>&1 || true)"
+if [[ "${hint}" == *"gate-review/approved/<repo>-<branch>/<label>"* ]]; then
+  echo "PASS: block message names the per-repo approved/ path"
+else
+  echo "FAIL: block message names the per-repo approved/ path — got: ${hint}"
+  fail=1
+fi
+
+if [[ "${HAVE_GATE}" == "1" ]] && grep -q '<repo>-<branch>' "${GATE}"; then
+  KEYED="${SANDBOX}/keyed.md"
+  printf 'A body approved under a per-repo key.\n' >"${KEYED}"
+  mkdir -p "${GATE_REVIEW_DIR}/approved/dotfiles-main"
+  cp "${KEYED}" "${GATE_REVIEW_DIR}/approved/dotfiles-main/commit-1"
+  assert_gate "body approved under approved/<repo>-<branch>/ is allowed" 0 \
+    pr create --title t --body-file "${KEYED}"
+else
+  echo "SKIP: keyed approval case — installed gate-review.sh predates per-repo keys"
+fi
+
 # --- gate-review.sh absent: fails CLOSED --------------------------------------
 # A redundant pair whose halves disagree about the unverifiable case is not
 # redundant. Removing the gate must not turn the check into a pass.
