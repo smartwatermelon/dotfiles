@@ -722,6 +722,101 @@ _gh_wrapper_api_body_fields() {
   return 0
 }
 
+# --- approval gate: destination ------------------------------------------------
+# Reduce a repository spelling to lowercase owner/name: a scheme, a leading
+# github.com/, a trailing slash and .git are stripped. Prints nothing when the
+# result is not exactly owner/name (another host, an empty part), and the
+# caller blocks. Mirrors _norm_repo in claude-config's hook-block-personify.sh.
+_gh_wrapper_norm_repo() {
+  local v="${1,,}"
+  v="${v#https://}"
+  v="${v#http://}"
+  v="${v#github.com/}"
+  v="${v%/}"
+  v="${v%.git}"
+  [[ "${v}" =~ ^[a-z0-9._-]+/[a-z0-9._-]+$ ]] && printf '%s\n' "${v}"
+  return 0
+}
+
+# Work out which repository a gated gh call publishes to, so gate-review.sh
+# check can route the text by destination (gate-rules.conf). Sets the caller's
+# locals `dest_repo` (empty: the checkout gh runs in) and `also_cwd`, and
+# returns 1 with the caller's `reason` set when the destination cannot be read.
+# Takes the caller's `sub`, `subsub`, `repo_args` and `url_args`.
+#
+# The forms read are the ones hook-block-personify.sh reads, so the two gates
+# route a text the same way: -R/--repo, GH_REPO, a github.com URL given as the
+# PR or issue argument, and gh api's repos/<owner>/<name> endpoint. Every form
+# found must name the same repository; disagreement blocks rather than picking
+# one. A URL is the destination only if it is the PR or issue argument, which
+# this walk cannot tell from the value of a flag it does not know (a --title),
+# so with no -R the checkout must route the text too (also_cwd). The same holds
+# for gh api's {owner}/{repo}, which gh fills from the checkout.
+_gh_wrapper_gate_destination() {
+  local c n ep rest
+  local -a cands=()
+  dest_repo=""
+  also_cwd=0
+  [[ -n "${GH_REPO:-}" ]] && cands+=("${GH_REPO}")
+  [[ "${#repo_args[@]}" -gt 0 ]] && cands+=("${repo_args[@]}")
+  if [[ "${sub}" == "api" ]]; then
+    ep="${subsub}"
+    [[ "${ep}" =~ ^https?://[^/]+(/.*)$ ]] && ep="${BASH_REMATCH[1]}"
+    ep="${ep#/}"
+    case "${ep}" in
+      repositories/*)
+        reason="gh api repositories/<id> names the repository by number; use repos/<owner>/<name>"
+        return 1
+        ;;
+      "repos/{owner}/{repo}"*) also_cwd=1 ;;
+      repos/*/*)
+        rest="${ep#repos/}"
+        c="${rest%%/*}"
+        rest="${rest#*/}"
+        cands+=("${c}/${rest%%/*}")
+        ;;
+      repos/*)
+        reason="cannot resolve the repository from '${ep}'"
+        return 1
+        ;;
+      *) ;;
+    esac
+  fi
+  for c in "${cands[@]}"; do
+    n="$(_gh_wrapper_norm_repo "${c}")"
+    if [[ -z "${n}" ]]; then
+      reason="cannot resolve '${c}' to a single owner/name repository"
+      return 1
+    fi
+    if [[ -n "${dest_repo}" && "${dest_repo}" != "${n}" ]]; then
+      reason="the call names more than one repository (${dest_repo}, ${n}); name exactly one"
+      return 1
+    fi
+    dest_repo="${n}"
+  done
+  # URLs last: with a -R, GH_REPO or endpoint repo already set, a URL only has
+  # to agree with it.
+  for c in "${url_args[@]}"; do
+    rest="${c,,}"
+    rest="${rest#*github.com/}"
+    n="${rest%%/*}"
+    rest="${rest#*/}"
+    n="$(_gh_wrapper_norm_repo "${n}/${rest%%/*}")"
+    if [[ -z "${n}" ]]; then
+      reason="cannot resolve '${c}' to a single owner/name repository"
+      return 1
+    fi
+    if [[ -n "${dest_repo}" && "${dest_repo}" != "${n}" ]]; then
+      reason="the call names more than one repository (${dest_repo}, ${n}); name exactly one"
+      return 1
+    fi
+    [[ "${#cands[@]}" -eq 0 ]] && also_cwd=1
+    dest_repo="${n}"
+  done
+  [[ -n "${dest_repo}" ]] || also_cwd=0
+  return 0
+}
+
 # --- approval gate -------------------------------------------------------------
 # Refuse to write PR or issue body text unless Andrew has visually approved
 # those exact bytes. Approval lives on disk in gate-review's approved/
@@ -744,6 +839,10 @@ _gh_wrapper_api_body_fields() {
 #   a RELATIVE path or ~/... or $VAR/... -> blocked, resolved against a cwd
 #       this function and gh may disagree about
 #
+# Each body's destination repository goes to check with it (see
+# _gh_wrapper_gate_destination), and check routes it by gate-rules.conf: a
+# Pangram-gated repository also needs a check record for the exact bytes.
+#
 # TITLES stay ungated -- one line by nature. A subcommand carrying no body flag
 # passes, so `gh pr edit --add-label` and `gh pr review --approve` are unaffected.
 #
@@ -759,7 +858,8 @@ _gh_wrapper_api_body_fields() {
 # Same arg walk as _gh_wrapper_force_draft_for_off_org so detection cannot drift.
 _gh_wrapper_approval_gate() {
   local sub="" subsub="" skip_next=0 arg
-  local body_file="" inline=0 want_path=0
+  local body_file="" inline=0 want_path=0 want_repo=0
+  local -a repo_args=() url_args=()
 
   for arg in "$@"; do
     [[ "${arg}" == "--" ]] && break
@@ -772,14 +872,25 @@ _gh_wrapper_approval_gate() {
       want_path=0
       continue
     fi
+    if [[ "${want_repo}" == "1" ]]; then
+      repo_args+=("${arg}")
+      want_repo=0
+      continue
+    fi
     case "${arg}" in
-      -R | --repo | --hostname | --config-dir | --token) skip_next=1 ;;
+      -R | --repo) want_repo=1 ;;
+      --hostname | --config-dir | --token) skip_next=1 ;;
       -b | --body) inline=1 ;;
       --body=* | -b=*) inline=1 ;;
       -F | --body-file) want_path=1 ;;
       --body-file=*) body_file="${arg#*=}" ;;
       -F*) body_file="${arg#-F}" ;;
-      -R*) ;;
+      --repo=*) repo_args+=("${arg#*=}") ;;
+      # gh (pflag) reads -Ro/n and -R=o/n as the value o/n.
+      -R*)
+        arg="${arg#-R}"
+        repo_args+=("${arg#=}")
+        ;;
       --*=*) ;;
       -*) ;;
       *)
@@ -787,6 +898,8 @@ _gh_wrapper_approval_gate() {
           sub="${arg}"
         elif [[ -z "${subsub}" ]]; then
           subsub="${arg}"
+        elif [[ "${arg,,}" =~ ^(https?://)?github\.com/ ]]; then
+          url_args+=("${arg}")
         fi
         ;;
     esac
@@ -829,24 +942,63 @@ _gh_wrapper_approval_gate() {
     return 0
   fi
 
+  local dest_repo="" also_cwd=0 err="" unchecked=0
+  local -a dest=()
   if [[ "${inline}" == "1" ]]; then
     reason="text given inline; only a file can be verified"
+  elif ! _gh_wrapper_gate_destination; then
+    {
+      echo "[gh] 🛑 BLOCKED: ${sub} ${subsub}: cannot tell which repository this body goes to."
+      echo "[gh]   reason: ${reason}"
+    } >&2
+    return 1
   else
+    # check routes the text by destination (gate-rules.conf): a Pangram-gated
+    # repository also needs a check record for these exact bytes.
+    dest=(--dir "${PWD}")
+    [[ -n "${dest_repo}" ]] && dest+=(--repo "${dest_repo}")
     # Every named file must verify: an approved first body must not carry an
     # unapproved second one through.
     for body_file in "${files[@]}"; do
+      err=""
       if [[ "${body_file}" != /* ]]; then
         reason="path '${body_file}' is not absolute; gh and this gate would resolve it differently"
       elif [[ ! -f "${body_file}" ]]; then
         reason="no such file: ${body_file}"
       elif [[ ! -x "${gate}" ]]; then
         reason="gate-review.sh missing at ${gate}; cannot verify"
-      elif ! "${gate}" check "${body_file}"; then
-        reason="the bytes in ${body_file} do not match anything approved"
+      elif ! err="$("${gate}" check "${body_file}" "${dest[@]}" 2>&1)" \
+        || { [[ "${also_cwd}" == "1" ]] && ! err="$("${gate}" check "${body_file}" --dir "${PWD}" 2>&1)"; }; then
+        reason="${err##*$'\n'}"
+        [[ -n "${reason}" ]] || reason="the bytes in ${body_file} do not match anything approved"
+        [[ "${reason}" == *"no Pangram check ran"* ]] && unchecked=1
+      fi
+      # Router notes (repo or author unresolved) stay visible. On a failure
+      # the last line is the reason, printed in the block message below.
+      if [[ -z "${reason}" && -n "${err}" ]]; then
+        printf '%s\n' "${err}" >&2
+      elif [[ "${err}" == *$'\n'* ]]; then
+        printf '%s\n' "${err%$'\n'*}" >&2
       fi
       [[ -n "${reason}" ]] && break
     done
     [[ -n "${reason}" ]] || return 0
+  fi
+
+  if [[ "${unchecked}" == "1" ]]; then
+    local hint
+    hint="$("${gate}" hint "${body_file}" 2>/dev/null)" \
+      || hint="personify's scripts/pangram_check.py < ${body_file}"
+    {
+      echo "[gh] 🛑 BLOCKED: ${sub} ${subsub} body goes to a Pangram-gated repository and no Pangram check ran on it."
+      echo "[gh]"
+      echo "[gh]   reason: ${reason}"
+      echo "[gh]"
+      echo "[gh] Run the personify check on this exact file, then re-run the same command:"
+      echo "[gh]"
+      echo "[gh]   ${hint}"
+    } >&2
+    return 1
   fi
 
   # gate-review keeps approvals per repo and branch (claude-config#623).
@@ -1277,6 +1429,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_approval_gate _gh_wrapper_api_body_fields _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_approval_gate _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
 fi
