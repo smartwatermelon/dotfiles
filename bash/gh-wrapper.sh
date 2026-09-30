@@ -24,6 +24,37 @@
 # calls `command gh`, which (since ~/.local/bin is early in PATH) finds this
 # same file again in standalone-wrapper mode.
 
+# Needs bash 4+. Under macOS bash 3.2, re-exec (executed) or delegate gh() (sourced) to a newer bash; with none, refuse to run gh.
+if ((BASH_VERSINFO[0] < 4)); then
+  _gh_wrapper_new_bash=""
+  # Keg dirs first: they hold only bash, so putting one first on PATH cannot change which gh is found.
+  for _gh_wrapper_candidate in /opt/homebrew/opt/bash/bin/bash /usr/local/opt/bash/bin/bash \
+    /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "${_gh_wrapper_candidate}" ]]; then
+      _gh_wrapper_new_bash="${_gh_wrapper_candidate}"
+      break
+    fi
+  done
+  if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    if [[ -n "${_gh_wrapper_new_bash}" ]]; then
+      PATH="${_gh_wrapper_new_bash%/*}:${PATH}" exec "${_gh_wrapper_new_bash}" "${BASH_SOURCE[0]}" "$@"
+    fi
+    echo "[gh] ERROR: bash ${BASH_VERSION} is too old and no bash 4+ was found; refusing to run gh unguarded." >&2
+    exit 1
+  fi
+  _gh_wrapper_self="$(CDPATH="" cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/${BASH_SOURCE[0]##*/}"
+  gh() {
+    if [[ -z "${_gh_wrapper_new_bash}" ]]; then
+      echo "[gh] ERROR: bash ${BASH_VERSION} is too old and no bash 4+ was found; refusing to run gh unguarded." >&2
+      return 1
+    fi
+    # Runs this file as a standalone wrapper, so every check in that path applies; its exit status is gh's.
+    PATH="${_gh_wrapper_new_bash%/*}:${PATH}" "${_gh_wrapper_new_bash}" "${_gh_wrapper_self}" "$@"
+    return $?
+  }
+  return 0
+fi
+
 # Deliberately NOT defaulted from ${HOME} here. This file is sourced once, but
 # ${HOME} at source time is not necessarily ${HOME} at call time: anything that
 # reassigns HOME afterwards -- test harnesses above all -- would still get the
