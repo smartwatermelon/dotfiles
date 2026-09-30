@@ -60,6 +60,32 @@ repo's own call: declare `black`, `ruff format`, or nothing in that repo's
 - **When**: Runs on all shell script files
 - **Output**: Summary with ✅ (fixed), ❌ (issues), 🎉 (clean)
 
+### Comment Length Caps
+
+**length-caps**
+
+- **Type**: Local hook
+- **Entry**: `$HOME/.config/git/hooks/lint-length.sh`
+- **Purpose**: Fails a commit that adds a code comment or docstring over
+  personify's length cap (`scripts/length_check.py --diff`)
+- **When**: Every commit; it reads the staged diff, not file arguments, and
+  measures only added lines
+- **Skipped**: during a merge, cherry-pick or revert in progress
+- **Fails closed**: if personify cannot be found the commit is blocked, in every
+  repo (`core.hooksPath` is global). Install personify to clear it.
+- **Bypass**:
+  - One commit: `SKIP=length-caps git commit ...`
+  - One file (license header, vendored code): set `length-caps=off` on it in a
+    tracked `.gitattributes`, e.g. `vendor/** length-caps=off`. The value must
+    be exactly `off`. Only tracked `.gitattributes` files count, read from the
+    index, so it applies once `.gitattributes` is staged and a diff shows it.
+    `core.attributesFile` and the system attributes file are ignored. The hook
+    fails if `.git/info/attributes` sets `length-caps` at all, and refuses a
+    tracked line that sets `length-caps=off` on `*`, `**` or `**/*`. Each
+    exempted path is printed to stderr on every run. `-diff` also silences the
+    check, but hides the file from `git diff` and `git log -p`; use this
+    attribute instead.
+
 ### YAML
 
 **yamllint**

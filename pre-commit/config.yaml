@@ -134,6 +134,28 @@ repos:
         pass_filenames: true
         verbose: true
 
+  # Length caps for code comments and docstrings. Reads the STAGED diff, so a
+  # comment or docstring already in a file is never this commit's problem; only
+  # added text is measured, against personify's caps (scripts/length_check.py,
+  # found through ~/.claude/scripts/gate-review.sh personify-path).
+  #
+  # Fails CLOSED: core.hooksPath is global, so a machine where personify does
+  # not resolve blocks every commit until it is installed. Chosen on purpose
+  # 2026-09-30; revisit if it hurts. Bypass: `SKIP=length-caps git commit` for
+  # one commit, or `<glob> length-caps=off` in a tracked .gitattributes (read from
+  # the index; info/attributes and core.attributesFile do not count; a line on
+  # `*`, `**` or `**/*` is refused; exempted paths are printed on every run)
+  # for a file whose comments are not yours. See lint-length.sh.
+  - repo: local
+    hooks:
+      - id: length-caps
+        name: "Comment Length Caps (personify)"
+        entry: bash -c '$HOME/.config/git/hooks/lint-length.sh'
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
+
   # Markdown linting (Homebrew binary — avoids pre-commit's node-lang npm
   # bootstrap, which breaks on npm releases that dropped --ignore-prepublish)
   #

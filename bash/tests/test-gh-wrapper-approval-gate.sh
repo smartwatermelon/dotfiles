@@ -69,6 +69,33 @@ export XDG_CONFIG_HOME="${SANDBOX}/.config"
 unset GH_REPO
 mkdir -p "${GATE_REVIEW_DIR}/pending" "${GATE_REVIEW_DIR}/approved"
 
+# check --kind measures the body with personify's length_check.py, found through
+# installed_plugins.json under CLAUDE_CONFIG_DIR. The fixture is a stub that logs
+# its arguments and judges by a marker in the text, so the suite neither needs
+# personify installed nor reads the live ~/.claude.
+export CLAUDE_CONFIG_DIR="${SANDBOX}/.claude"
+PERSONIFY_FIX="${SANDBOX}/personify-fixture"
+KIND_LOG="${SANDBOX}/length-check-args.log"
+mkdir -p "${PERSONIFY_FIX}/scripts" "${CLAUDE_CONFIG_DIR}/plugins"
+: >"${PERSONIFY_FIX}/scripts/pangram_check.py"
+cat >"${PERSONIFY_FIX}/scripts/length_check.py" <<'STUB'
+import os
+import sys
+
+with open(os.environ["KIND_LOG"], "a") as log:
+    log.write(" ".join(sys.argv[1:]) + "\n")
+text = sys.stdin.read()
+if "CHECKERR" in text:
+    sys.stderr.write("stub checker failure\n")
+    sys.exit(5)
+if "OVERCAP" in text:
+    print("body:1 over by 9")
+    sys.exit(1)
+STUB
+export KIND_LOG
+printf '{"plugins":{"personify@personify":[{"installPath":"%s"}]}}\n' "${PERSONIFY_FIX}" \
+  >"${CLAUDE_CONFIG_DIR}/plugins/installed_plugins.json"
+
 BODY="${SANDBOX}/body.md"
 printf 'A body that was approved.\n' >"${BODY}"
 
@@ -235,6 +262,89 @@ if [[ "${HAVE_GATE}" == "1" ]]; then
     api repos/o/r/issues/5/comments -F "body=@${BODY}" -f body=x
 else
   echo "SKIP: approval cases — gate-review.sh not installed at ${REAL_GATE}"
+fi
+
+# --- length cap kind per subcommand ---------------------------------------------
+# Each gated subcommand hands check the kind hook-block-personify.sh derives for
+# the same command, including the gh api rows. The kind is read back from the
+# stub checker's argument log.
+if [[ "${HAVE_GATE}" == "1" ]] && grep -q -- '--kind' "${GATE}"; then
+  assert_kind() {
+    local label="$1" expected="$2" got
+    shift 2
+    : >"${KIND_LOG}"
+    _gh_wrapper_approval_gate "$@" >/dev/null 2>&1 || true
+    got="$(tail -n 1 "${KIND_LOG}")"
+    if [[ "${got}" == "--kind ${expected}" ]]; then
+      echo "PASS: ${label}"
+    else
+      echo "FAIL: ${label} — expected '--kind ${expected}', checker saw '${got}'"
+      fail=1
+    fi
+  }
+  assert_kind "kind: pr create" pr pr create --title t --body-file "${BODY}"
+  assert_kind "kind: pr edit" pr pr edit 5 --body-file "${BODY}"
+  assert_kind "kind: issue create" issue issue create --title t --body-file "${BODY}"
+  assert_kind "kind: issue edit" issue issue edit 5 --body-file "${BODY}"
+  assert_kind "kind: pr comment" pr-comment pr comment 5 --body-file "${BODY}"
+  assert_kind "kind: pr review" pr-comment pr review 5 --comment --body-file "${BODY}"
+  assert_kind "kind: issue comment" pr-comment issue comment 5 --body-file "${BODY}"
+  assert_kind "kind: api issue comments" pr-comment \
+    api repos/o/r/issues/5/comments -F "body=@${BODY}"
+  assert_kind "kind: api pulls/N/comments is a line comment" line-comment \
+    api repos/o/r/pulls/5/comments -F "body=@${BODY}"
+  assert_kind "kind: api /repos/ full URL pulls/N/comments" line-comment \
+    api https://api.github.com/repos/o/r/pulls/5/comments -F "body=@${BODY}"
+  assert_kind "kind: api pulls/N/reviews is not a line comment" pr-comment \
+    api repos/o/r/pulls/5/reviews -F "body=@${BODY}"
+  # The body file's name cannot select the looser cap: only the endpoint counts.
+  cp "${BODY}" "${SANDBOX}/repos-o-r-pulls-5-comments.md"
+  assert_kind "kind: api body path naming pulls/N/comments" pr-comment \
+    api repos/o/r/issues/5/comments -F "body=@${SANDBOX}/repos-o-r-pulls-5-comments.md"
+  mkdir -p "${SANDBOX}/repos/o/r/pulls/5"
+  cp "${BODY}" "${SANDBOX}/repos/o/r/pulls/5/comments"
+  assert_kind "kind: api body path is a repos/.../pulls/N/comments file" pr-comment \
+    api repos/o/r/issues/5/comments -F "body=@${SANDBOX}/repos/o/r/pulls/5/comments"
+  assert_kind "kind: api graphql has no repos endpoint" pr-comment \
+    api graphql -F "body=@${BODY}"
+
+  # Over the cap blocks even though the bytes are approved; the reason is shown.
+  OVER="${SANDBOX}/over.md"
+  printf 'OVERCAP but approved.\n' >"${OVER}"
+  cp "${OVER}" "${GATE_REVIEW_DIR}/approved/overlabel"
+  assert_gate "over the cap: approved bytes still blocked" 1 pr create --title t --body-file "${OVER}"
+  msg="$(_gh_wrapper_approval_gate pr create --title t --body-file "${OVER}" 2>&1 || true)"
+  if [[ "${msg}" == *"over length"* ]]; then
+    echo "PASS: over the cap: block message names the length"
+  else
+    echo "FAIL: over the cap: block message names the length — got: ${msg}"
+    fail=1
+  fi
+  # A checker error is not a verdict on the text, and also blocks.
+  ERR="${SANDBOX}/err.md"
+  printf 'CHECKERR but approved.\n' >"${ERR}"
+  cp "${ERR}" "${GATE_REVIEW_DIR}/approved/errlabel"
+  assert_gate "checker error: blocked" 1 pr create --title t --body-file "${ERR}"
+  if [[ "${msg}" == *"over its length cap"* && "${msg}" != *"not been visually approved"* ]]; then
+    echo "PASS: over the cap: headline says over its length cap"
+  else
+    echo "FAIL: over the cap: headline says over its length cap — got: ${msg}"
+    fail=1
+  fi
+  msg="$(_gh_wrapper_approval_gate pr create --title t --body-file "${ERR}" 2>&1 || true)"
+  if [[ "${msg}" == *"length checker failed"* && "${msg}" == *"not a verdict on the text"* && "${msg}" != *"not been visually approved"* ]]; then
+    echo "PASS: checker error: headline says the checker failed"
+  else
+    echo "FAIL: checker error: headline says the checker failed — got: ${msg}"
+    fail=1
+  fi
+  # Fail closed when personify is not installed.
+  mv "${CLAUDE_CONFIG_DIR}/plugins/installed_plugins.json" "${CLAUDE_CONFIG_DIR}/plugins/installed_plugins.json.hidden"
+  assert_gate "personify not installed: blocked" 1 pr create --title t --body-file "${BODY}"
+  mv "${CLAUDE_CONFIG_DIR}/plugins/installed_plugins.json.hidden" "${CLAUDE_CONFIG_DIR}/plugins/installed_plugins.json"
+  assert_gate "personify restored: allowed" 0 pr create --title t --body-file "${BODY}"
+else
+  echo "SKIP: length cap kind cases — ${REAL_GATE} predates check --kind"
 fi
 
 # --- time-boxed suspension ----------------------------------------------------
