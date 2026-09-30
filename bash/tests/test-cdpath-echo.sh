@@ -193,8 +193,9 @@ cat >"${WORKDIR}/drift-gh.sh" <<'DRIFT'
 source "${REPO_ROOT}/bash/gh-wrapper.sh" >/dev/null 2>&1
 printf '%s' "${_GH_WRAPPER_BEACON_DIR_DEFAULT:-}"
 DRIFT
+# ${BASH}: a bare bash on /usr/bin:/bin is macOS 3.2, where the wrapper only defines a delegating gh().
 drift_gh="$(env -i HOME="${drift_home}" REPO_ROOT="${REPO_ROOT}" \
-  PATH="/usr/bin:/bin" bash --norc "${WORKDIR}/drift-gh.sh")"
+  PATH="/usr/bin:/bin" "${BASH}" --norc "${WORKDIR}/drift-gh.sh")"
 
 # install.sh: extract its BEACON_WORKDIR assignment and evaluate that single
 # line, rather than running the installer (which would mutate the machine).
