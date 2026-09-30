@@ -817,6 +817,42 @@ _gh_wrapper_gate_destination() {
   return 0
 }
 
+# --- approval gate: length cap kind --------------------------------------------
+# The personify length-cap kind for a gated call, from its subcommand. A copy of
+# the table in claude-config's hook-block-personify.sh (_gh_cap_kind and
+# _api_cap_kind): the two must agree, so change them together. Copied rather
+# than sourced so this wrapper does not depend on claude-config's internals.
+#
+#   pr create, pr edit         -> pr
+#   issue create, issue edit   -> issue
+#   pr comment, pr review,
+#   issue comment              -> pr-comment
+#   api repos/.../pulls/N/comments -> line-comment
+#   any other api              -> pr-comment
+#
+# gh api is classified from the endpoint word alone, never from a body-file
+# path, so a path cannot select a looser cap. Titles are not measured here: the
+# wrapper serves Andrew's own gh calls, and title caps apply to the agent path.
+# Takes the caller's `sub` and `subsub`.
+_gh_wrapper_cap_kind() {
+  local ep
+  case "${sub}/${subsub}" in
+    pr/create | pr/edit) printf 'pr\n' ;;
+    issue/create | issue/edit) printf 'issue\n' ;;
+    api/*)
+      ep="${subsub}"
+      [[ "${ep}" =~ ^https?://[^/]+(/.*)$ ]] && ep="${BASH_REMATCH[1]}"
+      ep="${ep#/}"
+      if [[ "${ep}" == repos/* && "${ep}" =~ /pulls/[0-9]+/comments ]]; then
+        printf 'line-comment\n'
+      else
+        printf 'pr-comment\n'
+      fi
+      ;;
+    *) printf 'pr-comment\n' ;;
+  esac
+}
+
 # --- approval gate -------------------------------------------------------------
 # Refuse to write PR or issue body text unless Andrew has visually approved
 # those exact bytes. Approval lives on disk in gate-review's approved/
@@ -842,6 +878,10 @@ _gh_wrapper_gate_destination() {
 # Each body's destination repository goes to check with it (see
 # _gh_wrapper_gate_destination), and check routes it by gate-rules.conf: a
 # Pangram-gated repository also needs a check record for the exact bytes.
+#
+# Each body is also measured against its length cap: check gets --kind from
+# _gh_wrapper_cap_kind, so an approved body over the cap still blocks, and a
+# machine without personify blocks (check reports a checker error).
 #
 # TITLES stay ungated -- one line by nature. A subcommand carrying no body flag
 # passes, so `gh pr edit --add-label` and `gh pr review --approve` are unaffected.
@@ -942,8 +982,9 @@ _gh_wrapper_approval_gate() {
     return 0
   fi
 
-  local dest_repo="" also_cwd=0 err="" unchecked=0
+  local dest_repo="" also_cwd=0 err="" unchecked=0 lenblock="" kind
   local -a dest=()
+  kind="$(_gh_wrapper_cap_kind)"
   if [[ "${inline}" == "1" ]]; then
     reason="text given inline; only a file can be verified"
   elif ! _gh_wrapper_gate_destination; then
@@ -955,7 +996,7 @@ _gh_wrapper_approval_gate() {
   else
     # check routes the text by destination (gate-rules.conf): a Pangram-gated
     # repository also needs a check record for these exact bytes.
-    dest=(--dir "${PWD}")
+    dest=(--kind "${kind}" --dir "${PWD}")
     [[ -n "${dest_repo}" ]] && dest+=(--repo "${dest_repo}")
     # Every named file must verify: an approved first body must not carry an
     # unapproved second one through.
@@ -968,10 +1009,12 @@ _gh_wrapper_approval_gate() {
       elif [[ ! -x "${gate}" ]]; then
         reason="gate-review.sh missing at ${gate}; cannot verify"
       elif ! err="$("${gate}" check "${body_file}" "${dest[@]}" 2>&1)" \
-        || { [[ "${also_cwd}" == "1" ]] && ! err="$("${gate}" check "${body_file}" --dir "${PWD}" 2>&1)"; }; then
+        || { [[ "${also_cwd}" == "1" ]] && ! err="$("${gate}" check "${body_file}" --kind "${kind}" --dir "${PWD}" 2>&1)"; }; then
         reason="${err##*$'\n'}"
         [[ -n "${reason}" ]] || reason="the bytes in ${body_file} do not match anything approved"
         [[ "${reason}" == *"no Pangram check ran"* ]] && unchecked=1
+        [[ "${reason}" == *"over length"* ]] && lenblock="over"
+        [[ "${reason}" == *"length checker error"* ]] && lenblock="error"
       fi
       # Router notes (repo or author unresolved) stay visible. On a failure
       # the last line is the reason, printed in the block message below.
@@ -997,6 +1040,27 @@ _gh_wrapper_approval_gate() {
       echo "[gh] Run the personify check on this exact file, then re-run the same command:"
       echo "[gh]"
       echo "[gh]   ${hint}"
+    } >&2
+    return 1
+  fi
+
+  if [[ "${lenblock}" == "over" ]]; then
+    {
+      echo "[gh] 🛑 BLOCKED: ${sub} ${subsub} body is over its length cap."
+      echo "[gh]"
+      echo "[gh]   reason: ${reason}"
+      echo "[gh]"
+      echo "[gh] Rewrite the body shorter, then stage, approve and re-run."
+    } >&2
+    return 1
+  fi
+  if [[ "${lenblock}" == "error" ]]; then
+    {
+      echo "[gh] 🛑 BLOCKED: ${sub} ${subsub} body: the length checker failed. This is not a verdict on the text."
+      echo "[gh]"
+      echo "[gh]   reason: ${reason}"
+      echo "[gh]"
+      echo "[gh] Fix the checker (is personify installed?) and re-run the same command."
     } >&2
     return 1
   fi
@@ -1429,6 +1493,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_approval_gate _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_approval_gate _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
 fi
