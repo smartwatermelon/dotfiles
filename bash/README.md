@@ -89,10 +89,11 @@ floor.
 
 ### When these run automatically
 
-- **On push** — `.project-hooks/pre-push` runs the suite via the pre-push hook's
-  project-extension seam (see `git/hooks/pre-push`). A failure blocks the push.
-- **In CI** — `.github/workflows/bash-tests.yml` runs it on every pull request
-  and on pushes to `main`. It uses a **macOS** runner: the tests assert against
+- **On push** — `.project-hooks/pre-push` runs only
+  `test-git-config-hygiene.sh`, which checks this checkout's own `.git/config`
+  and so means nothing in CI. A failure blocks the push.
+- **In CI** — `.github/workflows/bash-tests.yml` runs the full suite on every
+  pull request, as a required check. It uses a **macOS** runner: the tests assert against
   macOS assumptions (Homebrew-rooted PATH tiers, macOS-only paths in `env.sh`),
   so a Linux runner would fail for reasons that say nothing about the code.
 
