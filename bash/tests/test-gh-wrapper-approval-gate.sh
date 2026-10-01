@@ -132,6 +132,11 @@ assert_gate "pr merge (not a text surface)" 0 pr merge 5 --squash
 assert_gate "issue list (not a text surface)" 0 issue list
 assert_gate "pr view (not a text surface)" 0 pr view 5
 assert_gate "pr review --request-changes (no body)" 0 pr review 5 --request-changes
+# --fill body is already-gated commit text: ungated by design (#355).
+assert_gate "pr create --fill (commit text, by design)" 0 pr create --fill
+assert_gate "pr create -f (commit text, by design)" 0 pr create -f
+assert_gate "pr create --fill-first (commit text, by design)" 0 pr create --fill-first
+assert_gate "pr create --fill --body inline still blocked" 1 pr create --fill --body "inline"
 assert_gate "api GET, no fields" 0 api repos/o/r/pulls/5
 assert_gate "api non-body field" 0 api repos/o/r/issues/5 -X PATCH -f state=closed
 assert_gate "api title field (titles stay ungated)" 0 api repos/o/r/issues -f title=t
