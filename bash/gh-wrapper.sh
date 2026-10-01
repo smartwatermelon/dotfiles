@@ -991,6 +991,7 @@ _gh_wrapper_approval_gate() {
   esac
 
   # No body flag at all: no prose is being written. Titles and labels pass.
+  # --fill/-f is ungated on purpose: its body is commit text that already passed the gate (#355).
   if [[ "${inline}" == "0" && "${#files[@]}" == "0" ]]; then
     return 0
   fi
