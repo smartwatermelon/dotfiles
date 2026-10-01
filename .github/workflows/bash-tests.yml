@@ -1,10 +1,10 @@
 name: Bash Tests
 
+# The only full-suite run, and a required check. No push trigger: strict
+# protection means the PR run already tested what merges.
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-  push:
-    branches: [main]
 
 permissions:
   contents: read

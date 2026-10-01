@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
 # Project-local pre-push extension (see git/hooks/pre-push,
-# run_project_extensions). Runs the bash test suite so a regression is caught
-# before it reaches CI rather than after — the gap smartwatermelon/dotfiles#221
-# was filed about.
-#
-# Pre-push rather than pre-commit deliberately: the suite spawns real git
-# repos, clones, and subprocesses (a few seconds), which is fine once per push
-# but a tax on every commit in a multi-commit branch. Pre-push is also the
-# boundary that matters here, since it is the last point before the code
-# becomes someone else's problem.
+# run_project_extensions). The full suite runs once, in CI (bash-tests, a
+# required check). Only the local .git/config check (dotfiles#239) runs here.
 set -uo pipefail
 unset CDPATH
 
@@ -29,5 +22,5 @@ if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); 
   done
 fi
 
-echo "Running bash test suite (bash/tests/run-tests.sh)..."
-exec "${runner_bash}" "${REPO_ROOT}/bash/tests/run-tests.sh"
+echo "Checking local git config hygiene (full suite runs in CI)..."
+exec "${runner_bash}" "${REPO_ROOT}/bash/tests/run-tests.sh" git-config-hygiene
