@@ -90,7 +90,6 @@ rules:
   # to add the local name here. See #142 and the README's zizmor section.
   excessive-permissions:
     ignore:
-      - claude-blocking-review.yml # caller for claude-blocking-review.yml
       - claude.yml # caller for claude-assistant.yml
       - dependabot-auto-merge.yml # caller for dependabot-auto-merge.yml
       - standards-check.yml # caller for standards-check.yml
