@@ -131,17 +131,15 @@ _gh_wrapper_resolve_owner() {
     return 0
   fi
 
-  # `gh api` takes no -R; the repo it acts on is in the endpoint. The first
-  # argument shaped like `repos/OWNER/...` (leading slash optional) names the
-  # owner. Anchoring on `repos/` keeps flag values (`-X GET`, `-f k=v`,
-  # `--jq .x`) from matching. A `{owner}` placeholder is not an owner: gh fills
-  # it from cwd, so cwd decides, as below. smartwatermelon/claude-wrapper#126.
+  # gh api names its owner in the endpoint: repos/, orgs/ or users/ OWNER.
+  # `{owner}` means cwd. claude-wrapper#126, dotfiles#396.
   if [[ -z "${repo_flag_value}" && "${1:-}" == "api" ]]; then
-    local api_owner_re='^/?repos/([^/{}]+)(/|$)'
+    # The ^ anchor keeps flag values like `-f k=v` from matching.
+    local api_owner_re='^/?(repos|orgs|users)/([^/{}]+)(/|$)'
     for arg in "${@:2}"; do
       [[ "${arg}" == "--" ]] && break
       if [[ "${arg}" =~ ${api_owner_re} ]]; then
-        printf '%s\n' "${BASH_REMATCH[1]}"
+        printf '%s\n' "${BASH_REMATCH[2]}"
         return 0
       fi
     done

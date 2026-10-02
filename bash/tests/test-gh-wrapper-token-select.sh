@@ -6,8 +6,7 @@
 #      GH_TOKEN_NOS / GH_TOKEN_TWM variable that is set, that token is used for
 #      the call. It replaces the old owner-mismatch refusal, and the
 #      CLAUDE_GH_TOKEN_ROUTER hook is gone.
-#   2. `gh api repos/OWNER/...` (with or without a leading slash) resolves
-#      OWNER from the endpoint, not from cwd.
+#   2. `gh api repos|orgs|users/OWNER/...` resolves OWNER from the endpoint.
 #   3. With no owner resolved, the launch token is kept; if the call fails, one
 #      stderr line tells the agent to stop and ask instead of guessing. The exit
 #      code is unchanged.
@@ -186,6 +185,47 @@ for mode in standalone function; do
     _pass "${mode}: api repos/{owner}/... falls back to cwd"
   else
     _fail "${mode}: api placeholder: rc=${rc} token=${logged} err=${err}"
+  fi
+
+  # (2b) orgs/OWNER and users/OWNER name an owner too (dotfiles#396).
+  for endpoint in orgs/smartwatermelon/repos /orgs/smartwatermelon/repos \
+    users/smartwatermelon/repos /users/smartwatermelon/repos; do
+    _run "${mode}" "${TWM}" GH_TOKEN=launch-stub CLAUDE_GH_TOKEN_LOGIN=twistedmelonman GH_TOKEN_TWM=twm-stub \
+      GH_TOKEN_SWM=swm-stub -- api "${endpoint}"
+    if [[ "${rc}" -eq 0 && "${logged}" == "swm-stub" ]]; then
+      _pass "${mode}: api ${endpoint} selects GH_TOKEN_SWM"
+    else
+      _fail "${mode}: api ${endpoint}: rc=${rc} token=${logged} err=${err}"
+    fi
+  done
+
+  # Placeholders under orgs/ and users/ fall back to cwd, like repos/.
+  for endpoint in 'orgs/{owner}/repos' 'users/{owner}/repos'; do
+    _run "${mode}" "${TWM}" GH_TOKEN=launch-stub CLAUDE_GH_TOKEN_LOGIN=twistedmelonman GH_TOKEN_TWM=twm-stub \
+      GH_TOKEN_SWM=swm-stub -- api "${endpoint}"
+    if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" ]]; then
+      _pass "${mode}: api ${endpoint} falls back to cwd"
+    else
+      _fail "${mode}: api ${endpoint}: rc=${rc} token=${logged} err=${err}"
+    fi
+  done
+
+  # A flag value shaped like an endpoint does not name an owner.
+  _run "${mode}" "${TWM}" GH_TOKEN=launch-stub CLAUDE_GH_TOKEN_LOGIN=twistedmelonman GH_TOKEN_TWM=twm-stub \
+    GH_TOKEN_SWM=swm-stub -- api graphql -f q=orgs/smartwatermelon
+  if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" ]]; then
+    _pass "${mode}: api -f q=orgs/Z does not match"
+  else
+    _fail "${mode}: api -f q=orgs/Z: rc=${rc} token=${logged} err=${err}"
+  fi
+
+  # repos/X/Y still resolves X when orgs/ appears later; first match wins.
+  _run "${mode}" "${TWM}" GH_TOKEN=launch-stub CLAUDE_GH_TOKEN_LOGIN=twistedmelonman GH_TOKEN_TWM=twm-stub \
+    GH_TOKEN_SWM=swm-stub GH_TOKEN_NOS=nos-stub -- api repos/smartwatermelon/x orgs/nightowlstudiollc/repos
+  if [[ "${rc}" -eq 0 && "${logged}" == "swm-stub" ]]; then
+    _pass "${mode}: first matching endpoint wins"
+  else
+    _fail "${mode}: first match: rc=${rc} token=${logged} err=${err}"
   fi
 
   # No GH_TOKEN: the keyring stays in charge; a per-owner var alone does not
