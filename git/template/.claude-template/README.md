@@ -25,15 +25,17 @@ The scaffold is generated content the hook can reproduce on demand, and `setting
 
 The hook only writes into a genuinely fresh clone or init that hasn't already decided. If `.claude/` was already tracked, or already ignored by any mechanism, it leaves that decision alone.
 
-If part of this directory *is* meant to be shared with the team — a `skills/` directory, a `pre-launch.sh`, a secrets template — negate those specific paths and commit them:
+If part of this directory *is* meant to be shared with the team — a `skills/` directory, a `pre-launch.sh`, a secrets template — replace the `.claude/` line with `.claude/*`, negate those specific paths, and commit them:
 
 ```gitignore
-.claude/
+.claude/*
 !.claude/skills/
 !.claude/pre-launch.sh
 ```
 
-To track the whole directory instead, remove the `.claude/` line and `git add .claude`.
+The `*` matters. Git never re-includes a file whose parent directory is excluded, so a negation under a plain `.claude/` line has no effect.
+
+Fleet policy (smartwatermelon/dev-env#178) is to ignore `.claude/` by default and share files only this way; the shared `standards-check` warns when a repo does otherwise.
 
 Run `git check-ignore -v .claude/` to see which file and line is doing the ignoring.
 
