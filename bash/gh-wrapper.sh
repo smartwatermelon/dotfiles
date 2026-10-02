@@ -552,6 +552,8 @@ _gh_wrapper_block_bypass() {
     return 1
   fi
 
+  _gh_wrapper_block_off_org_promotion "$@" || return 1
+
   return 0
 }
 
@@ -617,6 +619,141 @@ _gh_wrapper_maybe_review() {
   return 0
 }
 
+# Sets the caller's `sub` and `subsub` to the first two non-flag words. Shared by both guards.
+_gh_wrapper_find_subcommand() {
+  local skip_next=0 arg
+  for arg in "$@"; do
+    [[ "${arg}" == "--" ]] && break
+    if [[ "${skip_next}" == "1" ]]; then
+      skip_next=0
+      continue
+    fi
+    case "${arg}" in
+      -R | --repo | --hostname | --config-dir | --token) skip_next=1 ;;
+      -R*) ;;
+      --*=*) ;;
+      -*) ;;
+      *)
+        if [[ -z "${sub}" ]]; then
+          sub="${arg}"
+        else
+          subsub="${arg}"
+          break
+        fi
+        ;;
+    esac
+  done
+  return 0
+}
+
+# True (0) when $1 is one of the three owners this environment is scoped to.
+_gh_wrapper_owner_in_org() {
+  case "${1,,}" in
+    smartwatermelon | nightowlstudiollc | twistedmelonman) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Off-org guard (#339): refuses `gh pr ready` and an undrafted `gh api` POST to pulls. Returns 1 to block.
+_gh_wrapper_block_off_org_promotion() {
+  local sub="" subsub="" owner arg
+
+  _gh_wrapper_find_subcommand "$@"
+
+  if [[ "${sub}" == "pr" && "${subsub}" == "ready" ]]; then
+    for arg in "$@"; do
+      [[ "${arg}" == "--" ]] && break
+      [[ "${arg}" == "--undo" ]] && return 0 # back to draft is allowed
+    done
+    owner="$(_gh_wrapper_resolve_owner "$@")"
+    if [[ -n "${owner}" ]] && ! _gh_wrapper_owner_in_org "${owner}"; then
+      echo "[gh] BLOCKED: 'gh pr ready' on off-org repo owner '${owner}'." >&2
+      echo "[gh] Only the human promotes off-org PRs out of draft, via the GitHub UI." >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ "${sub}" == "api" ]]; then
+    local endpoint="" method="" implicit_post=0 draft="" skip_next="" field seen_api=0
+    local pulls_re='^/?repos/[^/]+/[^/]+/pulls/?(\?.*)?$'
+    for arg in "$@"; do
+      [[ "${arg}" == "--" ]] && break
+      if [[ "${seen_api}" == "0" ]]; then
+        [[ "${arg}" == "api" ]] && seen_api=1
+        continue
+      fi
+      field=""
+      case "${skip_next}" in
+        method)
+          method="${arg}"
+          skip_next=""
+          continue
+          ;;
+        field)
+          field="${arg}"
+          skip_next=""
+          ;;
+        skip)
+          skip_next=""
+          continue
+          ;;
+        *) ;;
+      esac
+      if [[ -z "${field}" ]]; then
+        case "${arg}" in
+          -X | --method) skip_next="method" ;;
+          --method=*) method="${arg#--method=}" ;;
+          -X?*) method="${arg#-X}" ;;
+          -f | -F | --field | --raw-field)
+            implicit_post=1
+            skip_next="field"
+            ;;
+          --field=* | --raw-field=*)
+            implicit_post=1
+            field="${arg#*=}"
+            ;;
+          -f?* | -F?*)
+            implicit_post=1
+            field="${arg:2}"
+            ;;
+          --input)
+            implicit_post=1
+            draft="unknown" # body is in a file; draft=true cannot be verified
+            skip_next="skip"
+            ;;
+          --input=*)
+            implicit_post=1
+            draft="unknown"
+            ;;
+          -H | --header | -q | --jq | -t | --template | --cache | -p | --preview | --hostname) skip_next="skip" ;;
+          -*) ;;
+          *) [[ -z "${endpoint}" ]] && endpoint="${arg}" ;;
+        esac
+      fi
+      if [[ "${field}" == draft=* && "${draft}" != "unknown" ]]; then
+        draft="${field#draft=}" # last draft field wins, as in gh
+      fi
+    done
+
+    [[ "${endpoint}" =~ ${pulls_re} ]] || return 0
+    method="${method^^}"
+    if [[ "${method}" != "POST" && (-n "${method}" || "${implicit_post}" == "0") ]]; then
+      return 0
+    fi
+    [[ "${draft}" == "true" ]] && return 0
+    owner="$(_gh_wrapper_resolve_owner "$@")"
+    if [[ -n "${owner}" ]] && ! _gh_wrapper_owner_in_org "${owner}"; then
+      echo "[gh] BLOCKED: 'gh api' POST to ${endpoint} on off-org owner '${owner}' without draft=true." >&2
+      echo "[gh] Off-org PRs must be created as drafts; only the human promotes them, via the GitHub UI." >&2
+      echo "[gh] Pass '-F draft=true' as a field." >&2
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
 # Hard, mechanical guard: a PR created against a repo outside the two orgs
 # this environment is scoped to (smartwatermelon/nightowlstudiollc) must
 # land as a draft, unconditionally — no AI judgement call, no opt-out flag,
@@ -639,45 +776,18 @@ _gh_wrapper_maybe_review() {
 # Parses args with the same sub/subsub walk as _gh_wrapper_maybe_review, so
 # `pr create` detection can't drift between the two.
 _gh_wrapper_force_draft_for_off_org() {
-  local sub="" subsub="" skip_next=0 arg owner
+  local sub="" subsub="" owner
 
-  for arg in "$@"; do
-    [[ "${arg}" == "--" ]] && break
-    if [[ "${skip_next}" == "1" ]]; then
-      skip_next=0
-      continue
-    fi
-    case "${arg}" in
-      -R | --repo | --hostname | --config-dir | --token) skip_next=1 ;;
-      -R*) ;;
-      --*=*) ;;
-      -*) ;;
-      *)
-        if [[ -z "${sub}" ]]; then
-          sub="${arg}"
-        else
-          subsub="${arg}"
-          break
-        fi
-        ;;
-    esac
-  done
+  _gh_wrapper_find_subcommand "$@"
 
-  if [[ "${sub}" == "pr" && "${subsub}" == "create" ]]; then
+  # `pr new` is the alias of `pr create`.
+  if [[ "${sub}" == "pr" && ("${subsub}" == "create" || "${subsub}" == "new") ]]; then
     owner="$(_gh_wrapper_resolve_owner "$@")"
-    if [[ -n "${owner}" ]]; then
-      case "${owner,,}" in
-        smartwatermelon | nightowlstudiollc | twistedmelonman) ;; # in-org: no change
-        *)
-          # Off-org target: force --draft. Don't bother deduplicating if the
-          # caller already passed --draft (or --draft=false, which gh doesn't
-          # support as a real flag) — an extra --draft is harmless, and the
-          # point is nothing the caller does can produce a non-draft PR here.
-          printf '%s\0' "$@"
-          printf -- '--draft\0'
-          return 0
-          ;;
-      esac
+    if [[ -n "${owner}" ]] && ! _gh_wrapper_owner_in_org "${owner}"; then
+      # Off-org: force --draft. A duplicate --draft is harmless; the caller cannot opt out.
+      printf '%s\0' "$@"
+      printf -- '--draft\0'
+      return 0
     fi
   fi
 
@@ -1525,6 +1635,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_approval_gate _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
 fi
