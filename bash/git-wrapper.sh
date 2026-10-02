@@ -45,6 +45,7 @@ git() {
   local c_flag_dir=""
   local found_subcommand=false
   local next_is_c_arg=false
+  local skip_next=false
 
   for arg in "$@"; do
     # Capture argument after -C flag
@@ -54,29 +55,61 @@ git() {
       continue
     fi
 
-    # Check for -C flag (git only supports "-C <path>" with space, not "-C<path>")
-    if [[ "${arg}" == "-C" ]]; then
-      next_is_c_arg=true
+    # Drop the value of an option that takes it as a separate argument (see
+    # the two option lists below)
+    if [[ "${skip_next}" == "true" ]]; then
+      skip_next=false
       continue
     fi
 
-    # Skip other flags
-    if [[ "${arg}" == -* ]]; then
-      continue
-    fi
-
-    # First non-flag is the subcommand
     if [[ "${found_subcommand}" == "false" ]]; then
+      case "${arg}" in
+        # git only supports "-C <path>" with space, not "-C<path>"
+        -C)
+          next_is_c_arg=true
+          continue
+          ;;
+        # Separate-value global options, or `-c k=v init` reads k=v as the
+        # subcommand (#394); --exec-path only takes =
+        -c | --git-dir | --work-tree | --namespace | --config-env)
+          skip_next=true
+          continue
+          ;;
+        # Any other flag, including the single-token --opt=value form
+        -*)
+          continue
+          ;;
+        # Not a flag: the subcommand, handled below
+        *) ;;
+      esac
+
+      # First non-flag is the subcommand
       [[ "${arg}" == "init" ]] && is_init=true
       found_subcommand=true
       continue
     fi
 
-    # Second non-flag (after "init") is the directory
-    if [[ "${is_init}" == "true" && -z "${init_dir}" ]]; then
-      init_dir="${arg}"
-      break
-    fi
+    # Only init's arguments matter past this point
+    [[ "${is_init}" == "true" ]] || break
+
+    case "${arg}" in
+      # Separate-value init options, or `init -b main <dir>` reads main as
+      # the target dir (#394); --shared only takes =
+      -b | --initial-branch | --template | --separate-git-dir | --object-format | --ref-format)
+        skip_next=true
+        continue
+        ;;
+      # Any other flag, including the single-token --opt=value form
+      -*)
+        continue
+        ;;
+      # Not a flag: the directory, handled below
+      *) ;;
+    esac
+
+    # First non-flag after "init" is the directory
+    init_dir="${arg}"
+    break
   done
 
   # Determine the target directory: -C flag takes precedence, then init_dir
@@ -119,8 +152,10 @@ git() {
   # This makes git rev-parse work from inside the new repo
   if [[ -n "${target_dir}" ]]; then
     if ! CDPATH='' cd "${target_dir}" 2>/dev/null; then
-      echo "Error: Cannot cd to ${target_dir}" >&2
-      return 1 # Return failure, not git_result
+      # init already succeeded; failing here stops a `set -e` caller over
+      # a repo that exists, so warn and pass git's result through (#394)
+      echo "Warning: cannot cd to ${target_dir}; skipping post-checkout hook" >&2
+      return "${git_result}"
     fi
   fi
 
