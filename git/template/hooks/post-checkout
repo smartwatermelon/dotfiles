@@ -18,7 +18,10 @@
 # and only with those synthesized values. It is NOT reachable when git is
 # called by absolute path or from a shell without the wrapper.
 #
-# We only want to run on initial checkout, not on every branch switch.
+# The .editorconfig seed runs on any branch checkout and carries its own guard.
+# The .claude/ scaffold and its ignore entry run only on a fresh clone or init:
+# not on `git checkout -b`, and not on `git worktree add` (see
+# is_fresh_clone_or_init below).
 
 set -euo pipefail
 
@@ -106,6 +109,44 @@ seed_editorconfig() {
 
 seed_editorconfig || true
 
+# Scaffold only on a fresh clone or init -- never on a branch switch or a new
+# linked worktree.
+#
+# post-checkout also fires with $3 == 1 on `git checkout -b` and on
+# `git worktree add`, and in both of those the repo already had its chance to
+# decide. Two signals separate them:
+#   0a. prev_head ($1) is the null SHA on clone and init, but a real commit on
+#       a branch switch, so it rules out `git checkout -b`.
+#   0b. a *linked* worktree also reports the null SHA, so prev_head alone is
+#       not enough. A linked worktree's --git-dir differs from its
+#       --git-common-dir (it lives at <repo>/.git/worktrees/<name>), whereas a
+#       main work tree's two agree. Its .claude/ is absent because the parent
+#       repo ignores it, so the "does .claude/ exist" no-op below does not
+#       fire.
+#
+# These guards used to protect only the ignore entry, so the copy itself ran
+# on every new branch and every new worktree and left the scaffold behind as
+# untracked files. In a linked worktree that also stops `git worktree remove`,
+# and with it `gh pr merge --delete-branch` (smartwatermelon/dotfiles#392).
+#
+# The wrapper's synthesized init call passes the null SHA from the main work
+# tree, so it passes both guards. If git cannot answer, treat the checkout as
+# not fresh: this hook is deliberately reluctant to write.
+is_fresh_clone_or_init() {
+  # Guard 0a: a branch switch passes the commit it moved away from.
+  [[ "${_prev_head}" =~ ^0+$ ]] || return 1
+
+  # Guard 0b: a linked worktree's own git dir differs from the shared one.
+  local git_dir="" common_dir=""
+  git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  [[ "${git_dir}" == "${common_dir}" ]]
+}
+
+if ! is_fresh_clone_or_init; then
+  exit 0
+fi
+
 # Only run if .claude/ doesn't already exist
 # This prevents overwriting existing project infrastructure
 if [[ -d ".claude" ]]; then
@@ -136,18 +177,11 @@ cp -r "${CLAUDE_TEMPLATE}" ".claude"
 # branch switch on this machine, so it is deliberately reluctant to write.
 # Four guards, in order of what they rule out:
 #
-#   0. Not a fresh clone/init -- post-checkout also fires with $3 == 1 on
-#      `git checkout -b` and on `git worktree add`, and in both of those the repo
-#      already had its chance to decide. Two signals separate them:
-#        - prev_head ($1) is the null SHA on clone and init, but a real
-#          commit on a branch switch, so it rules out `git checkout -b`.
-#        - a *linked* worktree also reports the null SHA, so prev_head alone
-#          is not enough. A linked worktree's --git-dir differs from its
-#          --git-common-dir (it lives at <repo>/.git/worktrees/<name>),
-#          whereas a main work tree's two agree. Its .claude/ is absent
-#          because the parent repo ignores it, so the "does .claude/ exist"
-#          no-op above does not fire, and without this check we would rewrite
-#          an established repo's committed, *tracked* .gitignore.
+#   0. Not a fresh clone/init -- applied above, before the copy, by
+#      is_fresh_clone_or_init. By the time this function runs, the checkout is
+#      known to be a clone or init in a main work tree. Without that guard, a
+#      new linked worktree would rewrite an established repo's committed,
+#      *tracked* .gitignore.
 #   1. Already tracked -- if any path under .claude/ is in the index, the repo
 #      chose to track it. Adding an ignore line there would be actively wrong:
 #      gitignore does not affect already-tracked files, so the repo would
@@ -177,21 +211,7 @@ add_claude_gitignore_entry() {
   # Not a work tree (or git is unhappy) -- do nothing.
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
 
-  # Guard 0a: prev_head is the null SHA only on a fresh clone or init; a
-  # branch switch passes the commit it moved away from.
-  if [[ ! "${_prev_head}" =~ ^0+$ ]]; then
-    return 0
-  fi
-
-  # Guard 0b: a linked worktree also reports the null SHA, so exclude it by
-  # comparing its own git dir against the shared one -- they differ only for
-  # a linked worktree.
-  local git_dir="" common_dir=""
-  git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null) || return 0
-  common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
-  if [[ "${git_dir}" != "${common_dir}" ]]; then
-    return 0
-  fi
+  # Guard 0 (0a and 0b) already ran, before the copy.
 
   # Guard 1: any path under .claude/ already tracked in the index.
   local tracked=""

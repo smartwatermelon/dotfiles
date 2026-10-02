@@ -16,6 +16,7 @@
 #      on clone/init but a real commit on a branch switch; a linked worktree
 #      also reports the null SHA, so it is excluded by comparing --git-dir
 #      against --git-common-dir.
+#      Since #392 it gates the scaffold copy too, not only the ignore entry.
 #   1. already tracked        -- skip (gitignore does not affect tracked files)
 #   2. already ignored        -- skip, checking .gitignore AND
 #      .git/info/exclude via `git check-ignore`
@@ -190,6 +191,10 @@ actual="$(git -C "${origin_c}" status --porcelain -- .gitignore)"
 assert_eq "branch switch: .gitignore not left modified" "" "${actual}"
 actual="$(count_entries "${origin_c}/.git/info/exclude")"
 assert_eq "branch switch: nothing written to .git/info/exclude either" "0" "${actual}"
+# Guard 0 gates the copy too: before #392, `git checkout -b` left an untracked
+# .claude/ scaffold.
+actual="$(exists -d "${origin_c}/.claude")"
+assert_eq "branch switch: no .claude/ scaffold copied" "no" "${actual}"
 
 # --- Case D: a new linked worktree of an established repo -----------------
 # Guard 0b. A linked worktree reports the null SHA just like a clone, and its
@@ -229,6 +234,9 @@ actual="$(count_entries "${origin_d2}/.git/info/exclude")"
 assert_eq "worktree of established repo: nothing written to info/exclude" "0" "${actual}"
 actual="$(count_entries "${origin_d2}/.gitignore")"
 assert_eq "worktree of established repo: tracked .gitignore untouched" "0" "${actual}"
+# #392: a leftover scaffold here is untracked, and blocks `git worktree remove`.
+actual="$(exists -d "${origin_d2}/.claude/worktrees/wt2/.claude")"
+assert_eq "worktree of established repo: no .claude/ scaffold copied" "no" "${actual}"
 
 # --- Case E: already-tracked .claude/ is left alone ------------------------
 # Guard 1. gitignore has no effect on tracked files, so writing the line here
@@ -278,10 +286,15 @@ actual="$(exists -f "${repo_g}/.gitignore")"
 assert_eq "already ignored via info/exclude: no .gitignore created" "no" "${actual}"
 
 # --- Case H: running twice does not duplicate the entry --------------------
+# The first run is also git-wrapper.sh's synthesized init call, which must
+# still scaffold.
 repo_h="${WORKDIR}/repo-h"
 git -c init.templateDir="" init -q -b main "${repo_h}"
 git -C "${repo_h}" config init.templateDir "${TEMPLATE_DIR}"
-run_hook "${repo_h}" >/dev/null
+rc="$(run_hook "${repo_h}")"
+assert_eq "wrapper init: hook exits 0" "0" "${rc}"
+actual="$(exists -d "${repo_h}/.claude")"
+assert_eq "wrapper init: .claude/ scaffolded" "yes" "${actual}"
 rm -rf "${repo_h:?}/.claude"
 rc="$(run_hook "${repo_h}")"
 assert_eq "second run: hook exits 0" "0" "${rc}"
