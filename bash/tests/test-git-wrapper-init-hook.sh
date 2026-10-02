@@ -9,7 +9,8 @@
 # parameters.
 # Note: -C is git's global pre-subcommand flag (`git -C <dir> init`), not an
 # init-specific flag. The wrapper's target_dir resolution logic handles this
-# and is tested below in Case 3.
+# and is tested below in Case 3. Cases 4-9 cover option values the wrapper
+# must not read as the target directory or subcommand (dotfiles#394).
 set -euo pipefail
 
 unset CDPATH
@@ -128,6 +129,117 @@ mkdir -p "${repo3_parent}"
 install_hook "${repo3}"
 (cd "${repo3_parent}" && git -C "${repo3_name}" init -q)
 assert_hook_ran "git -C <dir> init triggers post-checkout hook" "${repo3}"
+
+# Cases 4-9: option values are not the init dir or subcommand (#394)
+# rc is recorded, not left to set -e, so a regression shows every case
+
+assert_rc_zero() {
+  local desc="$1" rc="$2"
+  if [[ "${rc}" -eq 0 ]]; then
+    echo "PASS: ${desc} exits 0"
+  else
+    echo "FAIL: ${desc} exited ${rc}, expected 0"
+    fail=1
+  fi
+}
+
+assert_hook_not_ran() {
+  local desc="$1" repo_dir="$2"
+  local marker="${repo_dir}/.git/post-checkout-ran"
+  if [[ -f "${marker}" ]]; then
+    echo "FAIL: ${desc} — expected ${marker} NOT to exist"
+    fail=1
+  else
+    echo "PASS: ${desc}"
+  fi
+}
+
+# Case 4: `git init -b main <dir>` — "main" is the branch, not the target
+repo4="${WORKDIR}/repo4"
+(cd "${WORKDIR}" && command git init -q repo4)
+install_hook "${repo4}"
+rc=0
+(cd "${WORKDIR}" && git init -q -b main repo4) || rc=$?
+assert_rc_zero "git init -b main <dir>" "${rc}"
+assert_hook_ran "git init -b main <dir> triggers hook in <dir>" "${repo4}"
+
+# Case 5: `git init --initial-branch=main <dir>` — single-token form
+repo5="${WORKDIR}/repo5"
+(cd "${WORKDIR}" && command git init -q repo5)
+install_hook "${repo5}"
+rc=0
+(cd "${WORKDIR}" && git init -q --initial-branch=main repo5) || rc=$?
+assert_rc_zero "git init --initial-branch=main <dir>" "${rc}"
+assert_hook_ran "git init --initial-branch=main <dir> triggers hook in <dir>" "${repo5}"
+
+# Case 6: `git init -b main` with no directory — the hook runs in cwd
+repo6="${WORKDIR}/repo6"
+mkdir -p "${repo6}"
+(cd "${repo6}" && command git init -q)
+install_hook "${repo6}"
+rc=0
+(cd "${repo6}" && git init -q -b main) || rc=$?
+assert_rc_zero "git init -b main (no dir)" "${rc}"
+assert_hook_ran "git init -b main (no dir) triggers hook in cwd" "${repo6}"
+
+# Case 7: cwd holds ./main, named like the -b value. Before #394 the
+# wrapper ran repo7a's hook from there instead of repo7b's
+repo7a="${WORKDIR}/repo7a"
+repo7b="${WORKDIR}/repo7b"
+mkdir -p "${repo7a}"
+(cd "${repo7a}" && command git init -q)
+install_hook "${repo7a}"
+mkdir -p "${repo7a}/main"
+(cd "${WORKDIR}" && command git init -q repo7b)
+install_hook "${repo7b}"
+rc=0
+(cd "${repo7a}" && git init -q -b main ../repo7b) || rc=$?
+assert_rc_zero "git init -b main ../<dir> beside ./main" "${rc}"
+assert_hook_ran "git init -b main ../<dir> triggers hook in <dir>" "${repo7b}"
+assert_hook_not_ran "git init -b main ../<dir> leaves the cwd repo's hook alone" "${repo7a}"
+main_contents="$(ls -A "${repo7a}/main")"
+if [[ -z "${main_contents}" ]]; then
+  echo "PASS: git init -b main ../<dir> writes nothing into ./main"
+else
+  echo "FAIL: git init -b main ../<dir> wrote into ./main: ${main_contents}"
+  fail=1
+fi
+
+# Case 8: `git -c key=val init <dir>` — "key=val" is a config value, not the
+# subcommand
+repo8="${WORKDIR}/repo8"
+(cd "${WORKDIR}" && command git init -q repo8)
+install_hook "${repo8}"
+rc=0
+(cd "${WORKDIR}" && git -c init.defaultBranch=main init -q repo8) || rc=$?
+assert_rc_zero "git -c key=val init <dir>" "${rc}"
+assert_hook_ran "git -c key=val init <dir> triggers hook in <dir>" "${repo8}"
+
+# Case 9: init succeeds but the cd fails: warn on stderr, skip the hook,
+# return git's result, print nothing on stdout
+repo9="${WORKDIR}/repo9"
+(cd "${WORKDIR}" && command git init -q repo9)
+install_hook "${repo9}"
+rc=0
+case9_out="$(
+  # Shadow the builtin so the wrapper's cd fails for repo9 only
+  cd() {
+    [[ "${1:-}" == "repo9" ]] && return 1
+    builtin cd "$@"
+  }
+  cd "${WORKDIR}" || exit 1
+  git init -q repo9 2>"${WORKDIR}/case9.err"
+)" || rc=$?
+assert_rc_zero "git init <dir> with an unreachable <dir>" "${rc}"
+assert_hook_not_ran "git init <dir> with an unreachable <dir> skips the hook" "${repo9}"
+if [[ -z "${case9_out}" ]] && grep -q "skipping post-checkout hook" "${WORKDIR}/case9.err"; then
+  echo "PASS: git init <dir> with an unreachable <dir> warns on stderr only"
+else
+  case9_err="$(cat "${WORKDIR}/case9.err")"
+  echo "FAIL: expected an empty stdout and a stderr warning;" \
+    "stdout='${case9_out}' stderr='${case9_err}'"
+  fail=1
+fi
 
 if [[ "${fail}" -eq 1 ]]; then
   echo "FAILED"
