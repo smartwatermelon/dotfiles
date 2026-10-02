@@ -90,10 +90,10 @@ log_warning() {
 # =========================================================
 # NON-INTERACTIVE STRICT MODE
 # =========================================================
-# CI was narrowed (smartwatermelon/github-workflows claude-blocking-review v2+)
-# to block only on production bugs / regressions / security / data-loss.
-# Everything else — style, integration, coverage, supply-chain hygiene — must
-# now be caught locally. Inside Claude Code sessions (CLAUDECODE=1), any
+# CI runs the deterministic standards-check plus repo tests. The CI Claude
+# reviewer is retired (smartwatermelon/github-workflows#154).
+# Everything else — style, integration, coverage, supply-chain hygiene, and
+# all judgment review — must be caught locally. Inside Claude Code sessions (CLAUDECODE=1), any
 # finding from the four non-interactive review paths below blocks the push by
 # default, rather than silently degrading to advisory.
 #
