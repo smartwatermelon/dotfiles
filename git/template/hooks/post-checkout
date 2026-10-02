@@ -204,8 +204,9 @@ cp -r "${CLAUDE_TEMPLATE}" ".claude"
 # far worse outcome than skipping the ignore line. Hence `|| return 0` on the
 # writes and `|| true` on the call.
 #
-# Projects that do want to share part of .claude/ can negate specific paths:
-#   .claude/
+# Projects that do want to share part of .claude/ can negate specific paths.
+# Use .claude/* -- git ignores a negation under an excluded directory:
+#   .claude/*
 #   !.claude/skills/
 add_claude_gitignore_entry() {
   # Not a work tree (or git is unhappy) -- do nothing.
