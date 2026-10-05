@@ -6,7 +6,7 @@
 #
 # _homebrew_update runs against a stub `brew` that records each call and
 # returns per-subcommand exit codes and output, so the test covers:
-#   - `brew vulns --severity=high` runs on every update
+#   - `brew vulns --severity=high --fix-available` runs on every update
 #   - a vulns finding (non-zero exit) is notified but does not fail the chain
 #   - a doctor warning that another brew shadows this one is notified
 #   - an ordinary doctor warning does not raise the shadow notification
@@ -82,10 +82,10 @@ untrusted_text="Warning: 1 installed keg from an untrusted tap not scanned:"
 
 echo "Case: clean run"
 out="$(run_update 0 0 "Your system is ready to brew.")"
-if grep -qx 'brew vulns --severity=high' <<<"${out}"; then
-  check "brew vulns --severity=high is called" "yes" "yes"
+if grep -qx 'brew vulns --severity=high --fix-available' <<<"${out}"; then
+  check "brew vulns --severity=high --fix-available is called" "yes" "yes"
 else
-  check "brew vulns --severity=high is called" "yes" "no"
+  check "brew vulns --severity=high --fix-available is called" "yes" "no"
 fi
 check "no vulns notification" "0" "$(grep -c 'brew vulns:' <<<"${out}" || true)"
 check "no shadow notification" "0" "$(grep -c 'shadows this installation' <<<"${out}" || true)"

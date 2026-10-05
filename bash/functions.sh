@@ -432,14 +432,16 @@ _homebrew_update() {
   # updates. The untrusted-tap skip gets its own notification, because it
   # repeats every run until the tap is trusted and would otherwise read as a
   # nightly vulnerability. The full report is in the log.
-  output=$(brew vulns --severity=high 2>&1)
+  # --fix-available: report only findings a released upgrade fixes, so
+  # the alert is actionable.
+  output=$(brew vulns --severity=high --fix-available 2>&1)
   result=$?
   echo "${output}" | _update_log
   if [[ "${result}" -ne 0 ]]; then
     if [[ "${output}" == *"from an untrusted tap not scanned"* ]]; then
       _notif "brew vulns: kegs from an untrusted tap were not scanned (brew trust or untap) - check log"
     fi
-    _notif "brew vulns: exit ${result} (high/critical finding, skipped keg, or check failure) - check log"
+    _notif "brew vulns: exit ${result} (fixable high/critical finding, skipped keg, or check failure) - check log"
   fi
 
   # brew doctor often returns non-zero for warnings; log but don't fail
