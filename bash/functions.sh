@@ -423,25 +423,31 @@ _homebrew_update() {
   fi
 
   # Check installed formulae against Homebrew's advisory database (OSV.dev).
-  # `brew vulns` is built in from Homebrew 7.0. It exits non-zero when it
-  # finds open vulnerabilities, and also on a network or usage error, so a
-  # non-zero exit is reported but never fails the update chain: a finding is
-  # information for the user, not a reason to skip npm/pipx/gem updates.
-  # --severity=high keeps the notification to findings worth acting on; the
-  # full report is in the log.
+  # `brew vulns` is built in (Homebrew 7.0 release notes). It exits non-zero
+  # in four cases (cmd/vulns.rb): an open vulnerability at or above
+  # --severity, an installed keg from an untrusted tap that it skipped, a
+  # keg older than its formula with no SBOM to check, and a network or usage
+  # error. A non-zero exit is reported but never fails the update chain: a
+  # finding is information for the user, not a reason to skip npm/pipx/gem
+  # updates. The untrusted-tap skip gets its own notification, because it
+  # repeats every run until the tap is trusted and would otherwise read as a
+  # nightly vulnerability. The full report is in the log.
   output=$(brew vulns --severity=high 2>&1)
   result=$?
   echo "${output}" | _update_log
   if [[ "${result}" -ne 0 ]]; then
-    _notif "brew vulns: high/critical findings or check failed (exit ${result}) - check log"
+    if [[ "${output}" == *"from an untrusted tap not scanned"* ]]; then
+      _notif "brew vulns: kegs from an untrusted tap were not scanned (brew trust or untap) - check log"
+    fi
+    _notif "brew vulns: exit ${result} (high/critical finding, skipped keg, or check failure) - check log"
   fi
 
   # brew doctor often returns non-zero for warnings; log but don't fail
   output=$(brew doctor 2>&1)
   result=$?
   echo "${output}" | _update_log
-  # Homebrew 7.0 warns when another `brew` comes earlier in PATH. This setup
-  # relies on PATH shims (claude, gh, git, the sudo shim above), so a shadowed
+  # Current brew doctor warns when another `brew` comes earlier in PATH. This
+  # setup relies on PATH shims (claude, gh, git, the sudo shim above), so a shadowed
   # brew would mean commands run against a different installation than the
   # one being updated. Surface it in the notification instead of leaving it
   # in the log. Matches the text output: `brew doctor --json` would need jq,

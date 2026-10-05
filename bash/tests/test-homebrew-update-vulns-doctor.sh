@@ -43,20 +43,21 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
 # Run _homebrew_update in a child bash with every external dependency
-# stubbed. Arguments: vulns exit code, doctor exit code, doctor output.
+# stubbed. Arguments: vulns exit code, doctor exit code, doctor output,
+# and optional vulns output.
 # Prints the notifications, then a line "RC=<n>", then the brew call log.
 run_update() {
-  local vulns_rc="$1" doctor_rc="$2" doctor_out="$3"
+  local vulns_rc="$1" doctor_rc="$2" doctor_out="$3" vulns_out="${4:-vulns report}"
   : >"${WORK}/calls"
   : >"${WORK}/notifs"
   HOME="${WORK}" VULNS_RC="${vulns_rc}" DOCTOR_RC="${doctor_rc}" \
-    DOCTOR_OUT="${doctor_out}" CALLS="${WORK}/calls" NOTIFS="${WORK}/notifs" \
+    DOCTOR_OUT="${doctor_out}" VULNS_OUT="${vulns_out}" CALLS="${WORK}/calls" NOTIFS="${WORK}/notifs" \
     bash --norc --noprofile -c '
       brew() {
         echo "brew $*" >>"${CALLS}"
         case "$1" in
           --prefix) echo "/opt/homebrew" ;;
-          vulns) echo "vulns report"; return "${VULNS_RC}" ;;
+          vulns) echo "${VULNS_OUT}"; return "${VULNS_RC}" ;;
           doctor) echo "${DOCTOR_OUT}"; return "${DOCTOR_RC}" ;;
           *) return 0 ;;
         esac
@@ -74,7 +75,10 @@ run_update() {
   cat "${WORK}/calls"
 }
 
-shadow_text='Warning: Another brew shadows this Homebrew installation in your PATH:'
+# Verbatim from Homebrew diagnostic.rb, so the match key is tested against
+# the real wording.
+shadow_text="Warning: Another \`brew\` shadows this Homebrew installation in your PATH:"
+untrusted_text="Warning: 1 installed keg from an untrusted tap not scanned:"
 
 echo "Case: clean run"
 out="$(run_update 0 0 "Your system is ready to brew.")"
@@ -90,6 +94,11 @@ check "returns 0" "1" "$(grep -cx 'RC=0' <<<"${out}" || true)"
 echo "Case: vulns reports findings"
 out="$(run_update 1 0 "Your system is ready to brew.")"
 check "vulns finding is notified" "1" "$(grep -c 'brew vulns:' <<<"${out}" || true)"
+check "update chain is not failed" "1" "$(grep -cx 'RC=0' <<<"${out}" || true)"
+
+echo "Case: vulns skipped a keg from an untrusted tap"
+out="$(run_update 1 0 "Your system is ready to brew." "${untrusted_text}")"
+check "untrusted-tap skip is notified" "1" "$(grep -c 'untrusted tap were not scanned' <<<"${out}" || true)"
 check "update chain is not failed" "1" "$(grep -cx 'RC=0' <<<"${out}" || true)"
 
 echo "Case: doctor reports a shadowing brew"
