@@ -327,6 +327,8 @@ _updates_shim_cleanup() {
 # Update Homebrew packages
 # Package managers provide their own network error diagnostics, so no pre-check needed
 _homebrew_update() {
+  # Set when an unattended formula upgrade fails; updates() reads it.
+  _UPDATES_FORMULA_FAILED=false
   local brew_prefix brew_owner my_id current_user
   brew_prefix="$(brew --prefix 2>/dev/null)" || { return 0; }
   brew_owner="$(stat -f '%u' "${brew_prefix}" 2>/dev/null)"
@@ -407,7 +409,10 @@ _homebrew_update() {
   fi
   if [[ "${result}" -ne 0 ]]; then
     if [[ "${tolerate_upgrade_failure}" == "true" ]]; then
-      _notif "brew upgrade (formulae) completed with errors (exit ${result}) - check log"
+      # Keep going so npm/pipx/gem still run, but record the failure so the
+      # run is not reported as a success.
+      _UPDATES_FORMULA_FAILED=true
+      _notif "brew upgrade (formulae) FAILED (exit ${result}): $(grep -m1 '^Error:' <<<"${output}" || echo 'see log')"
     else
       _notif "brew upgrade failed (exit ${result})"
       return "${result}"
@@ -457,7 +462,9 @@ _homebrew_update() {
   if [[ "${output}" == *"shadows this Homebrew installation"* ]]; then
     _notif "brew doctor: another brew shadows this installation in PATH - check log"
   fi
-  if [[ "${result}" -eq 0 ]]; then
+  if [[ "${_UPDATES_FORMULA_FAILED}" == "true" ]]; then
+    _notif "Homebrew update completed with formula upgrade failures (check log)"
+  elif [[ "${result}" -eq 0 ]]; then
     _notif "Homebrew update completed successfully"
   else
     _notif "Homebrew update completed with warnings (check log)"
@@ -884,6 +891,11 @@ updates() {
       return "${result}"
     fi
   done
+
+  if [[ "${_UPDATES_FORMULA_FAILED:-false}" == "true" ]]; then
+    _notif "Updates finished, but a Homebrew formula upgrade failed (check log)"
+    return 1
+  fi
 
   rm -f "${_UPDATES_STATE_FILE}"
   _notif "All updates completed successfully"
