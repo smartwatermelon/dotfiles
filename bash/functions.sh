@@ -422,10 +422,33 @@ _homebrew_update() {
     return "${result}"
   fi
 
+  # Check installed formulae against Homebrew's advisory database (OSV.dev).
+  # `brew vulns` is built in from Homebrew 7.0. It exits non-zero when it
+  # finds open vulnerabilities, and also on a network or usage error, so a
+  # non-zero exit is reported but never fails the update chain: a finding is
+  # information for the user, not a reason to skip npm/pipx/gem updates.
+  # --severity=high keeps the notification to findings worth acting on; the
+  # full report is in the log.
+  output=$(brew vulns --severity=high 2>&1)
+  result=$?
+  echo "${output}" | _update_log
+  if [[ "${result}" -ne 0 ]]; then
+    _notif "brew vulns: high/critical findings or check failed (exit ${result}) - check log"
+  fi
+
   # brew doctor often returns non-zero for warnings; log but don't fail
   output=$(brew doctor 2>&1)
   result=$?
   echo "${output}" | _update_log
+  # Homebrew 7.0 warns when another `brew` comes earlier in PATH. This setup
+  # relies on PATH shims (claude, gh, git, the sudo shim above), so a shadowed
+  # brew would mean commands run against a different installation than the
+  # one being updated. Surface it in the notification instead of leaving it
+  # in the log. Matches the text output: `brew doctor --json` would need jq,
+  # which the Brewfile lists as optional.
+  if [[ "${output}" == *"shadows this Homebrew installation"* ]]; then
+    _notif "brew doctor: another brew shadows this installation in PATH - check log"
+  fi
   if [[ "${result}" -eq 0 ]]; then
     _notif "Homebrew update completed successfully"
   else

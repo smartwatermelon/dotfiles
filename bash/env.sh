@@ -126,6 +126,13 @@ if command -v brew &>/dev/null; then
   fi
 fi
 export HOMEBREW_DOWNLOAD_CONCURRENCY=auto
+# Leave casks with `auto_updates true` (Chrome, iTerm2, ...) to their own
+# updaters. By default `brew upgrade` replaces such an app whenever its bundle
+# version lags the tap, swapping the bundle out from under a running app.
+# That is the suspected cause of Chrome and iTerm2 losing network access after
+# `updates` until restarted. Does not affect an explicit
+# `brew upgrade --greedy` or `--greedy-auto-updates`.
+export HOMEBREW_NO_UPGRADE_AUTO_UPDATES_CASKS=1
 
 # Set Homebrew Git prefix
 if command -v brew &>/dev/null; then
