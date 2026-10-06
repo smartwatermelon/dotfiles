@@ -4,7 +4,7 @@ Centralized linting configuration using the [pre-commit framework](https://pre-c
 
 ## Overview
 
-This directory contains the default pre-commit configuration that can be used as a template or fallback for projects that don't have their own `.pre-commit-config.yaml`.
+This directory contains the global pre-commit configuration. The global git `pre-commit` hook runs it in every repo. A repo's own `.pre-commit-config.yaml` runs after it and adds repo-specific hooks; it does not replace this config.
 
 **Location**: `~/.config/pre-commit/`
 **Framework**: [pre-commit.com](https://pre-commit.com/)
@@ -150,17 +150,13 @@ repo's own call: declare `black`, `ruff format`, or nothing in that repo's
 
 ### In a New Project
 
-Copy this config to your project root:
+Nothing to set up: the global git hook (via `core.hooksPath`) already runs
+this config in every repo.
 
-```bash
-cp ~/.config/pre-commit/config.yaml .pre-commit-config.yaml
-```
-
-Install the hooks:
-
-```bash
-pre-commit install
-```
+If the repo needs hooks of its own (a formatter, a type check), create a
+`.pre-commit-config.yaml` in the repo root containing **only** those hooks.
+Do not copy this config into it: the global hooks already run, so a copy
+runs each of them twice.
 
 ### Testing Hooks
 
@@ -267,21 +263,24 @@ All hooks use `verbose: true` for detailed output during runs.
 
 This config works with the global git `pre-commit` hook at `~/.config/git/hooks/pre-commit`, which:
 
-1. Checks if a repo has `.pre-commit-config.yaml`
-2. If yes: runs `pre-commit run` (repo-specific config)
-3. If no: uses this global config as fallback
+1. Always runs this global config (`pre-commit run --config ~/.config/pre-commit/config.yaml`)
+2. Then, if the repo has a `.pre-commit-config.yaml`, runs that too
+3. Blocks the commit if either run fails. Both run even when the global run
+   fails, so one commit attempt shows every error.
 
-This means repos can override these settings with their own `.pre-commit-config.yaml`, while repos without one still get basic linting.
+A repo-local config adds hooks; it cannot override or disable a global one.
+A hook listed in both configs runs twice. If the global config is missing,
+the hook fails rather than running the local config alone, because a
+missing global config means a broken install.
 
 ## Customization
 
-### Per-Project Overrides
+### Per-Project Additions
 
-Projects can override these settings by:
-
-1. Creating `.pre-commit-config.yaml` in repo root
-2. Modifying hook `args` or adding new hooks
-3. Disabling specific hooks with `exclude` patterns
+Projects add hooks by creating `.pre-commit-config.yaml` in the repo root
+with only the repo-specific hooks. Those hooks run after the global set.
+`exclude` patterns and `args` in that file apply only to its own hooks; to
+change a global hook, change it here.
 
 ### Adding New Hooks
 

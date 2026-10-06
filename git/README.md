@@ -75,14 +75,19 @@ All hooks are configured via `core.hooksPath` to use this directory instead of p
 
 ### pre-commit
 
-**Purpose**: Delegates to repository-local pre-commit framework configuration
+**Purpose**: Runs the global pre-commit framework configuration, then any repository-local one
 **File**: `hooks/pre-commit`
 
 **Behavior**:
 
-1. Checks if repo has `.pre-commit-config.yaml`
-2. If yes: Runs `pre-commit run` (repo-specific hooks)
-3. If no: Runs global linting (fallback to `lint-shell.sh`)
+1. Blocks commits to `main`/`master`
+2. Runs the global config (`~/.config/pre-commit/config.yaml`, from `pre-commit/config.yaml`)
+3. If the repo has `.pre-commit-config.yaml`, runs it next. It adds repo-specific hooks; it does not replace the global config
+4. Blocks the commit if either run failed. Both run even when the first fails, so one attempt shows every error
+5. Runs the repo's executable `.project-hooks/pre-commit`, if present
+
+A missing global config is an error even when a local config exists. See
+[`pre-commit/README.md`](../pre-commit/README.md#integration-with-git-hooks).
 
 **Integration**: Works with [pre-commit framework](https://pre-commit.com/) configurations in individual repos
 
