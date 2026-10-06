@@ -49,25 +49,67 @@ if [[ -f "${_REPAIR_LIB}" ]]; then
   repair_config_symlinks true
 fi
 
-# Prefer repo-local config if it exists, otherwise fall back to global
-LOCAL_CONFIG=".pre-commit-config.yaml"
-GLOBAL_CONFIG="${HOME}/.config/pre-commit/config.yaml"
+# =========================================================
+# PRE-COMMIT FRAMEWORK — global config, then repo-local config
+# =========================================================
+# The global config always runs. A repo-local .pre-commit-config.yaml, if
+# present, runs AFTER it and adds repo-specific hooks; it does not replace
+# the global set. (Before this, a local file replaced the global config
+# entirely, so any repo with one silently skipped the global secret scan,
+# zizmor, yamllint and length caps.)
+#
+# Both passes run even when the global pass fails, so one commit attempt
+# shows every error. That is safe with auto-fixers because each
+# `pre-commit run` stashes unstaged changes, runs against the index, and
+# restores the stash afterwards. A global fixer's edits are unstaged by the
+# time the local pass starts, so they are stashed and restored intact. The
+# one cost: if a local fixer edits the same file a global fixer already
+# edited, pre-commit reports the conflict and rolls back the LOCAL fix (it
+# never discards the stashed changes). The commit fails either way; the
+# committer re-stages and commits again, and the local fixer applies on
+# that pass. Verified by experiment with two overlapping `sed -i` fixers.
+#
+# A missing global config is an error even when a local config exists. The
+# hook and the global config are deployed together by install.sh, so a
+# missing global config means a broken install — and quietly running only
+# the local config is exactly the skip this layout exists to prevent.
+run_pre_commit_configs() {
+  local local_config=".pre-commit-config.yaml"
+  local global_config="${HOME}/.config/pre-commit/config.yaml"
 
-if ! command -v pre-commit >/dev/null 2>&1; then
-  echo "[pre-commit] ERROR: 'pre-commit' command not found in PATH." >&2
-  exit 1
-fi
+  if ! command -v pre-commit >/dev/null 2>&1; then
+    echo "[pre-commit] ERROR: 'pre-commit' command not found in PATH." >&2
+    exit 1
+  fi
 
-if [[ -f "${LOCAL_CONFIG}" ]]; then
-  echo "[pre-commit] Running with repo-local config: ${LOCAL_CONFIG}"
-  pre-commit run "$@" || exit 1
-elif [[ -f "${GLOBAL_CONFIG}" ]]; then
-  echo "[pre-commit] Running with global config: ${GLOBAL_CONFIG}"
-  pre-commit run --config "${GLOBAL_CONFIG}" "$@" || exit 1
-else
-  echo "[pre-commit] ERROR: No config found (expected ${LOCAL_CONFIG} or ${GLOBAL_CONFIG})." >&2
-  exit 1
-fi
+  if [[ ! -f "${global_config}" && ! -f "${local_config}" ]]; then
+    echo "[pre-commit] ERROR: No config found (expected ${local_config} or ${global_config})." >&2
+    exit 1
+  fi
+
+  if [[ ! -f "${global_config}" ]]; then
+    echo "[pre-commit] ERROR: Global config not found at ${global_config}." >&2
+    echo "[pre-commit]        ${local_config} adds to the global config; it does not replace it." >&2
+    echo "[pre-commit]        Re-run the dotfiles install.sh to restore the global config." >&2
+    exit 1
+  fi
+
+  local failed=()
+
+  echo "[pre-commit] Running with global config: ${global_config}"
+  pre-commit run --config "${global_config}" "$@" || failed+=("global-config")
+
+  if [[ -f "${local_config}" ]]; then
+    echo "[pre-commit] Running with repo-local config: ${local_config}"
+    pre-commit run --config "${local_config}" "$@" || failed+=("repo-local-config")
+  fi
+
+  if ((${#failed[@]} > 0)); then
+    echo "[pre-commit] FAILED: ${failed[*]}. Fix the errors above, re-stage, and commit again." >&2
+    exit 1
+  fi
+}
+run_pre_commit_configs "$@"
 
 # =========================================================
 # PROJECT-LOCAL PRE-COMMIT EXTENSIONS
