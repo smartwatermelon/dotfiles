@@ -251,6 +251,12 @@ for mode in standalone function; do
     repo clone https://github.com/nightowlstudiollc/x.git
   _pos_case "repo edit OTHER/x" "${SWM}" nos-stub \
     repo edit nightowlstudiollc/x --description d
+  _pos_case "repo edit --template is boolean" "${SWM}" nos-stub \
+    repo edit --template nightowlstudiollc/x
+  _pos_case "repo edit skips a merge-message value" "${SWM}" nos-stub \
+    repo edit --squash-merge-commit-message default nightowlstudiollc/x
+  _pos_case "repo view skips a slashed --template value" "${SWM}" nos-stub \
+    repo view -t '{{.a}}/{{.b}}' nightowlstudiollc/x
   _pos_case "repo sync skips the --source value" "${TWM}" swm-stub \
     repo sync --source nightowlstudiollc/x smartwatermelon/fork
   _pos_case "bare repo name falls back to cwd" "${SWM}" swm-stub \

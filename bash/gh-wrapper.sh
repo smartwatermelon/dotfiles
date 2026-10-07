@@ -129,34 +129,38 @@ _gh_wrapper_resolve_owner() {
   # gh repo <sub> OWNER/REPO names the owner positionally (#330). rename takes
   # a new name; a bare REPO is left to cwd.
   if [[ -z "${repo_flag_value}" && "${1:-}" == "repo" ]]; then
+    # Flags taking a separate value, per subcommand (gh 2.x --help).
+    local value_flags="" positional=1
     case "${2:-}" in
-      view | clone | fork | edit | delete | archive | unarchive | sync | set-default)
-        skip_next=""
-        for arg in "${@:3}"; do
-          [[ "${arg}" == "--" ]] && break
-          if [[ -n "${skip_next}" ]]; then
-            skip_next=""
-            continue
-          fi
-          case "${arg}" in
-            # Flags of these subcommands that take a separate value.
-            -b | --branch | --json | -q | --jq | -t | --template | -s | --source | \
-              -u | --upstream-remote-name | --remote-name | --org | --fork-name | \
-              -d | --description | -h | --homepage | --add-topic | --remove-topic | \
-              --default-branch | --visibility)
-              skip_next="value"
-              ;;
-            -*) ;;
-            */*)
-              repo_flag_value="${arg}"
-              break
-              ;;
-            *) break ;;
-          esac
-        done
-        ;;
-      *) ;;
+      view) value_flags="-b --branch -q --jq --json -t --template" ;;
+      clone) value_flags="-u --upstream-remote-name" ;;
+      fork) value_flags="--fork-name --org --remote-name" ;;
+      edit) value_flags="--add-topic --default-branch -d --description -h --homepage
+        --remove-topic --squash-merge-commit-message --visibility" ;;
+      sync) value_flags="-b --branch -s --source" ;;
+      delete | archive | unarchive | set-default) ;;
+      *) positional=0 ;;
     esac
+    if [[ "${positional}" == "1" ]]; then
+      skip_next=""
+      for arg in "${@:3}"; do
+        [[ "${arg}" == "--" ]] && break
+        if [[ -n "${skip_next}" ]]; then
+          skip_next=""
+          continue
+        fi
+        case "${arg}" in
+          -*)
+            [[ " ${value_flags//$'\n'/ } " == *" ${arg} "* ]] && skip_next="value"
+            ;;
+          */*)
+            repo_flag_value="${arg}"
+            break
+            ;;
+          *) break ;;
+        esac
+      done
+    fi
   fi
 
   if [[ -z "${repo_flag_value}" && -n "${owner_flag_value}" && "${owner_flag_value}" != *,* ]]; then
