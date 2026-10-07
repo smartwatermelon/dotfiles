@@ -126,6 +126,39 @@ _gh_wrapper_resolve_owner() {
     esac
   done
 
+  # gh repo <sub> OWNER/REPO names the owner positionally (#330). rename takes
+  # a new name; a bare REPO is left to cwd.
+  if [[ -z "${repo_flag_value}" && "${1:-}" == "repo" ]]; then
+    case "${2:-}" in
+      view | clone | fork | edit | delete | archive | unarchive | sync | set-default)
+        skip_next=""
+        for arg in "${@:3}"; do
+          [[ "${arg}" == "--" ]] && break
+          if [[ -n "${skip_next}" ]]; then
+            skip_next=""
+            continue
+          fi
+          case "${arg}" in
+            # Flags of these subcommands that take a separate value.
+            -b | --branch | --json | -q | --jq | -t | --template | -s | --source | \
+              -u | --upstream-remote-name | --remote-name | --org | --fork-name | \
+              -d | --description | -h | --homepage | --add-topic | --remove-topic | \
+              --default-branch | --visibility)
+              skip_next="value"
+              ;;
+            -*) ;;
+            */*)
+              repo_flag_value="${arg}"
+              break
+              ;;
+            *) break ;;
+          esac
+        done
+        ;;
+      *) ;;
+    esac
+  fi
+
   if [[ -z "${repo_flag_value}" && -n "${owner_flag_value}" && "${owner_flag_value}" != *,* ]]; then
     printf '%s\n' "${owner_flag_value}"
     return 0
