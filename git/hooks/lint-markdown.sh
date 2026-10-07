@@ -46,11 +46,34 @@ _find_repo_config() {
   return 1
 }
 
+# The cli2 config names CI checks first (github-workflows standards/run-standards.sh).
+_find_cli2_config() {
+  local c
+  for c in .markdownlint-cli2.jsonc .markdownlint-cli2.yaml .markdownlint-cli2.cjs; do
+    if [[ -f "${c}" ]]; then
+      printf '%s' "${c}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 main() {
   # Nothing staged for this hook: pre-commit still invokes it, and
   # markdownlint with no files would lint nothing but exit non-zero on some
   # versions. Exit clean rather than inventing a failure.
   (($# > 0)) || exit 0
+
+  # A cli2 config is used alone, with markdownlint-cli2, as CI does; else its "ignores" are skipped.
+  local cli2_config
+  if cli2_config="$(_find_cli2_config)"; then
+    if ! command -v markdownlint-cli2 >/dev/null 2>&1; then
+      printf 'lint-markdown: %s needs markdownlint-cli2 (brew install markdownlint-cli2)\n' \
+        "${cli2_config}" >&2
+      exit 1
+    fi
+    exec markdownlint-cli2 --fix --config "${cli2_config}" "$@"
+  fi
 
   local repo_config merged
   if ! repo_config="$(_find_repo_config)"; then

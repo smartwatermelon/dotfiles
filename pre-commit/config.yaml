@@ -16,6 +16,9 @@ repos:
         language: system
         pass_filenames: true
         exclude_types: [binary]
+        # Skips test files, which hold token-shaped fakes (2026-10-07).
+        # Keep it on one single-quoted line: a dotfiles test reads it.
+        exclude: '(^|/)(tests?|__tests__|spec)/|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)test[-_][^/]*\.(sh|py)$|_test\.py$|\.bats$'
 
   # Python linting
   #
@@ -72,7 +75,8 @@ repos:
         # NOTE: the ignore list must be quoted — unquoted, YAML flow-sequence
         # syntax splits it at the comma and flake8 receives "E402" as a
         # filename (E902 FileNotFoundError) instead of a rule code.
-        args: ["--max-line-length=88", "--extend-ignore=E501,E402"]
+        args: ["--max-line-length=88", "--extend-ignore=E501,E402,E203"]
+        # E203: black writes x[a : b], and this flag overrides a repo's own extend-ignore.
 
   # Shell linting and formatting using global script
   - repo: local
