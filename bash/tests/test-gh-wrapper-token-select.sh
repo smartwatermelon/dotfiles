@@ -228,6 +228,44 @@ for mode in standalone function; do
     _fail "${mode}: first match: rc=${rc} token=${logged} err=${err}"
   fi
 
+  # (2c) gh repo <sub> OWNER/REPO routes on that owner, not cwd (#330); the
+  # merge-lock pr_exists case.
+  _pos_case() {
+    local label="$1" cwd="$2" want="$3"
+    shift 3
+    _run "${mode}" "${cwd}" GH_TOKEN=launch-stub CLAUDE_GH_TOKEN_LOGIN=twistedmelonman \
+      GH_TOKEN_SWM=swm-stub GH_TOKEN_NOS=nos-stub GH_TOKEN_TWM=twm-stub -- "$@"
+    if [[ "${rc}" -eq 0 && "${logged}" == "${want}" ]]; then
+      _pass "${mode}: ${label} selects ${want}"
+    else
+      _fail "${mode}: ${label}: want=${want} rc=${rc} token=${logged} err=${err}"
+    fi
+  }
+  _pos_case "repo view OTHER/x beats cwd" "${SWM}" nos-stub \
+    repo view nightowlstudiollc/x --json nameWithOwner
+  _pos_case "repo view OTHER/x from a non-repo cwd" "${NEUTRAL}" nos-stub \
+    repo view nightowlstudiollc/x
+  _pos_case "repo view, flags before the repo" "${SWM}" nos-stub \
+    repo view --json name --jq .name nightowlstudiollc/x
+  _pos_case "repo clone URL" "${SWM}" nos-stub \
+    repo clone https://github.com/nightowlstudiollc/x.git
+  _pos_case "repo edit OTHER/x" "${SWM}" nos-stub \
+    repo edit nightowlstudiollc/x --description d
+  _pos_case "repo edit --template is boolean" "${SWM}" nos-stub \
+    repo edit --template nightowlstudiollc/x
+  _pos_case "repo edit skips a merge-message value" "${SWM}" nos-stub \
+    repo edit --squash-merge-commit-message default nightowlstudiollc/x
+  _pos_case "repo view skips a slashed --template value" "${SWM}" nos-stub \
+    repo view -t '{{.a}}/{{.b}}' nightowlstudiollc/x
+  _pos_case "repo sync skips the --source value" "${TWM}" swm-stub \
+    repo sync --source nightowlstudiollc/x smartwatermelon/fork
+  _pos_case "bare repo name falls back to cwd" "${SWM}" swm-stub \
+    repo view x
+  _pos_case "repo rename's new name is not an owner" "${SWM}" swm-stub \
+    repo rename nightowlstudiollc/renamed
+  _pos_case "positional after -- is ignored" "${SWM}" swm-stub \
+    repo clone -- nightowlstudiollc/x
+
   # No GH_TOKEN: the keyring stays in charge; a per-owner var alone does not
   # route the call.
   _run "${mode}" "${SWM}" GH_TOKEN_SWM=swm-stub -- pr list
