@@ -315,10 +315,8 @@ _gh_wrapper_keyring_users() {
   ' "${HOME}/.config/gh/hosts.yml" 2>/dev/null | tr -d "\"'"
 }
 
-# The login to hand `gh auth switch`. `desired` may not exist in the keyring
-# yet, and switching to an account gh does not have fails outright. Prefer the
-# keyring's own casing when a case-insensitive match is held, else `desired`
-# unchanged so the caller still fails closed with its own message.
+# The login to hand `gh auth token --user`, which matches exact casing. Prefer
+# the keyring's own casing, else `desired` unchanged.
 _gh_wrapper_resolve_switch_target() {
   local desired="$1"
   local held_logins
@@ -395,11 +393,6 @@ _gh_wrapper_identity_for_owner() {
 #   3. Otherwise, default to twistedmelonman. This is the personal-default
 #      environment; Beacon work is the specifically-marked exception.
 #
-# Local-only (reads/writes gh's config file, no network), so it's cheap to
-# run on every invocation. Caveat: this mutates global gh state, so
-# concurrent shells working in different-owner repos at the same time can
-# race each other.
-#
 # Token selection (smartwatermelon/claude-wrapper#126). When GH_TOKEN is set
 # and the resolved owner has its own fine-grained token in the environment
 # (see _gh_wrapper_owner_token_var), that token is used for this one call.
@@ -408,21 +401,29 @@ _gh_wrapper_identity_for_owner() {
 # real gh process -- never exported into the caller's shell. A fine-grained
 # PAT binds to exactly one resource owner, so the launch token acting on any
 # other owner is a 403 at best; selection replaces the old owner-mismatch
-# refusal wherever a matching token exists. With GH_TOKEN unset, the keyring
-# stays in charge and nothing is selected.
+# refusal wherever a matching token exists.
 _gh_wrapper_sync_identity() {
-  local owner desired current
+  local owner desired
 
   _gh_wrapper_token_var=""
+  _gh_wrapper_keyring_token=""
   owner="$(_gh_wrapper_resolve_owner "$@")"
   [[ -z "${owner}" ]] && return 0
 
   desired="$(_gh_wrapper_identity_for_owner "${owner}")"
 
+  # gh reads GH_TOKEN, then GITHUB_TOKEN; check whichever it will use (#365).
+  local env_token_var=""
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    env_token_var="GH_TOKEN"
+  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    env_token_var="GITHUB_TOKEN"
+  fi
+
   # The owner's own token, when one is set, is the answer outright: it was
   # issued for this owner, so there is no identity left to check and no
   # `gh api user` round-trip to pay.
-  if [[ -n "${GH_TOKEN:-}" ]]; then
+  if [[ -n "${env_token_var}" ]]; then
     local owner_token_var
     owner_token_var="$(_gh_wrapper_owner_token_var "${owner}")"
     if [[ -n "${owner_token_var}" && -n "${!owner_token_var:-}" ]]; then
@@ -431,9 +432,7 @@ _gh_wrapper_sync_identity() {
   fi
 
   # No owner token to select (an owner outside the three, or its variable is
-  # unset): GH_TOKEN is used as given. It outranks the keyring identity that
-  # `gh auth switch` selects, so the hosts.yml check below verifies this
-  # function's own output rather than the auth `gh` will actually use. When
+  # unset): GH_TOKEN is used as given. When
   # the token represents a different identity than the resolved owner needs,
   # fail closed instead of silently acting as the wrong account.
   #
@@ -442,7 +441,7 @@ _gh_wrapper_sync_identity() {
   # user` fallback below resolves it — one network call per invocation. See
   # Step 11: session-level caching is a known follow-up, deliberately not
   # built here.
-  if [[ -n "${GH_TOKEN:-}" && -z "${_gh_wrapper_token_var}" ]]; then
+  if [[ -n "${env_token_var}" && -z "${_gh_wrapper_token_var}" ]]; then
     local token_login="${CLAUDE_GH_TOKEN_LOGIN:-}"
     # Why resolution failed, so the advice below can match the actual cause
     # instead of guessing "expired". Three paths reach the same dead end and
@@ -463,7 +462,7 @@ _gh_wrapper_sync_identity() {
         # login name by any check that only tests for emptiness. Discard the
         # output unless the call actually succeeded.
         local api_out
-        if api_out="$(GH_TOKEN="${GH_TOKEN}" "${real_gh}" api user --jq .login 2>/dev/null)"; then
+        if api_out="$(GH_TOKEN="${!env_token_var}" "${real_gh}" api user --jq .login 2>/dev/null)"; then
           token_login="${api_out}"
         else
           unresolved_reason="api_failed"
@@ -487,8 +486,8 @@ _gh_wrapper_sync_identity() {
     fi
 
     if [[ -z "${token_login}" ]]; then
-      echo "[gh] ERROR: GH_TOKEN is set but its identity could not be resolved" >&2
-      echo "[gh] Refusing to run: GH_TOKEN overrides 'gh auth switch', so the" >&2
+      echo "[gh] ERROR: ${env_token_var} is set but its identity could not be resolved" >&2
+      echo "[gh] Refusing to run: ${env_token_var} overrides the keyring identity, so the" >&2
       echo "[gh] identity check cannot be trusted." >&2
 
       # Never echo the captured output itself. A shadowing binary can print
@@ -501,7 +500,7 @@ _gh_wrapper_sync_identity() {
           echo "[gh] as 'gh' but is not gh. Resolved to:" >&2
           echo "[gh]   ${real_gh:-<unknown>}" >&2
           echo "[gh] Fix: remove that entry from PATH. If it is a test stub, unset" >&2
-          echo "[gh] GH_TOKEN for the test so this check is skipped." >&2
+          echo "[gh] ${env_token_var} for the test so this check is skipped." >&2
           echo "[gh] Inspect with: type -a gh" >&2
           ;;
         no_real_gh)
@@ -512,7 +511,7 @@ _gh_wrapper_sync_identity() {
         *)
           echo "[gh] Most likely the token is expired or revoked. Check with:" >&2
           echo "[gh]   gh api -i user | grep -i token-expiration" >&2
-          echo "[gh] Fix: rotate the token, or unset GH_TOKEN to use the keyring" >&2
+          echo "[gh] Fix: rotate the token, or unset ${env_token_var} to use the keyring" >&2
           echo "[gh] identity." >&2
           ;;
       esac
@@ -520,30 +519,30 @@ _gh_wrapper_sync_identity() {
     fi
 
     if [[ "${token_login,,}" != "${desired,,}" ]]; then
-      echo "[gh] ERROR: GH_TOKEN authenticates as '${token_login}' but repo owner '${owner}' requires '${desired}'" >&2
-      echo "[gh] GH_TOKEN takes precedence over 'gh auth switch', so this would" >&2
+      echo "[gh] ERROR: ${env_token_var} authenticates as '${token_login}' but repo owner '${owner}' requires '${desired}'" >&2
+      echo "[gh] ${env_token_var} takes precedence over the keyring identity, so this would" >&2
       echo "[gh] run as the wrong identity. Failing closed." >&2
-      echo "[gh] Fix: unset GH_TOKEN to use the keyring identity for this repo." >&2
+      echo "[gh] Fix: unset ${env_token_var} to use the keyring identity for this repo." >&2
       return 1
     fi
   fi
 
-  current="$(_gh_wrapper_keyring_login)"
+  # An env token decides the identity; no hosts.yml means no keyring to read.
+  [[ -n "${env_token_var}" ]] && return 0
+  [[ -z "$(_gh_wrapper_keyring_login)" ]] && return 0
 
-  if [[ -n "${current}" && "${current,,}" != "${desired,,}" ]]; then
-    # Not `desired` verbatim: `gh auth switch` matches logins by exact casing
-    # and fails for an account it does not hold. Resolve to the keyring's own
-    # casing when held; otherwise pass `desired` through so the switch fails
-    # and we fail closed below.
-    local target
-    target="$(_gh_wrapper_resolve_switch_target "${desired}")"
-    if ! command gh auth switch --hostname github.com --user "${target}" >/dev/null 2>&1; then
-      echo "[gh] ERROR: failed to switch identity to '${target}' (repo owner: '${owner}') — refusing to run as '${current}' instead" >&2
-      echo "[gh] If '${target}' is not authenticated on this machine, run: gh auth login --hostname github.com" >&2
-      echo "[gh] Failing closed rather than acting on '${owner}' as the wrong identity." >&2
-      return 1
-    fi
+  # Keyring token for this call only, never `gh auth switch`: shared hosts.yml races (#404).
+  local target token=""
+  target="$(_gh_wrapper_resolve_switch_target "${desired}")"
+  if ! token="$(command gh auth token --hostname github.com --user "${target}" 2>/dev/null)" \
+    || [[ -z "${token}" || "${token}" =~ [[:space:]] ]]; then
+    echo "[gh] ERROR: no keyring token for '${target}' (repo owner: '${owner}')." >&2
+    echo "[gh] To add it, run: gh auth login --hostname github.com (as '${target}')" >&2
+    echo "[gh] Failing closed rather than acting on '${owner}' as the wrong identity." >&2
+    return 1
   fi
+  _gh_wrapper_keyring_token="${token}"
+  _gh_wrapper_token_var="_gh_wrapper_keyring_token"
 }
 
 # Find the real `gh` binary, skipping ourselves. Only meaningful in
@@ -1507,10 +1506,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   # the two in lockstep.
   # Set by _gh_wrapper_sync_identity; applied just before gh runs, below.
   _gh_wrapper_token_var=""
+  _gh_wrapper_keyring_token=""
   if [[ -z "${_GH_REVIEW_DONE:-}" ]]; then
-    # Don't auto-switch identity while the user is managing accounts
-    # directly, or for --help/-h — informational calls shouldn't mutate
-    # global auth state.
+    # No identity routing for `gh auth` (account management) or --help.
     if [[ "${1:-}" != "auth" && "${_gh_wrapper_help}" != "1" ]]; then
       _gh_wrapper_sync_identity "$@" || exit 1
     fi
@@ -1568,6 +1566,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     GH_TOKEN="${!_gh_wrapper_token_var}"
     export GH_TOKEN
   fi
+  # A keyring token is no env-token override, so the scope hint has nothing to say.
+  if [[ "${_gh_wrapper_token_var}" == "_gh_wrapper_keyring_token" || -n "${_GH_WRAPPER_KEYRING:-}" ]]; then
+    unset _GH_WRAPPER_KEYRING
+    exec "${REAL_GH}" "$@"
+  fi
 
   # The F4 scope hint exists for one situation: an env-var token (GH_TOKEN, or
   # GITHUB_TOKEN as gh's fallback) is overriding the keyring and lacks a scope
@@ -1599,7 +1602,7 @@ else
     local help=0 arg
     # Local, so _gh_wrapper_sync_identity's selection (dynamic scope) lives
     # only as long as this call.
-    local _gh_wrapper_token_var=""
+    local _gh_wrapper_token_var="" _gh_wrapper_keyring_token=""
     for arg in "$@"; do
       if [[ "${arg}" == "--help" || "${arg}" == "-h" ]]; then
         help=1
@@ -1607,9 +1610,7 @@ else
       fi
     done
 
-    # Don't auto-switch identity while the user is managing accounts
-    # directly, or for --help/-h — informational calls shouldn't mutate
-    # global auth state.
+    # No identity routing for `gh auth` (account management) or --help.
     if [[ "${1:-}" != "auth" && "${help}" != "1" ]]; then
       _gh_wrapper_sync_identity "$@" || return 1
     fi
@@ -1650,7 +1651,9 @@ else
     # PATH) does not run the review a second time. A selected token is
     # passed as a prefix assignment, so it reaches gh without changing the
     # caller's GH_TOKEN.
-    if [[ -n "${_gh_wrapper_token_var}" ]]; then
+    if [[ "${_gh_wrapper_token_var}" == "_gh_wrapper_keyring_token" ]]; then
+      GH_TOKEN="${_gh_wrapper_keyring_token}" _GH_WRAPPER_KEYRING=1 _GH_REVIEW_DONE=1 command gh "$@"
+    elif [[ -n "${_gh_wrapper_token_var}" ]]; then
       GH_TOKEN="${!_gh_wrapper_token_var}" _GH_REVIEW_DONE=1 command gh "$@"
     else
       _GH_REVIEW_DONE=1 command gh "$@"

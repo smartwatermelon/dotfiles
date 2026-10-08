@@ -32,8 +32,11 @@ NEUTRAL="${HOME}/neutral-cwd"
 LOG="${WORKDIR}/gh.log"
 STUB_DIR="${WORKDIR}/stub-bin"
 mkdir -p "${STUB_DIR}"
+# `auth token` is the wrapper's keyring lookup, not a call under test: answer
+# it with a fixture string and keep it out of the log.
 cat >"${STUB_DIR}/gh" <<STUB_EOF
 #!/usr/bin/env bash
+[[ "\$1 \$2" == "auth token" ]] && { echo keyring-fixture; exit 0; }
 printf '%s\n' "\$*" >>"${LOG}"
 exit 0
 STUB_EOF

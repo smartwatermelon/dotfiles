@@ -58,13 +58,21 @@ RUNNER_EOF
 # test-gh-wrapper-token-select.sh; these cases pin the fallback when the
 # owner's token is not set.
 _sync_under_env() {
-  env -u GH_TOKEN -u CLAUDE_GH_TOKEN_LOGIN \
+  env -u GH_TOKEN -u GITHUB_TOKEN -u CLAUDE_GH_TOKEN_LOGIN \
     -u GH_TOKEN_SWM -u GH_TOKEN_NOS -u GH_TOKEN_TWM "$@" bash "${RUNNER}"
 }
 
-# Case 1: no GH_TOKEN -> sync succeeds, as it does today.
+# Case 1: no GH_TOKEN -> sync succeeds. The keyring path asks gh for the
+# login's token, so a stub answers that with a fixture string.
+KEYRING_DIR="${WORKDIR}/keyring-bin"
+mkdir -p "${KEYRING_DIR}"
+cat >"${KEYRING_DIR}/gh" <<'STUB_EOF'
+#!/usr/bin/env bash
+[[ "$1 $2" == "auth token" ]] && echo keyring-fixture
+STUB_EOF
+chmod +x "${KEYRING_DIR}/gh"
 
-if _sync_under_env; then
+if _sync_under_env PATH="${KEYRING_DIR}:${PATH}"; then
   _pass "no GH_TOKEN: sync succeeds"
 else
   _fail "no GH_TOKEN: sync should succeed"
@@ -213,6 +221,35 @@ if [[ "$(_sync_under_env PATH="${STUB_DIR}:${PATH}" \
   _pass "expired GH_TOKEN: still gets rotate-the-token advice"
 else
   _fail "expired GH_TOKEN: lost its rotate-the-token advice"
+fi
+
+# Cases 6-8 (#365): the guard also checks GITHUB_TOKEN. 6 and 7 fail before the fix.
+err_output="$(_sync_under_env GITHUB_TOKEN="fake-token-for-andrewmrich" \
+  CLAUDE_GH_TOKEN_LOGIN="andrewmrich" 2>&1)"
+rc=$?
+if [[ ${rc} -ne 0 && "${err_output}" == *"GITHUB_TOKEN authenticates as"* ]]; then
+  _pass "mismatched GITHUB_TOKEN alone: fails closed naming GITHUB_TOKEN"
+else
+  _fail "mismatched GITHUB_TOKEN alone: rc=${rc} err=${err_output}"
+fi
+
+err_output="$(_sync_under_env PATH="${STUB_DIR}:${PATH}" \
+  GITHUB_TOKEN="expired-token-fixture" 2>&1)"
+rc=$?
+if [[ ${rc} -ne 0 && "${err_output}" == *"GITHUB_TOKEN is set but its identity could not be resolved"* ]]; then
+  _pass "invalid GITHUB_TOKEN alone: fails closed naming GITHUB_TOKEN"
+else
+  _fail "invalid GITHUB_TOKEN alone: rc=${rc} err=${err_output}"
+fi
+
+# Both set: GH_TOKEN is what gh uses, so it is the one checked and named.
+err_output="$(_sync_under_env GH_TOKEN="fake-token-for-andrewmrich" \
+  GITHUB_TOKEN="fake-token-other" CLAUDE_GH_TOKEN_LOGIN="andrewmrich" 2>&1)"
+rc=$?
+if [[ ${rc} -ne 0 && "${err_output}" == *"GH_TOKEN authenticates as"* && "${err_output}" != *GITHUB_TOKEN* ]]; then
+  _pass "both set: GH_TOKEN is checked and named"
+else
+  _fail "both set: rc=${rc} err=${err_output}"
 fi
 
 if [[ ${fail} -eq 0 ]]; then
