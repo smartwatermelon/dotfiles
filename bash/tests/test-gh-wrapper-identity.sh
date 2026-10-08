@@ -49,15 +49,18 @@ source "${BASH_CONFIG_DIR}/gh-wrapper.sh"
 
 fail=0
 
-# Stub `command gh auth switch` so we can observe the desired identity
-# without touching real gh state. Records the requested user to a file.
+# Stub `command gh auth`: `token --user X` prints tok-X; `switch` is logged (must never run).
 switch_log="${HOME}/switch-log"
 # _gh_wrapper_sync_identity reaches this only indirectly, via its own
-# `command gh auth switch ...` call — shellcheck can't see that call site from
+# `command gh auth token ...` call — shellcheck can't see that call site from
 # here, so the stub is routed through an explicit dispatcher that it can.
 _test_command_stub() {
+  if [[ "$1" == "gh" && "$2" == "auth" && "$3" == "token" ]]; then
+    # args: gh auth token --hostname github.com --user <login>
+    printf 'tok-%s\n' "${*: -1}"
+    return 0
+  fi
   if [[ "$1" == "gh" && "$2" == "auth" && "$3" == "switch" ]]; then
-    # args: gh auth switch --hostname github.com --user <desired>
     printf '%s' "${*: -1}" >"${switch_log}"
     return 0
   fi
@@ -69,13 +72,20 @@ _test_command_stub() {
 eval 'command() { _test_command_stub "$@"; }'
 # Prove the stub is wired up before relying on it for every assertion below:
 # a clean result from a stub that never fired would be meaningless.
-_test_command_stub gh auth switch --hostname github.com --user __selftest__
-command gh auth switch --hostname github.com --user __selftest__
-if [[ "$(cat "${switch_log}" 2>/dev/null || true)" != "__selftest__" ]]; then
-  echo "FAIL: command stub is not intercepting 'gh auth switch' — aborting"
+if [[ "$(_test_command_stub gh auth token --hostname github.com --user __selftest__)" != "tok-__selftest__" ]] \
+  || [[ "$(command gh auth token --hostname github.com --user __selftest__)" != "tok-__selftest__" ]]; then
+  echo "FAIL: command stub is not intercepting 'gh auth token' — aborting"
   exit 1
 fi
-rm -f "${switch_log}"
+
+# The login whose keyring token sync_identity selected, or empty. Compares
+# against the fixture string; there is no real token here to print.
+_selected_login() {
+  if [[ "${_gh_wrapper_token_var:-}" == "_gh_wrapper_keyring_token" ]]; then
+    local selected="${!_gh_wrapper_token_var}"
+    printf '%s' "${selected#tok-}"
+  fi
+}
 
 assert_desired() {
   local label="$1" current_user="$2" repo_arg="$3" expected="$4"
@@ -92,22 +102,15 @@ EOF
     return
   fi
   local got
-  got="$(cat "${switch_log}" 2>/dev/null || true)"
-  if [[ "${current_user}" == "${expected}" ]]; then
-    # No switch should have been attempted.
-    if [[ -z "${got}" ]]; then
-      echo "PASS: ${label} (no switch needed, stayed on ${current_user})"
-    else
-      echo "FAIL: ${label} — unexpected switch attempted to '${got}'"
-      fail=1
-    fi
+  got="$(_selected_login)"
+  if [[ -e "${switch_log}" ]]; then
+    echo "FAIL: ${label} — gh auth switch was called"
+    fail=1
+  elif [[ "${got}" == "${expected}" ]]; then
+    echo "PASS: ${label} (${expected}'s token, active was ${current_user})"
   else
-    if [[ "${got}" == "${expected}" ]]; then
-      echo "PASS: ${label} (switched to ${expected})"
-    else
-      echo "FAIL: ${label} — expected switch to '${expected}', got '${got}'"
-      fail=1
-    fi
+    echo "FAIL: ${label} — expected ${expected}'s token, got '${got}'"
+    fail=1
   fi
 }
 
@@ -253,8 +256,7 @@ assert_desired_args() {
   printf 'github.com:\n    user: %s\n' "${current_user}" >"${HOME}/.config/gh/hosts.yml"
   _gh_wrapper_sync_identity "$@" || true
   local got
-  got="$(cat "${switch_log}" 2>/dev/null || true)"
-  [[ -z "${got}" ]] && got="${current_user}"
+  got="$(_selected_login)"
   if [[ "${got}" == "${expected}" ]]; then
     echo "PASS: ${label} (${expected})"
   else

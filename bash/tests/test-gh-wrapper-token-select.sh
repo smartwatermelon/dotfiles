@@ -60,11 +60,13 @@ done
 
 # The stub records the token it was handed and its argv, then exits with
 # STUB_RC (default 0). It never prints the token anywhere but the log.
+# The keyring lookup gets kr-X, unlogged.
 LOG="${WORKDIR}/gh.log"
 STUB_DIR="${WORKDIR}/stub-bin"
 mkdir -p "${STUB_DIR}"
 cat >"${STUB_DIR}/gh" <<STUB_EOF
 #!/usr/bin/env bash
+[[ "\$1 \$2" == "auth token" ]] && { printf 'kr-%s\n' "\${*: -1}"; exit 0; }
 printf 'token=%s|%s\n' "\${GH_TOKEN:-<unset>}" "\$*" >>"${LOG}"
 exit "\${STUB_RC:-0}"
 STUB_EOF
@@ -266,11 +268,11 @@ for mode in standalone function; do
   _pos_case "positional after -- is ignored" "${SWM}" swm-stub \
     repo clone -- nightowlstudiollc/x
 
-  # No GH_TOKEN: the keyring stays in charge; a per-owner var alone does not
-  # route the call.
+  # No GH_TOKEN: the owner's keyring token is used (dotfiles#404); a
+  # per-owner var alone does not route the call.
   _run "${mode}" "${SWM}" GH_TOKEN_SWM=swm-stub -- pr list
-  if [[ "${rc}" -eq 0 && "${logged}" == "<unset>" ]]; then
-    _pass "${mode}: no GH_TOKEN leaves the keyring in charge"
+  if [[ "${rc}" -eq 0 && "${logged}" == "kr-twistedmelonman" ]]; then
+    _pass "${mode}: no GH_TOKEN uses the owner's keyring token"
   else
     _fail "${mode}: no GH_TOKEN: rc=${rc} token=${logged}"
   fi
