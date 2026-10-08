@@ -502,11 +502,69 @@ else
   echo "SKIP: routing cases — ${REAL_GATE} has no gate-route.sh beside it"
 fi
 
+# --- route first: exempt text passes in any form (#411) -----------------------
+# Local rules: the shared set has no exempt rule.
+if [[ "${HAVE_GATE}" == "1" && -x "${SANDBOX}/.claude/scripts/gate-route.sh" ]] \
+  && grep -q '_cmd_route' "${GATE}"; then
+  SHARED_RULES="$(cat "${GATE_RULES_FILE}")"
+  printf '%s\n' 'owner=smartwatermelon exempt' 'owner=nightowlstudiollc pangram' '* visual' >"${GATE_RULES_FILE}"
+  SWM="${SANDBOX}/swm"
+  NOS="${SANDBOX}/nos"
+  for r in "${SWM}" "${NOS}"; do
+    git init -q "${r}"
+  done
+  git -C "${SWM}" remote add origin git@github.com:smartwatermelon/z.git
+  git -C "${NOS}" remote add origin git@github.com:nightowlstudiollc/y.git
+
+  pushd "${NOS}" >/dev/null
+  assert_gate "route first: inline --body -R exempt repo passes" 0 \
+    pr create --title t --body "inline" -R smartwatermelon/x
+  assert_gate "route first: inline issue comment -R exempt repo passes" 0 \
+    issue comment 5 --body "inline" -R smartwatermelon/x
+  assert_gate "route first: api repos/ exempt, inline -f body passes" 0 \
+    api repos/smartwatermelon/x/issues/5/comments -f body=inline
+  assert_gate "route first: unapproved file to exempt repo passes" 0 \
+    pr create --title t --body-file "${UNAPPROVED}" -R smartwatermelon/x
+  assert_gate "route first: inline --body -R gated repo still blocked" 1 \
+    pr create --title t --body "inline" -R nightowlstudiollc/x
+  assert_gate "route first: inline in gated checkout, no -R, still blocked" 1 \
+    pr comment 5 --body "inline"
+  # A URL with no -R may be a flag value, so the gated checkout must pass too.
+  assert_gate "route first: exempt URL from gated checkout still blocked" 1 \
+    pr comment https://github.com/smartwatermelon/x/pull/5 --body "inline"
+  popd >/dev/null
+
+  pushd "${SWM}" >/dev/null
+  assert_gate "route first: inline in exempt checkout, no -R, passes" 0 \
+    pr comment 5 --body "inline"
+  assert_gate "route first: inline -R gated repo from exempt checkout still blocked" 1 \
+    pr create --title t --body "inline" -R nightowlstudiollc/x
+  # GraphQL names its target by node id: no route, never exempt.
+  assert_gate "route first: graphql mutation body in exempt checkout still blocked" 1 \
+    api graphql -f query='mutation { addComment(input: {subjectId: "X", body: "hi"}) { clientMutationId } }'
+  # An unreadable destination blocks before any route is asked.
+  assert_gate "route first: -R and URL disagree still blocked" 1 \
+    pr comment https://github.com/smartwatermelon/x/pull/5 -R smartwatermelon/z --body "inline"
+  # A broken rules file is a route failure, not an exemption. Also the known-bad control.
+  printf 'not-a-rule\n' >"${GATE_RULES_FILE}"
+  assert_gate "route first: route failure, inline to exempt repo blocked" 1 \
+    pr create --title t --body "inline" -R smartwatermelon/x
+  assert_gate "route first: route failure, inline in exempt checkout blocked" 1 \
+    pr comment 5 --body "inline"
+  popd >/dev/null
+  printf '%s\n' "${SHARED_RULES}" >"${GATE_RULES_FILE}"
+else
+  echo "SKIP: route-first cases — ${REAL_GATE} has no 'route' subcommand"
+fi
+
 # --- gate-review.sh absent: fails CLOSED --------------------------------------
 # A redundant pair whose halves disagree about the unverifiable case is not
 # redundant. Removing the gate must not turn the check into a pass.
 mv "${GATE}" "${GATE}.hidden" 2>/dev/null || true
 assert_gate "gate-review.sh absent fails closed" 1 pr create --title t --body-file "${BODY}"
+# With no gate-review.sh there is no route, so nothing is exempt.
+assert_gate "gate absent, inline body to an exempt-looking repo fails closed" 1 \
+  pr create --title t --body "inline" -R smartwatermelon/x
 # ...but a call with no body is still unaffected by the gate's absence.
 assert_gate "gate absent, no body, still allowed" 0 pr create --title "a title"
 # A SUSPENDED file cannot be read without gate-review.sh, so it must not

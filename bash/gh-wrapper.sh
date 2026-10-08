@@ -1028,6 +1028,24 @@ _gh_wrapper_cap_kind() {
   esac
 }
 
+# --- approval gate: exempt destination ----------------------------------------
+# Exempt? Args as for check. Any failure: 1, full checks.
+_gh_wrapper_dest_exempt() {
+  local gate="$1" route
+  [[ -x "${gate}" ]] || return 1
+  # GraphQL names its target by node id: no route, never exempt.
+  [[ "${sub}/${subsub}" == "api/graphql" ]] && return 1
+  local -a args=(--dir "${PWD}")
+  [[ -n "${dest_repo}" ]] && args+=(--repo "${dest_repo}")
+  route="$("${gate}" route "${args[@]}" 2>/dev/null)" || return 1
+  [[ "${route%%$'\t'*}" == "exempt" ]] || return 1
+  if [[ "${also_cwd}" == "1" ]]; then
+    route="$("${gate}" route --dir "${PWD}" 2>/dev/null)" || return 1
+    [[ "${route%%$'\t'*}" == "exempt" ]] || return 1
+  fi
+  return 0
+}
+
 # --- approval gate -------------------------------------------------------------
 # Refuse to write PR or issue body text unless Andrew has visually approved
 # those exact bytes. Approval lives on disk in gate-review's approved/
@@ -1049,6 +1067,8 @@ _gh_wrapper_cap_kind() {
 #   --body/-b "inline text"              -> blocked, nothing to hash
 #   a RELATIVE path or ~/... or $VAR/... -> blocked, resolved against a cwd
 #       this function and gh may disagree about
+#
+# Gated destinations only: the route is asked first; exempt text passes in any form (#411).
 #
 # Each body's destination repository goes to check with it (see
 # _gh_wrapper_gate_destination), and check routes it by gate-rules.conf: a
@@ -1161,14 +1181,17 @@ _gh_wrapper_approval_gate() {
   local dest_repo="" also_cwd=0 err="" unchecked=0 lenblock="" kind
   local -a dest=()
   kind="$(_gh_wrapper_cap_kind)"
-  if [[ "${inline}" == "1" ]]; then
-    reason="text given inline; only a file can be verified"
-  elif ! _gh_wrapper_gate_destination; then
+  # Route first (#411): exempt passes in any form; an unreadable destination blocks.
+  if ! _gh_wrapper_gate_destination; then
     {
       echo "[gh] 🛑 BLOCKED: ${sub} ${subsub}: cannot tell which repository this body goes to."
       echo "[gh]   reason: ${reason}"
     } >&2
     return 1
+  fi
+  _gh_wrapper_dest_exempt "${gate}" && return 0
+  if [[ "${inline}" == "1" ]]; then
+    reason="text given inline; only a file can be verified"
   else
     # check routes the text by destination (gate-rules.conf): a Pangram-gated
     # repository also needs a check record for these exact bytes.
@@ -1673,6 +1696,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
 fi
