@@ -53,8 +53,19 @@ jobs:
       - name: Install linters the lint tests exercise
         run: brew install shellcheck shfmt markdownlint-cli markdownlint-cli2 yamllint zizmor
 
+      # yamllint/zizmor tests compare vendored configs with github-workflows
+      # main. Outside the workspace so no repo-wide test scans it.
+      - name: Clone github-workflows for the upstream config comparison
+        run: >-
+          git clone --quiet --depth 1
+          https://github.com/smartwatermelon/github-workflows.git
+          "${RUNNER_TEMP}/github-workflows"
+
       - name: Show bash version
         run: $(brew --prefix)/bin/bash --version
 
       - name: Run bash test suite
+        env:
+          YAMLLINT_UPSTREAM_CONFIG: ${{ runner.temp }}/github-workflows/standards/yamllint.yml
+          ZIZMOR_UPSTREAM_CONFIG: ${{ runner.temp }}/github-workflows/zizmor.yml
         run: $(brew --prefix)/bin/bash bash/tests/run-tests.sh
