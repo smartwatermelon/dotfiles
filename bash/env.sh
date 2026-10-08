@@ -198,7 +198,7 @@ fi
 # CDPATH being unset by the caller. Instead, either `unset CDPATH` at the
 # top of the script (see bash/tests/*.sh for the established pattern) or
 # scope it out per-invocation with `CDPATH='' cd -- "$dir"`.
-export CDPATH="${HOME}/Developer:${HOME}/Developer/clients:${HOME}/Developer/netlify"
+export CDPATH="${HOME}/Developer"
 
 # Append the work (Beacon) checkout root, but only on machines where it
 # actually exists — a CDPATH entry pointing at a missing directory is dead
