@@ -10,6 +10,7 @@
 #   3. With no owner resolved, the launch token is kept; if the call fails, one
 #      stderr line tells the agent to stop and ask instead of guessing. The exit
 #      code is unchanged.
+#   4. GH_TOKEN unset or empty still selects the owner token (claude-wrapper#124).
 #
 # Every case runs in BOTH modes: standalone (bash gh-wrapper.sh ...) and
 # function (source gh-wrapper.sh; gh ...). Function mode reaches the real gh
@@ -268,13 +269,72 @@ for mode in standalone function; do
   _pos_case "positional after -- is ignored" "${SWM}" swm-stub \
     repo clone -- nightowlstudiollc/x
 
-  # No GH_TOKEN: the owner's keyring token is used (dotfiles#404); a
-  # per-owner var alone does not route the call.
-  _run "${mode}" "${SWM}" GH_TOKEN_SWM=swm-stub -- pr list
-  if [[ "${rc}" -eq 0 && "${logged}" == "kr-twistedmelonman" ]]; then
-    _pass "${mode}: no GH_TOKEN uses the owner's keyring token"
+  # (4) claude-wrapper#124: GH_TOKEN unset or empty still selects the owner token.
+  _run "${mode}" "${SWM}" GH_TOKEN_SWM=swm-stub GH_TOKEN_TWM=twm-stub -- pr list
+  if [[ "${rc}" -eq 0 && "${logged}" == "swm-stub" ]]; then
+    _pass "${mode}: GH_TOKEN unset still selects GH_TOKEN_SWM"
   else
-    _fail "${mode}: no GH_TOKEN: rc=${rc} token=${logged}"
+    _fail "${mode}: GH_TOKEN unset: want swm-stub, rc=${rc} token=${logged}"
+  fi
+  _run "${mode}" "${SWM}" GH_TOKEN= GITHUB_TOKEN= GH_TOKEN_SWM=swm-stub -- pr list
+  if [[ "${rc}" -eq 0 && "${logged}" == "swm-stub" ]]; then
+    _pass "${mode}: GH_TOKEN empty still selects GH_TOKEN_SWM"
+  else
+    _fail "${mode}: GH_TOKEN empty: want swm-stub, rc=${rc} token=${logged}"
+  fi
+  _run "${mode}" "${TWM}" GH_TOKEN_NOS=nos-stub GH_TOKEN_TWM=twm-stub -- \
+    issue list -R nightowlstudiollc/x
+  if [[ "${rc}" -eq 0 && "${logged}" == "nos-stub" ]]; then
+    _pass "${mode}: GH_TOKEN unset, -R owner selects GH_TOKEN_NOS"
+  else
+    _fail "${mode}: GH_TOKEN unset, -R: want nos-stub, rc=${rc} token=${logged}"
+  fi
+  _run "${mode}" "${NEUTRAL}" GH_TOKEN_NOS=nos-stub -- api orgs/nightowlstudiollc/members
+  if [[ "${rc}" -eq 0 && "${logged}" == "nos-stub" ]]; then
+    _pass "${mode}: GH_TOKEN unset, api orgs/OWNER selects GH_TOKEN_NOS"
+  else
+    _fail "${mode}: GH_TOKEN unset, api orgs/: want nos-stub, rc=${rc} token=${logged}"
+  fi
+  # The selection is not paid for with an identity round-trip either.
+  _run "${mode}" "${SWM}" GH_TOKEN_SWM=swm-stub -- pr list
+  mapfile -t log_lines <"${LOG}"
+  if [[ "${#log_lines[@]}" -eq 1 ]]; then
+    _pass "${mode}: GH_TOKEN unset, one stub call (no api user lookup)"
+  else
+    _fail "${mode}: GH_TOKEN unset: expected one stub call, got ${#log_lines[@]}"
+  fi
+
+  # `GH_TOKEN="$GH_TOKEN_TWM" gh ...` keeps working.
+  _run "${mode}" "${TWM}" GH_TOKEN=twm-stub GH_TOKEN_TWM=twm-stub -- pr list
+  if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" ]]; then
+    _pass "${mode}: GH_TOKEN set to GH_TOKEN_TWM's value works"
+  else
+    _fail "${mode}: GH_TOKEN=TWM: rc=${rc} token=${logged} err=${err}"
+  fi
+
+  # No GH_TOKEN_* at all (the work machine): the keyring path is unchanged
+  # (dotfiles#404/#410).
+  _run "${mode}" "${SWM}" -- pr list
+  if [[ "${rc}" -eq 0 && "${logged}" == "kr-twistedmelonman" ]]; then
+    _pass "${mode}: no GH_TOKEN_* vars: owner's keyring token, as before"
+  else
+    _fail "${mode}: no GH_TOKEN_* vars: want kr-twistedmelonman, rc=${rc} token=${logged}"
+  fi
+  # An owner with no GH_TOKEN_* mapping (Beacon) keeps the keyring path even
+  # when the three vars are set.
+  _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-stub GH_TOKEN_NOS=nos-stub GH_TOKEN_TWM=twm-stub -- \
+    pr list -R beacon-biosignals/x
+  if [[ "${rc}" -eq 0 && "${logged}" == "kr-andrewmrich" ]]; then
+    _pass "${mode}: unmapped owner keeps its keyring token"
+  else
+    _fail "${mode}: unmapped owner: want kr-andrewmrich, rc=${rc} token=${logged}"
+  fi
+  # KNOWN GAP (current behavior): no owner + GH_TOKEN unset selects nothing.
+  _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-stub GH_TOKEN_TWM=twm-stub -- api user
+  if [[ "${rc}" -eq 0 && "${logged}" == "<unset>" ]]; then
+    _pass "${mode}: KNOWN GAP: no owner + GH_TOKEN unset selects nothing"
+  else
+    _fail "${mode}: no owner + GH_TOKEN unset: rc=${rc} token=${logged}"
   fi
 
   # Owner token unset: the old refusal still applies to a mismatched login.
