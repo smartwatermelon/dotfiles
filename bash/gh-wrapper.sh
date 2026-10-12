@@ -455,13 +455,12 @@ _gh_wrapper_sync_identity() {
     return 0
   fi
 
-  # An owner outside the three has no token to select: GH_TOKEN_TWM, loudly.
-  if [[ -z "${owner_token_var}" ]]; then
-    local fb_rc=0
-    _gh_wrapper_scoped_fallback "owner '${owner}' has no mapped token" || fb_rc=$?
-    [[ "${fb_rc}" -eq 1 ]] && return 1
-    [[ "${fb_rc}" -eq 2 ]] && return 0
-  fi
+  # No usable owner token (unmapped owner, or its variable unset): TWM, loudly.
+  local fb_rc=0 fb_why="owner '${owner}' has no mapped token"
+  [[ -n "${owner_token_var}" ]] && fb_why="owner '${owner}' maps to ${owner_token_var}, which is not set"
+  _gh_wrapper_scoped_fallback "${fb_why}" || fb_rc=$?
+  [[ "${fb_rc}" -eq 1 ]] && return 1
+  [[ "${fb_rc}" -eq 2 ]] && return 0
 
   # No owner token to select (its variable is unset): GH_TOKEN is used as given. When
   # the token represents a different identity than the resolved owner needs,
