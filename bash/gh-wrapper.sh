@@ -393,8 +393,8 @@ _gh_wrapper_identity_for_owner() {
 #   3. Otherwise, default to twistedmelonman. This is the personal-default
 #      environment; Beacon work is the specifically-marked exception.
 #
-# Token selection (smartwatermelon/claude-wrapper#126). When GH_TOKEN is set
-# and the resolved owner has its own fine-grained token in the environment
+# Token selection (smartwatermelon/claude-wrapper#126). When the resolved owner
+# has its own fine-grained token in the environment
 # (see _gh_wrapper_owner_token_var), that token is used for this one call.
 # This function is the only place that decides it: it records the chosen
 # variable NAME in _gh_wrapper_token_var, and each mode applies it only to the
@@ -423,12 +423,12 @@ _gh_wrapper_sync_identity() {
   # The owner's own token, when one is set, is the answer outright: it was
   # issued for this owner, so there is no identity left to check and no
   # `gh api user` round-trip to pay.
-  if [[ -n "${env_token_var}" ]]; then
-    local owner_token_var
-    owner_token_var="$(_gh_wrapper_owner_token_var "${owner}")"
-    if [[ -n "${owner_token_var}" && -n "${!owner_token_var:-}" ]]; then
-      _gh_wrapper_token_var="${owner_token_var}"
-    fi
+  # GH_TOKEN need not be set: else `env -u GH_TOKEN` reaches the keyring (claude-wrapper#124).
+  local owner_token_var
+  owner_token_var="$(_gh_wrapper_owner_token_var "${owner}")"
+  if [[ -n "${owner_token_var}" && -n "${!owner_token_var:-}" ]]; then
+    _gh_wrapper_token_var="${owner_token_var}"
+    return 0
   fi
 
   # No owner token to select (an owner outside the three, or its variable is
@@ -441,7 +441,7 @@ _gh_wrapper_sync_identity() {
   # user` fallback below resolves it — one network call per invocation. See
   # Step 11: session-level caching is a known follow-up, deliberately not
   # built here.
-  if [[ -n "${env_token_var}" && -z "${_gh_wrapper_token_var}" ]]; then
+  if [[ -n "${env_token_var}" ]]; then
     local token_login="${CLAUDE_GH_TOKEN_LOGIN:-}"
     # Why resolution failed, so the advice below can match the actual cause
     # instead of guessing "expired". Three paths reach the same dead end and
@@ -1295,14 +1295,9 @@ _gh_wrapper_approval_gate() {
 }
 
 # --- F4: scope-error hint ------------------------------------------------------
-# GH_TOKEN (the CCCLI PAT) and the keyring token are the same login; only the
-# scopes differ. When gh fails because the active token lacks a scope, say
-# exactly how to re-run the one command with the other token. Detection is
+# On a missing scope, name the token and its PAT fix, never `env -u` (claude-wrapper#124). Detection is
 # gh's own ScopesSuggestion text, so there is no command classifier to get
 # wrong. Design: dev-env docs/superpowers/specs/2026-09-03-org-migration-design.md.
-#
-# Never widen the PAT: it is exported into every session, so a scope added
-# there applies to every call rather than the one that needed it.
 
 # Print the scope named in a captured stderr file, or nothing. The character
 # class accepts either quote style, so the hint keeps working whichever one gh
@@ -1396,25 +1391,25 @@ _gh_wrapper_print_scope_hint() {
   shift
   local cmd
   cmd="$(_gh_wrapper_redact_argv "$@")"
-  # gh reads GH_TOKEN first, then GITHUB_TOKEN. Name whichever is actually set:
-  # telling someone to unset GH_TOKEN when GITHUB_TOKEN is what authenticated
-  # them is advice that cannot work, and `gh auth refresh` is equally useless
-  # here — it rewrites the keyring token, which an env-var token overrides.
-  # The caller only reaches this function when one of the two is set.
+  # gh reads GH_TOKEN, then GITHUB_TOKEN; the caller gets here only when one is set.
   local token_var="GH_TOKEN"
   if [[ -z "${GH_TOKEN:-}" ]]; then
     token_var="GITHUB_TOKEN"
   fi
-  local keyring
-  keyring="$(_gh_wrapper_keyring_login)"
-  # The login stays on the same line as its label: a reader grepping the
-  # hint for the account name should find it next to the word naming it,
-  # not wrapped onto the following line.
-  echo "[gh] ${token_var} is set and lacks the '${scope}' scope." >&2
-  echo "[gh] The keyring identity for ${keyring:-<none in hosts.yml>} has it." >&2
-  echo "[gh] Re-run this one command without ${token_var}:" >&2
-  echo "[gh]   env -u ${token_var} gh ${cmd}" >&2
-  echo "[gh] (Do not add the scope to the CCCLI PAT — it is exported into every session.)" >&2
+  # Name the owner's variable when GH_TOKEN holds its value (function mode passes it as GH_TOKEN).
+  local owner owner_var
+  owner="$(_gh_wrapper_resolve_owner "$@")"
+  if [[ -n "${owner}" ]]; then
+    owner_var="$(_gh_wrapper_owner_token_var "${owner}")"
+    if [[ -n "${owner_var}" && -n "${!owner_var:-}" && "${!owner_var}" == "${!token_var:-}" ]]; then
+      token_var="${owner_var}"
+    fi
+  fi
+  echo "[gh] ${token_var} lacks the '${scope}' scope." >&2
+  echo "[gh] Fix: grant the missing permission on ${owner:-the repo owner}'s fine-grained PAT, then re-run:" >&2
+  echo "[gh]   gh ${cmd}" >&2
+  echo "[gh] How: smartwatermelon/dev-env docs/runbooks/fleet-probe-token-scopes.md." >&2
+  echo "[gh] Only Andrew can change a PAT. Do not unset or override ${token_var} to reach the keyring token." >&2
 }
 
 # Run the real gh. stderr goes to the terminal live AND to a temp file; stdout

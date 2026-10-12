@@ -4,8 +4,8 @@
 # Run directly: bash bash/tests/test-gh-wrapper-scope-hint.sh
 #
 # When the real gh fails with GitHub's "needs the ... scope" error, the
-# wrapper must print the exact fix (env -u GH_TOKEN ... when GH_TOKEN is set;
-# gh auth refresh otherwise), keep the original stderr, and pass the exit
+# wrapper must name the token and say to fix its PAT (never env -u, #124),
+# keep the original stderr, and pass the exit
 # code through. A non-scope failure prints no hint. A success prints nothing.
 # Design: dev-env docs/superpowers/specs/2026-09-03-org-migration-design.md.
 set -uo pipefail
@@ -117,7 +117,7 @@ _run() {
   )
 }
 
-# --- Case 1: scope error with GH_TOKEN set -> env -u hint ---------------------
+# --- Case 1: scope error with GH_TOKEN set -> grant-the-permission hint -------
 GH_TOKEN="fixture-token" _run scope secret set CLAUDE_CODE_OAUTH_TOKEN --org smartwatermelon --visibility all
 rc=$?
 err="$(cat "${WORKDIR}/err")"
@@ -133,20 +133,27 @@ if [[ "${err}" == *'needs the "admin:org" scope'* ]]; then
 else
   _fail "scope error: original stderr missing, got: ${err}"
 fi
-if [[ "${err}" == *"[gh] GH_TOKEN is set and lacks the 'admin:org' scope"* ]]; then
+if [[ "${err}" == *"[gh] GH_TOKEN lacks the 'admin:org' scope"* ]]; then
   _pass "scope error: hint names the scope"
 else
   _fail "scope error: hint missing, got: ${err}"
 fi
-if [[ "${err}" == *"env -u GH_TOKEN gh secret set CLAUDE_CODE_OAUTH_TOKEN --org smartwatermelon --visibility all"* ]]; then
+if [[ "${err}" == *"[gh]   gh secret set CLAUDE_CODE_OAUTH_TOKEN --org smartwatermelon --visibility all"* ]]; then
   _pass "scope error: hint carries the exact re-run command"
 else
   _fail "scope error: re-run command missing, got: ${err}"
 fi
-if [[ "${err}" == *"keyring identity for twistedmelonman"* ]]; then
-  _pass "scope error: hint names the keyring login from hosts.yml"
+if [[ "${err}" == *"grant the missing permission"* && "${err}" == *"fleet-probe-token-scopes.md"* ]]; then
+  _pass "scope error: hint points at fixing the PAT"
 else
-  _fail "scope error: keyring login missing, got: ${err}"
+  _fail "scope error: PAT remedy missing, got: ${err}"
+fi
+# claude-wrapper#124: `env -u GH_TOKEN` reaches the full-scope keyring token.
+# The hint must never suggest it.
+if [[ "${err}" == *"env -u"* || "${err}" == *"keyring identity for"* ]]; then
+  _fail "scope error: hint still suggests the keyring bypass, got: ${err}"
+else
+  _pass "scope error: hint does not suggest env -u or the keyring"
 fi
 if [[ "${out}" == *'You must be an org admin'* ]]; then
   _pass "scope error: stdout passes through untouched"
@@ -314,15 +321,30 @@ fi
 # would be useless: an env-var token overrides the keyring token it rewrites.
 GITHUB_TOKEN="fixture-token" _run scope secret set FOO --org smartwatermelon
 err="$(cat "${WORKDIR}/err")"
-if [[ "${err}" == *"env -u GITHUB_TOKEN"* ]]; then
-  _pass "GITHUB_TOKEN: hint names GITHUB_TOKEN in the re-run"
+if [[ "${err}" == *"[gh] GITHUB_TOKEN lacks the"* ]]; then
+  _pass "GITHUB_TOKEN: hint names GITHUB_TOKEN"
 else
-  _fail "GITHUB_TOKEN: expected 'env -u GITHUB_TOKEN', got: ${err}"
+  _fail "GITHUB_TOKEN: expected the hint to name GITHUB_TOKEN, got: ${err}"
 fi
-if [[ "${err}" == *"env -u GH_TOKEN "* ]]; then
-  _fail "GITHUB_TOKEN: wrongly told the user to unset GH_TOKEN"
+if [[ "${err}" == *"GH_TOKEN lacks"* && "${err}" != *"GITHUB_TOKEN lacks"* ]]; then
+  _fail "GITHUB_TOKEN: wrongly named the unset GH_TOKEN"
 else
   _pass "GITHUB_TOKEN: does not name the unset GH_TOKEN"
+fi
+
+# --- Case 7b: GH_TOKEN unset, GH_TOKEN_SWM selected -> the hint names it -----
+GH_TOKEN_SWM="swm-fixture" _run scope secret set FOO -R smartwatermelon/x
+err="$(cat "${WORKDIR}/err")"
+if [[ "${err}" == *"[gh] GH_TOKEN_SWM lacks the 'admin:org' scope"* &&
+  "${err}" == *"smartwatermelon's fine-grained PAT"* ]]; then
+  _pass "owner token: hint names GH_TOKEN_SWM and the owner"
+else
+  _fail "owner token: expected GH_TOKEN_SWM and smartwatermelon, got: ${err}"
+fi
+if [[ "${err}" == *"swm-fixture"* ]]; then
+  _fail "owner token: token VALUE leaked into the hint"
+else
+  _pass "owner token: token value never printed"
 fi
 
 # --- Case 8: no temp-file leak when the wrapper is signalled mid-run ---------
