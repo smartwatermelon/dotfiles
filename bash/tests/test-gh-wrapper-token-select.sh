@@ -10,6 +10,7 @@
 #   3. With no owner resolved, the launch token is kept; if the call fails, one
 #      stderr line tells the agent to stop and ask instead of guessing. The exit
 #      code is unchanged.
+#   4. GH_TOKEN unset or empty still selects the owner token (claude-wrapper#124).
 #
 # Every case runs in BOTH modes: standalone (bash gh-wrapper.sh ...) and
 # function (source gh-wrapper.sh; gh ...). Function mode reaches the real gh
@@ -19,7 +20,6 @@
 # KNOWN-BAD against origin/main: the "cross-owner" cases fail (the call is
 # refused), the "api repos/OTHER" cases fail (cwd's token is used), the
 # stop-line cases fail (no line), and the router case fails (hook sourced).
-#   4. GH_TOKEN unset or empty still selects the owner token (claude-wrapper#124).
 #
 # All tokens are stub strings. The real per-owner variables are unset first so
 # nothing from the caller's environment reaches the stub.
