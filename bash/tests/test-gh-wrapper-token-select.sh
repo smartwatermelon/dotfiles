@@ -11,6 +11,7 @@
 #      stderr line tells the agent to stop and ask instead of guessing. The exit
 #      code is unchanged.
 #   4. GH_TOKEN unset or empty still selects the owner token (claude-wrapper#124).
+#   5. No owner or unmapped owner, GH_TOKEN unset: TWM plus warning, or fail closed.
 #
 # Every case runs in BOTH modes: standalone (bash gh-wrapper.sh ...) and
 # function (source gh-wrapper.sh; gh ...). Function mode reaches the real gh
@@ -320,21 +321,74 @@ for mode in standalone function; do
   else
     _fail "${mode}: no GH_TOKEN_* vars: want kr-twistedmelonman, rc=${rc} token=${logged}"
   fi
-  # An owner with no GH_TOKEN_* mapping (Beacon) keeps the keyring path even
-  # when the three vars are set.
+  # No GH_TOKEN_* at all, unmapped owner (Beacon on the work machine): keyring.
+  _run "${mode}" "${NEUTRAL}" -- pr list -R beacon-biosignals/x
+  if [[ "${rc}" -eq 0 && "${logged}" == "kr-andrewmrich" && -z "${err}" ]]; then
+    _pass "${mode}: no GH_TOKEN_* vars, unmapped owner: keyring, silent"
+  else
+    _fail "${mode}: no vars, unmapped owner: want kr-andrewmrich, rc=${rc} token=${logged} err=${err}"
+  fi
+  # No GH_TOKEN_* at all, no owner: unchanged (no token set, no warning).
+  _run "${mode}" "${NEUTRAL}" -- api user
+  if [[ "${rc}" -eq 0 && "${logged}" == "<unset>" && -z "${err}" ]]; then
+    _pass "${mode}: no GH_TOKEN_* vars, no owner: unchanged, silent"
+  else
+    _fail "${mode}: no vars, no owner: rc=${rc} token=${logged} err=${err}"
+  fi
+
+  # claude-wrapper#124: GH_TOKEN unset, GH_TOKEN_* present, but no owner
+  # resolved or an unmapped owner: GH_TOKEN_TWM plus a stderr warning.
+  _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-stub GH_TOKEN_TWM=twm-stub -- api user
+  if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" && "${err}" == *"no owner resolved"* &&
+    "${err}" == *"GH_TOKEN_TWM"* && "${err}" == *"-R OWNER/REPO"* ]]; then
+    _pass "${mode}: no owner + GH_TOKEN unset uses GH_TOKEN_TWM with a warning"
+  else
+    _fail "${mode}: no owner fallback: rc=${rc} token=${logged} err=${err}"
+  fi
   _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-stub GH_TOKEN_NOS=nos-stub GH_TOKEN_TWM=twm-stub -- \
     pr list -R beacon-biosignals/x
-  if [[ "${rc}" -eq 0 && "${logged}" == "kr-andrewmrich" ]]; then
-    _pass "${mode}: unmapped owner keeps its keyring token"
+  if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" && "${err}" == *"owner 'beacon-biosignals' has no mapped token"* &&
+    "${err}" == *"GH_TOKEN_TWM"* && "${err}" == *"-R OWNER/REPO"* ]]; then
+    _pass "${mode}: unmapped owner + GH_TOKEN unset uses GH_TOKEN_TWM with a warning"
   else
-    _fail "${mode}: unmapped owner: want kr-andrewmrich, rc=${rc} token=${logged}"
+    _fail "${mode}: unmapped owner fallback: rc=${rc} token=${logged} err=${err}"
   fi
-  # KNOWN GAP (current behavior): no owner + GH_TOKEN unset selects nothing.
-  _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-stub GH_TOKEN_TWM=twm-stub -- api user
-  if [[ "${rc}" -eq 0 && "${logged}" == "<unset>" ]]; then
-    _pass "${mode}: KNOWN GAP: no owner + GH_TOKEN unset selects nothing"
+  _run "${mode}" "${NEUTRAL}" GH_TOKEN= GITHUB_TOKEN= GH_TOKEN_TWM=twm-stub -- api user
+  if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" && "${err}" == *"no owner resolved"* ]]; then
+    _pass "${mode}: empty GH_TOKEN/GITHUB_TOKEN also take the fallback"
   else
-    _fail "${mode}: no owner + GH_TOKEN unset: rc=${rc} token=${logged}"
+    _fail "${mode}: empty-token fallback: rc=${rc} token=${logged} err=${err}"
+  fi
+  # GH_TOKEN_TWM unset: fail closed, stub never reached, no keyring.
+  for owner_args in "api user" "pr list -R beacon-biosignals/x"; do
+    read -ra case_args <<<"${owner_args}"
+    _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-stub -- "${case_args[@]}"
+    if [[ "${rc}" -ne 0 && "${err}" == *"GH_TOKEN_TWM is not set"* && ! -s "${LOG}" ]]; then
+      _pass "${mode}: '${owner_args}' with GH_TOKEN_TWM unset fails closed"
+    else
+      _fail "${mode}: '${owner_args}' fail-closed: rc=${rc} err=${err} log=$(cat "${LOG}")"
+    fi
+  done
+  # The warning names variables, never values.
+  _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-secret-value GH_TOKEN_NOS=nos-secret-value \
+    GH_TOKEN_TWM=twm-secret-value -- api user
+  if [[ "${err}" != *secret-value* ]]; then
+    _pass "${mode}: fallback warning contains no token value"
+  else
+    _fail "${mode}: fallback warning leaked a token value"
+  fi
+  _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-secret-value -- api user
+  if [[ "${err}" != *secret-value* ]]; then
+    _pass "${mode}: fail-closed message contains no token value"
+  else
+    _fail "${mode}: fail-closed message leaked a token value"
+  fi
+  # A set GH_TOKEN is never replaced by the fallback.
+  _run "${mode}" "${NEUTRAL}" GH_TOKEN=launch-stub GH_TOKEN_TWM=twm-stub -- api user
+  if [[ "${rc}" -eq 0 && "${logged}" == "launch-stub" && "${err}" != *WARNING* ]]; then
+    _pass "${mode}: set GH_TOKEN bypasses the fallback"
+  else
+    _fail "${mode}: GH_TOKEN set: rc=${rc} token=${logged} err=${err}"
   fi
 
   # Owner token unset: the old refusal still applies to a mismatched login.

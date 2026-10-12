@@ -376,6 +376,25 @@ _gh_wrapper_identity_for_owner() {
   esac
 }
 
+# No owner token fits (claude-wrapper#124): use TWM and warn, else fail.
+# Returns 0 = not applicable, 1 = fail closed, 2 = fallback applied.
+_gh_wrapper_scoped_fallback() {
+  local why="$1"
+  [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]] && return 0
+  [[ -z "${GH_TOKEN_SWM:-}" && -z "${GH_TOKEN_NOS:-}" && -z "${GH_TOKEN_TWM:-}" ]] && return 0
+  if [[ -z "${GH_TOKEN_TWM:-}" ]]; then
+    echo "[gh] ERROR: ${why}, and GH_TOKEN_TWM is not set." >&2
+    echo "[gh] Failing closed rather than using the full-scope keyring token." >&2
+    echo "[gh] Fix: pass -R OWNER/REPO or run inside the repo, or set GH_TOKEN_TWM." >&2
+    return 1
+  fi
+  echo "[gh] WARNING: ${why}; using GH_TOKEN_TWM instead of the keyring token." >&2
+  echo "[gh] Reaching this fallback means owner detection failed." >&2
+  echo "[gh] Fix: pass -R OWNER/REPO or run inside the repo." >&2
+  _gh_wrapper_token_var="GH_TOKEN_TWM"
+  return 2
+}
+
 # gh has one active account per host (not per repo), unlike git+SSH which
 # already resolves the right identity per remote via ~/.ssh/config host
 # aliases. This keeps gh in sync with that same per-repo intent.
@@ -408,7 +427,12 @@ _gh_wrapper_sync_identity() {
   _gh_wrapper_token_var=""
   _gh_wrapper_keyring_token=""
   owner="$(_gh_wrapper_resolve_owner "$@")"
-  [[ -z "${owner}" ]] && return 0
+  if [[ -z "${owner}" ]]; then
+    local fb_rc=0
+    _gh_wrapper_scoped_fallback "no owner resolved" || fb_rc=$?
+    [[ "${fb_rc}" -eq 1 ]] && return 1
+    return 0
+  fi
 
   desired="$(_gh_wrapper_identity_for_owner "${owner}")"
 
@@ -431,8 +455,15 @@ _gh_wrapper_sync_identity() {
     return 0
   fi
 
-  # No owner token to select (an owner outside the three, or its variable is
-  # unset): GH_TOKEN is used as given. When
+  # An owner outside the three has no token to select: GH_TOKEN_TWM, loudly.
+  if [[ -z "${owner_token_var}" ]]; then
+    local fb_rc=0
+    _gh_wrapper_scoped_fallback "owner '${owner}' has no mapped token" || fb_rc=$?
+    [[ "${fb_rc}" -eq 1 ]] && return 1
+    [[ "${fb_rc}" -eq 2 ]] && return 0
+  fi
+
+  # No owner token to select (its variable is unset): GH_TOKEN is used as given. When
   # the token represents a different identity than the resolved owner needs,
   # fail closed instead of silently acting as the wrong account.
   #
