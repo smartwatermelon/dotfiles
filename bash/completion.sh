@@ -70,9 +70,11 @@ if command -v brew &>/dev/null; then
 fi
 
 # pipx completion
-if command -v register-python-argcomplete &>/dev/null; then
-  eval "$(register-python-argcomplete pipx)"
+if command -v register-python-argcomplete &>/dev/null \
+  && _pipx_ac="$(register-python-argcomplete pipx)"; then
+  eval "${_pipx_ac}"
 fi
+unset _pipx_ac
 
 # eas completion
 # `eas autocomplete:script` starts Node (~80 ms) per shell, so cache its
