@@ -77,20 +77,13 @@ rules:
   # itself, so the effective ceiling is set in the reusable workflow, not
   # here.
   #
-  # Scoped to the three standard caller filenames only. A repo's own
-  # workflows are still audited normally — if `validate.yml` or `release.yml`
-  # asks for more than it needs, that finding still fires.
+  # Scoped to the standard caller filenames only. A repo's own workflows
+  # are still audited normally.
   #
-  # These match on FILENAME, not on which reusable workflow is called, so the
-  # coupling is by naming convention. Note especially that `claude.yml` is the
-  # caller for `claude-assistant.yml` — the names differ, which is easy to
-  # misread as an omission. A consumer who names a caller anything else (say
-  # `claude-assistant-caller.yml`) gets excessive-permissions findings with no
-  # explanation; the fix is to rename the caller to the standard filename, or
-  # to add the local name here. See #142 and the README's zizmor section.
+  # These match on FILENAME, not on the reusable workflow called. A caller
+  # with a nonstandard name gets findings: rename it or add it. See #142.
   excessive-permissions:
     ignore:
-      - claude.yml # caller for claude-assistant.yml
       - dependabot-auto-merge.yml # caller for dependabot-auto-merge.yml
       - standards-check.yml # caller for standards-check.yml
 
