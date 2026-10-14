@@ -73,3 +73,23 @@ fi
 if command -v register-python-argcomplete &>/dev/null; then
   eval "$(register-python-argcomplete pipx)"
 fi
+
+# eas completion
+# `eas autocomplete:script` starts Node (~80 ms) per shell, so cache its
+# output; regenerate when eas is newer.
+if _eas_bin="$(command -v eas)"; then
+  _eas_ac_cache="${XDG_CACHE_HOME:-${HOME}/.cache}/eas/autocomplete.bash"
+  if [[ ! -s "${_eas_ac_cache}" || "${_eas_bin}" -nt "${_eas_ac_cache}" ]]; then
+    mkdir -p "${_eas_ac_cache%/*}"
+    # Per-process temp file: shells opening together must not share one.
+    if eas autocomplete:script bash 2>/dev/null >"${_eas_ac_cache}.tmp.$$"; then
+      mv -f "${_eas_ac_cache}.tmp.$$" "${_eas_ac_cache}"
+    else
+      rm -f "${_eas_ac_cache}.tmp.$$"
+    fi
+  fi
+  #shellcheck source=/dev/null
+  [[ -s "${_eas_ac_cache}" ]] && source "${_eas_ac_cache}"
+  unset _eas_ac_cache
+fi
+unset _eas_bin
