@@ -344,24 +344,11 @@ else
 fi
 
 # ============================================================================
-# 7. NVM (Node Version Manager)
+# 7. NODE.JS (Homebrew `node`, installed from the Brewfile in step 2)
 # ============================================================================
 
-NVM_VERSION="v0.40.4"
 if [[ -d "${HOME}/.nvm" ]]; then
-  _skip "NVM already installed at ~/.nvm"
-elif [[ "${DRY_RUN}" == true ]]; then
-  _dry "Would install NVM ${NVM_VERSION}"
-else
-  _info "Installing NVM ${NVM_VERSION}..."
-  nvm_installer="$(curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh")"
-  PROFILE=/dev/null bash -c "${nvm_installer}"
-  if [[ ! -d "${HOME}/.nvm" ]]; then
-    _warn "NVM installation may have failed — ~/.nvm not found"
-    failures+=("nvm-install")
-  else
-    installed+=("NVM ${NVM_VERSION}")
-  fi
+  _warn "${HOME}/.nvm exists; node should come only from Homebrew. Remove it."
 fi
 
 # ============================================================================

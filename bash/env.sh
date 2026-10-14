@@ -49,7 +49,7 @@ fi
 export BASH_SILENCE_DEPRECATION_WARNING=1
 
 # Timeout wrapper for shell startup commands
-# Prevents indefinite hangs if brew/nvm are slow or unresponsive
+# Prevents indefinite hangs if brew is slow or unresponsive
 # Usage: _with_timeout <seconds> <command> [args...]
 # Returns: command exit code, or 124 if timeout occurred
 _with_timeout() {

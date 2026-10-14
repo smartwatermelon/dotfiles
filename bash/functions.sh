@@ -950,7 +950,7 @@ allup() {
   # the interactive shell that invoked it rather than a subshell.
   #
   # Deliberately not `|| return $?`: .bash_profile's exit status is just
-  # that of its last command (an nvm bash_completion probe), not a signal
+  # that of its last command, not a signal
   # that the environment loaded correctly. Gating on it would risk
   # skipping `updates` below after the pulls and installs had already run.
   #shellcheck source=/dev/null

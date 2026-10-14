@@ -23,6 +23,10 @@ brew "markdownlint-cli"
 brew "markdownlint-cli2"
 brew "semgrep"
 
+# ── Core: Runtimes (path.sh and env.sh expect these) ─────
+brew "node"                 # the only node install; no version manager
+brew "ruby"
+
 # ── Core: Tools referenced by configs ────────────────────
 brew "bat"
 brew "coreutils"            # provides GNU timeout, gdate, etc.

@@ -170,6 +170,6 @@ git checkout -b main origin/main
 source ~/.bash_profile
 ```
 
-`install.sh` is idempotent — safe to re-run at any time. It creates per-file symlinks from `~/.config/` into the repo using `git ls-files` for discovery. It also handles Homebrew, directories, pipx packages, NVM, and a post-install smoke test. Use `--dry-run` to preview changes.
+`install.sh` is idempotent — safe to re-run at any time. It creates per-file symlinks from `~/.config/` into the repo using `git ls-files` for discovery. It also handles Homebrew, directories, pipx packages, and a post-install smoke test. Use `--dry-run` to preview changes.
 
 Tools that use XDG conventions (`git`, `vim`, `btop`, `yamllint`, `gh`, `yt-dlp`) will find their config automatically.
