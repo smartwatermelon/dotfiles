@@ -50,18 +50,3 @@ if [[ -f "${HOME}/.bashrc" ]] && [[ "${BASH_SOURCE[0]}" != "${HOME}/.bashrc" ]];
   #shellcheck source=/dev/null
   source "${HOME}/.bashrc"
 fi
-
-# NVM (Node Version Manager) setup
-# Note: NVM loading can be slow (~1-2s). If it causes issues:
-#   - Check NVM installation: ${HOME}/.nvm/
-#   - Comment out these lines to disable NVM temporarily
-#   - Use _profile_time output to measure actual load time
-export NVM_DIR="${HOME}/.nvm"
-#shellcheck source=/dev/null
-if [[ -s "${NVM_DIR}/nvm.sh" ]]; then
-  _profile_time "NVM loading" source "${NVM_DIR}/nvm.sh"
-fi
-#shellcheck source=/dev/null
-if [[ -s "${NVM_DIR}/bash_completion" ]]; then
-  _profile_time "NVM bash_completion" source "${NVM_DIR}/bash_completion"
-fi

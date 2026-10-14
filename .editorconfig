@@ -26,3 +26,10 @@ indent_style = space
 indent_size = 2
 switch_case_indent = true
 binary_next_line = true
+
+# Bash startup files have no .sh extension either; same style.
+[.bash_profile]
+indent_style = space
+indent_size = 2
+switch_case_indent = true
+binary_next_line = true
