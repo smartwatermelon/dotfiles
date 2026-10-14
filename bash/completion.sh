@@ -73,3 +73,8 @@ fi
 if command -v register-python-argcomplete &>/dev/null; then
   eval "$(register-python-argcomplete pipx)"
 fi
+
+# eas completion
+if command -v eas &>/dev/null; then
+  eval "$(eas autocomplete:script bash &>/dev/null)"
+fi
