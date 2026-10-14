@@ -102,7 +102,7 @@ rm -f "${cache_file}"
 out="$(run_block "${stub_bin}:/usr/bin:/bin" 1)"
 got="$(exists "${cache_file}")"
 check "failed eas leaves no cache" "${got}" absent
-got="$(exists "${cache_file}.tmp")"
+got="$(compgen -G "${cache_file}.tmp*" || echo absent)"
 check "failed eas leaves no temp file" "${got}" absent
 check "failed eas registers nothing" "${out}" ''
 run_block "${stub_bin}:/usr/bin:/bin" >/dev/null

@@ -81,10 +81,11 @@ if _eas_bin="$(command -v eas)"; then
   _eas_ac_cache="${XDG_CACHE_HOME:-${HOME}/.cache}/eas/autocomplete.bash"
   if [[ ! -s "${_eas_ac_cache}" || "${_eas_bin}" -nt "${_eas_ac_cache}" ]]; then
     mkdir -p "${_eas_ac_cache%/*}"
-    if eas autocomplete:script bash 2>/dev/null >"${_eas_ac_cache}.tmp"; then
-      mv -f "${_eas_ac_cache}.tmp" "${_eas_ac_cache}"
+    # Per-process temp file: shells opening together must not share one.
+    if eas autocomplete:script bash 2>/dev/null >"${_eas_ac_cache}.tmp.$$"; then
+      mv -f "${_eas_ac_cache}.tmp.$$" "${_eas_ac_cache}"
     else
-      rm -f "${_eas_ac_cache}.tmp"
+      rm -f "${_eas_ac_cache}.tmp.$$"
     fi
   fi
   #shellcheck source=/dev/null
