@@ -76,5 +76,5 @@ fi
 
 # eas completion
 if command -v eas &>/dev/null; then
-  eval "$(eas autocomplete:script bash &>/dev/null)"
+  eval "$(eas autocomplete:script bash 2>/dev/null)"
 fi
