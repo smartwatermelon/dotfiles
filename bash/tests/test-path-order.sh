@@ -148,4 +148,56 @@ else
   fail=1
 fi
 
+# Regression: GEM_EXE_DIR comes from Homebrew ruby even when a decoy system
+# ruby resolves first. Each stub prints its own Gem.bindir.
+fake_brew="${HOME}/fake-brew"
+decoy_bin="${HOME}/decoy-bin"
+brew_gem_bin="${HOME}/brew-gem-bin"
+system_gem_bin="${HOME}/system-gem-bin"
+mkdir -p "${fake_brew}/opt/ruby/bin" "${fake_brew}/bin" "${decoy_bin}" \
+  "${brew_gem_bin}" "${system_gem_bin}"
+printf '#!/bin/sh\necho "%s"\n' "${brew_gem_bin}" >"${fake_brew}/opt/ruby/bin/ruby"
+printf '#!/bin/sh\necho "%s"\n' "${system_gem_bin}" >"${decoy_bin}/ruby"
+chmod +x "${fake_brew}/opt/ruby/bin/ruby" "${decoy_bin}/ruby"
+
+# A separate bash process, not a subshell: _get_homebrew_root has to be
+# replaced between sourcing functions.sh and path.sh.
+fake_brew_driver="${HOME}/fake-brew-driver.sh"
+cat >"${fake_brew_driver}" <<'EOF'
+source "${BASH_CONFIG_DIR}/functions.sh"
+_get_homebrew_root() { echo "${FAKE_BREW}"; }
+PATH="${START_PATH}"
+source "${BASH_CONFIG_DIR}/path.sh"
+printf '%s' "${PATH}"
+EOF
+
+_run_with_fake_brew() {
+  FAKE_BREW="${fake_brew}" START_PATH="${decoy_bin}:/usr/bin:/bin" \
+    "${BASH}" "${fake_brew_driver}"
+}
+
+gem_path="$(_run_with_fake_brew)"
+if [[ ":${gem_path}:" == *":${brew_gem_bin}:"* ]]; then
+  echo "PASS: Homebrew ruby's Gem.bindir is on PATH"
+else
+  echo "FAIL: expected Homebrew ruby's Gem.bindir '${brew_gem_bin}' in PATH: ${gem_path}"
+  fail=1
+fi
+if [[ ":${gem_path}:" == *":${system_gem_bin}:"* ]]; then
+  echo "FAIL: system ruby's Gem.bindir '${system_gem_bin}' leaked into PATH: ${gem_path}"
+  fail=1
+else
+  echo "PASS: system ruby's Gem.bindir kept off PATH"
+fi
+
+# Without Homebrew ruby, the decoy system ruby still must not set a tier.
+rm "${fake_brew}/opt/ruby/bin/ruby"
+gem_path="$(_run_with_fake_brew)"
+if [[ ":${gem_path}:" == *":${system_gem_bin}:"* ]]; then
+  echo "FAIL: system ruby's Gem.bindir used when Homebrew ruby is absent: ${gem_path}"
+  fail=1
+else
+  echo "PASS: no gem tier when Homebrew ruby is absent"
+fi
+
 exit "${fail}"
