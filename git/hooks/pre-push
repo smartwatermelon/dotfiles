@@ -309,6 +309,52 @@ run_supply_chain_scan
 # prefer it when present and fall back to a watchdog subshell otherwise.
 SEMGREP_TIMEOUT_SECS="${SEMGREP_TIMEOUT_SECS:-300}"
 
+# Ends every member of process group $1 after a timeout: SIGTERM, a grace
+# period, then SIGKILL for whatever is left. Both paths of run_bounded call
+# this, so expiry cleanup has one implementation (smartwatermelon/dotfiles#350).
+_bounded_reap_group() {
+  local pgid="$1"
+  # Nothing to do if the group is already empty.
+  kill -TERM -- "-${pgid}" 2>/dev/null || return 0
+
+  # Escalate to SIGKILL only while the group still has a member.
+  #
+  # A flat `sleep 2; kill -KILL` could signal an id that has already been freed
+  # and reassigned, so the SIGKILL could land on an unrelated process
+  # (smartwatermelon/dotfiles#258). Polling in short steps and re-checking
+  # liveness before escalating shortens that window and makes the escalation
+  # conditional on something still being there to kill.
+  #
+  # This narrows the race; it does not close it. Nothing a shell can call makes
+  # "check liveness, then signal" atomic, and signalling a group instead of a
+  # pid does not change that: a group id is not reused while any member lives,
+  # but once the group empties the id is free again. Only pidfds would close
+  # it. The residual window is a few milliseconds on a path that runs once per
+  # push. Liveness is a GROUP test, so escalation continues after the leader
+  # dies if a TERM-ignoring descendant is still running.
+  #
+  # Poll in 0.1s steps for SEMGREP_TIMEOUT_KILL_GRACE seconds, the same knob
+  # the GNU path passes to `timeout --kill-after`; this loop once hardcoded 20
+  # iterations and ignored it (smartwatermelon/dotfiles#279). bash has no float
+  # arithmetic, so the seconds value is scaled by 10 to get the iteration
+  # count. A non-numeric or empty value falls back to the 2s default.
+  local grace_secs="${SEMGREP_TIMEOUT_KILL_GRACE:-2}"
+  [[ "${grace_secs}" =~ ^[0-9]+$ ]] || grace_secs=2
+  local grace_steps=$((grace_secs * 10))
+  local grace=0
+  while ((grace < grace_steps)); do
+    # `|| return 0` is the SUCCESS path: the group is empty, so there is
+    # nothing left to escalate against. The counter uses `+= 1` rather than
+    # `++` because `((v++))` evaluates to 0 when v is 0 and would abort under
+    # `set -e`.
+    kill -0 -- "-${pgid}" 2>/dev/null || return 0
+    sleep 0.1
+    ((grace += 1))
+  done
+  kill -KILL -- "-${pgid}" 2>/dev/null || true
+  return 0
+}
+
 run_bounded() {
   local secs="$1"
   shift
@@ -320,6 +366,16 @@ run_bounded() {
     timeout_bin="gtimeout"
   fi
 
+  # The fallback's expiry marker is made before anything is launched, so a
+  # failing mktemp cannot abort the hook with the command already running.
+  # See the fallback section below for what the marker is for.
+  local expiry_marker=""
+  if [[ -z "${timeout_bin}" ]]; then
+    expiry_marker="$(mktemp "${TMPDIR:-/tmp}/prepush-expiry.XXXXXX")"
+    rm -f "${expiry_marker}"
+  fi
+
+  local -a launch=("$@")
   if [[ -n "${timeout_bin}" ]]; then
     # --kill-after is not optional. Plain `timeout N` sends only SIGTERM and
     # then waits indefinitely for a command that ignores it — it still reports
@@ -328,6 +384,35 @@ run_bounded() {
     # command returned 124 after 60 seconds; with --kill-after it returned at 4
     # (smartwatermelon/dotfiles#262). Without this the hook keeps exactly the
     # hang #251 set out to remove, on any machine that has coreutils.
+    launch=("${timeout_bin}" --kill-after="${SEMGREP_TIMEOUT_KILL_GRACE:-2}" "${secs}" "$@")
+  fi
+
+  # Both paths run the command in its OWN process group, and cleanup signals
+  # that group (`kill -- -PGID`), not one pid. Signalling only the pid left a
+  # timed-out command's children running after this function returned
+  # (smartwatermelon/dotfiles#350); semgrep spawns workers, so that is the case
+  # that matters here. On the GNU path the job is `timeout` itself, which
+  # already leads its own group, so the group id is still the job's pid.
+  #
+  # Why `set -m`: it makes bash put the next background job in a new group whose
+  # id is the job's pid. Stock macOS has no `setsid`, and a `pkill -P` walk of
+  # the tree is not atomic: a fork between listing and killing escapes, and a
+  # grandchild whose parent dies first is reparented out of the tree. A group
+  # signal reaches every member in one call, orphans included. The one escape is
+  # a descendant that calls setsid/setpgid itself.
+  #
+  # `-m` is on for this one line only, so the fallback's watchdog stays in the
+  # hook's own group. Stdin is /dev/null so a job outside the terminal's
+  # foreground group cannot stop on SIGTTIN; bash 3.2 and 5.x also differ on
+  # async stdin under `-m`, and this makes both behave the same.
+  local had_monitor=0
+  [[ $- == *m* ]] && had_monitor=1
+  set -m
+  "${launch[@]}" </dev/null &
+  local cmd_pid=$!
+  ((had_monitor)) || set +m
+
+  if [[ -n "${timeout_bin}" ]]; then
     local timeout_status=0
     # A SIGKILLed child makes the invoking shell print a "Killed: 9" job notice
     # on its own stderr. That is cosmetic and only appears on the escalation
@@ -335,8 +420,7 @@ run_bounded() {
     # cannot be suppressed from inside this function, since the notice comes
     # from the shell reaping the job rather than from the command. Left alone
     # rather than papered over with a subshell that does not actually stop it.
-    "${timeout_bin}" --kill-after="${SEMGREP_TIMEOUT_KILL_GRACE:-2}" "${secs}" "$@" \
-      || timeout_status=$?
+    wait "${cmd_pid}" || timeout_status=$?
     # 137 ONLY, not 143. GNU timeout already distinguishes these itself, so
     # mapping both would throw away information it went to the trouble of
     # providing (smartwatermelon/dotfiles#270). Measured against GNU coreutils
@@ -355,7 +439,13 @@ run_bounded() {
     # So 137 is an expiry and folds into 124 for one caller-facing code, while
     # 143 is a signal death that must stay 143. Collapsing it would reintroduce
     # on this path exactly the mislabelling #266 fixed on the fallback.
-    if ((timeout_status == 137)); then
+    #
+    # On expiry, finish the job `timeout` leaves undone. It returns as soon as
+    # its DIRECT child exits, before --kill-after fires, so a descendant that
+    # ignores SIGTERM outlives it. Measured: a TERM-ignoring grandchild survived
+    # this path (#350). The same group cleanup the watchdog uses ends it.
+    if ((timeout_status == 124 || timeout_status == 137)); then
+      _bounded_reap_group "${cmd_pid}"
       return 124
     fi
     return "${timeout_status}"
@@ -367,11 +457,8 @@ run_bounded() {
   #
   # The marker records that the watchdog — rather than anything else — is what
   # killed the command, so the expiry code below is not inferred from the signal
-  # number alone.
-  local expiry_marker
-  expiry_marker="$(mktemp "${TMPDIR:-/tmp}/prepush-expiry.XXXXXX")"
-  rm -f "${expiry_marker}"
-
+  # number alone. It is created above, before the launch.
+  #
   # Cleanup is explicit on each return path below, NOT a `trap ... RETURN`.
   #
   # A RETURN trap set inside a function is not scoped to that function: it stays
@@ -385,30 +472,6 @@ run_bounded() {
   # empty file under TMPDIR with a recognizable prefix, which the OS collects.
   # Trading a real crash for that is not a good exchange.
 
-  # The command runs in its OWN process group, and every signal below goes to
-  # that group (`kill -- -PGID`), not to one pid. Signalling only the pid left a
-  # timed-out command's children running after this function returned
-  # (smartwatermelon/dotfiles#350); semgrep spawns workers, so that is the case
-  # that matters here.
-  #
-  # Why `set -m`: it makes bash put the next background job in a new group whose
-  # id is the job's pid. Stock macOS has no `setsid`, and a `pkill -P` walk of
-  # the tree is not atomic: a fork between listing and killing escapes, and a
-  # grandchild whose parent dies first is reparented out of the tree. A group
-  # signal reaches every member in one call, orphans included. The one escape is
-  # a descendant that calls setsid/setpgid itself; GNU `timeout` has it too.
-  #
-  # `-m` is on for this one line only, so the watchdog stays in the hook's own
-  # group. Stdin is /dev/null so a job outside the terminal's foreground group
-  # cannot stop on SIGTTIN; bash 3.2 and 5.x also differ on async stdin under
-  # `-m`, and this makes both behave the same.
-  local had_monitor=0
-  [[ $- == *m* ]] && had_monitor=1
-  set -m
-  "$@" </dev/null &
-  local cmd_pid=$!
-  ((had_monitor)) || set +m
-
   (
     # Poll rather than `sleep ${secs}` in one shot so the watchdog exits
     # promptly once the command finishes, instead of lingering for the full
@@ -421,49 +484,7 @@ run_bounded() {
       ((waited += 1))
     done
     : >"${expiry_marker}"
-    kill -TERM -- "-${cmd_pid}" 2>/dev/null || true
-
-    # Escalate to SIGKILL only while the process is still ours to signal.
-    #
-    # A flat `sleep 2; kill -KILL` would signal a pid the parent's `wait` may
-    # already have reaped, and a reaped pid can be reassigned — so the SIGKILL
-    # could land on an unrelated process
-    # (smartwatermelon/dotfiles#258). Polling in short steps and re-checking
-    # liveness before escalating both shortens that window and makes the
-    # escalation conditional on the process still existing.
-    #
-    # This narrows the race rather than eliminating it: nothing in POSIX makes
-    # "check liveness, then signal" atomic. It cannot be closed from a shell
-    # without process groups or pidfds, and the residual window is now a few
-    # milliseconds on a path that runs once per push.
-    #
-    # The checks and signals now target the group (#350). The race is the same
-    # in kind: an id is not reused while its group has a live member, but once
-    # the group empties the id is free again. Liveness is a GROUP test, so the
-    # loop keeps escalating after the leader dies if a TERM-ignoring child lives.
-    #
-    # Poll in 0.1s steps for SEMGREP_TIMEOUT_KILL_GRACE seconds. The GNU path
-    # at the top of this function passes the same variable to `timeout
-    # --kill-after`, so both paths honor one knob; this loop previously
-    # hardcoded 20 iterations and ignored it (smartwatermelon/dotfiles#279).
-    # bash has no float arithmetic, so the seconds value is scaled by 10 to
-    # get the iteration count. A non-numeric or empty value falls back to the
-    # same 2s default the GNU path uses.
-    local grace_secs="${SEMGREP_TIMEOUT_KILL_GRACE:-2}"
-    [[ "${grace_secs}" =~ ^[0-9]+$ ]] || grace_secs=2
-    local grace_steps=$((grace_secs * 10))
-    local grace=0
-    while ((grace < grace_steps)); do
-      # `|| exit 0` is the SUCCESS path, not an error path: the command is
-      # already gone, so there is nothing left to escalate against and the
-      # watchdog has no further work. The counter uses `+= 1` rather than
-      # `++` because `((v++))` evaluates to 0 when v is 0 and would abort
-      # this subshell under the inherited `set -e`.
-      kill -0 -- "-${cmd_pid}" 2>/dev/null || exit 0
-      sleep 0.1
-      ((grace += 1))
-    done
-    kill -0 -- "-${cmd_pid}" 2>/dev/null && kill -KILL -- "-${cmd_pid}" 2>/dev/null
+    _bounded_reap_group "${cmd_pid}"
     exit 0
   ) &
   local watchdog_pid=$!
@@ -473,7 +494,7 @@ run_bounded() {
 
   # On expiry, let the watchdog FINISH. The group TERM usually kills the leader
   # at once, so `wait` returns while a TERM-ignoring child may still live; only
-  # the watchdog's grace loop will SIGKILL it. Killing the watchdog here, as the
+  # the watchdog's _bounded_reap_group will SIGKILL it. Killing the watchdog here, as the
   # normal path does, would cancel that escalation and leak the child (#350).
   # This adds at most SEMGREP_TIMEOUT_KILL_GRACE, and only when one ignores TERM.
   # The marker is written before the TERM, so it is present on this path.

@@ -72,15 +72,16 @@ _fail() {
 # A shell-accurate tokenizer is not worth writing here. bash then parses it and
 # `declare -f` reprints it, so what the cases drive is a function bash accepted,
 # not a region awk guessed at.
+# run_bounded calls _bounded_reap_group, so both are sliced the same way.
 _raw_body="$(awk '
-  /^run_bounded\(\)/ { collecting = 1 }
+  /^(run_bounded|_bounded_reap_group)\(\)/ { collecting = 1 }
   collecting {
     print
     counted = $0
     sub(/#.*/, "", counted)
     n = gsub(/\{/, "{", counted); depth += n
     n = gsub(/\}/, "}", counted); depth -= n
-    if (depth == 0 && seen_open) { exit }
+    if (depth == 0 && seen_open) { collecting = 0; seen_open = 0; next }
     if (depth > 0) { seen_open = 1 }
   }
 ' "${HOOK}")"
@@ -91,7 +92,7 @@ _raw_body="$(awk '
 # explanation, not an empty exit 1.
 RUNNER_SRC="$(bash --norc --noprofile -c '
   eval "$1" || exit 1
-  declare -f run_bounded
+  declare -f _bounded_reap_group run_bounded
 ' _ "${_raw_body}" 2>/dev/null)" || RUNNER_SRC=""
 
 if [[ -n "${RUNNER_SRC}" ]]; then
@@ -386,42 +387,51 @@ wait
 SPAWNER_EOF
 chmod +x "${GRANDCHILD}" "${SPAWNER}"
 
-# Fallback only (leading 1). GNU timeout exits with its child, before --kill-after: measured to fail.
-pidfile="${WORKDIR}/grandchild.pid"
-_timed 1 1 "${SPAWNER}" "${pidfile}"
-read -r rc _ <<<"${case_out}"
-gc_pid="$(cat "${pidfile}" 2>/dev/null)"
-
-if [[ "${rc}" == "124" ]]; then
-  _pass "watchdog fallback: a command whose grandchild ignores TERM reports 124"
-else
-  _fail "watchdog fallback: grandchild case exited ${rc}, expected 124"
-fi
-
-if [[ -z "${gc_pid}" ]]; then
-  _fail "watchdog fallback: the fixture never recorded its grandchild's pid"
-else
-  # The orphan is reaped asynchronously and a zombie answers kill -0, so settle first.
-  gone=0
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if ! kill -0 "${gc_pid}" 2>/dev/null; then
-      gone=1
-      break
-    fi
-    sleep 0.2
-  done
-  if ((gone)); then
-    _pass "watchdog fallback: the grandchild is gone after run_bounded returns"
-  else
-    _fail "watchdog fallback: grandchild ${gc_pid} survived the timeout (#350)"
-    kill -KILL "${gc_pid}" 2>/dev/null
+# Both paths: GNU timeout exits with its direct child, before --kill-after, so it leaked this too.
+for mode in timeout fallback; do
+  force=0
+  label="GNU timeout"
+  if [[ "${mode}" == "fallback" ]]; then
+    force=1
+    label="watchdog fallback"
   fi
-fi
-if ((CASE_WALL <= 6)); then
-  _pass "watchdog fallback: the caller returned in ${CASE_WALL}s"
-else
-  _fail "watchdog fallback: caller blocked ${CASE_WALL}s on a 1s budget"
-fi
+
+  pidfile="${WORKDIR}/grandchild-${mode}.pid"
+  _timed "${force}" 1 "${SPAWNER}" "${pidfile}"
+  read -r rc _ <<<"${case_out}"
+  gc_pid="$(cat "${pidfile}" 2>/dev/null)"
+
+  if [[ "${rc}" == "124" ]]; then
+    _pass "${label}: a command whose grandchild ignores TERM reports 124"
+  else
+    _fail "${label}: grandchild case exited ${rc}, expected 124"
+  fi
+
+  if [[ -z "${gc_pid}" ]]; then
+    _fail "${label}: the fixture never recorded its grandchild's pid"
+  else
+    # The orphan is reaped asynchronously and a zombie answers kill -0, so settle first.
+    gone=0
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if ! kill -0 "${gc_pid}" 2>/dev/null; then
+        gone=1
+        break
+      fi
+      sleep 0.2
+    done
+    if ((gone)); then
+      _pass "${label}: the grandchild is gone after run_bounded returns"
+    else
+      _fail "${label}: grandchild ${gc_pid} survived the timeout (#350)"
+      kill -KILL "${gc_pid}" 2>/dev/null
+    fi
+  fi
+  if ((CASE_WALL <= 6)); then
+    _pass "${label}: the caller returned in ${CASE_WALL}s"
+  else
+    _fail "${label}: caller blocked ${CASE_WALL}s on a 1s budget"
+  fi
+done
 
 # ---------------------------------------------------------------
 # A signal death inside the budget is not an expiry
