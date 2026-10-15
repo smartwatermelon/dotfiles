@@ -424,7 +424,8 @@ for mode in standalone function; do
   _run "${mode}" "${SWM}" GH_TOKEN_NOS=nos-stub GH_TOKEN_SWM= GH_TOKEN_TWM=twm-stub -- pr list
   if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" &&
     "${err}" == *"owner 'smartwatermelon' maps to GH_TOKEN_SWM, which is not set"* &&
-    "${err}" == *"-R OWNER/REPO"* ]]; then
+    "${err}" == *"-R OWNER/REPO"* && "${err}" == *"refresh it in 1Password"* &&
+    "${err}" != *"owner detection failed"* ]]; then
     _pass "${mode}: mapped owner, own var unset: GH_TOKEN_TWM with a warning"
   else
     _fail "${mode}: mapped-unset fallback: rc=${rc} token=${logged} err=${err}"
@@ -432,7 +433,7 @@ for mode in standalone function; do
   # ...and both unset: fail closed.
   _run "${mode}" "${SWM}" GH_TOKEN_NOS=nos-secret-value -- pr list
   if [[ "${rc}" -ne 0 && "${err}" == *"maps to GH_TOKEN_SWM, which is not set, and GH_TOKEN_TWM is not set"* &&
-    "${err}" != *secret-value* && ! -s "${LOG}" ]]; then
+    "${err}" == *"refresh it in 1Password"* && "${err}" != *secret-value* && ! -s "${LOG}" ]]; then
     _pass "${mode}: mapped owner, own var and TWM unset: fails closed"
   else
     _fail "${mode}: mapped-unset fail-closed: rc=${rc} err=${err}"

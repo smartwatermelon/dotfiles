@@ -72,15 +72,16 @@ _fail() {
 # A shell-accurate tokenizer is not worth writing here. bash then parses it and
 # `declare -f` reprints it, so what the cases drive is a function bash accepted,
 # not a region awk guessed at.
+# run_bounded calls _bounded_reap_group, so both are sliced the same way.
 _raw_body="$(awk '
-  /^run_bounded\(\)/ { collecting = 1 }
+  /^(run_bounded|_bounded_reap_group)\(\)/ { collecting = 1 }
   collecting {
     print
     counted = $0
     sub(/#.*/, "", counted)
     n = gsub(/\{/, "{", counted); depth += n
     n = gsub(/\}/, "}", counted); depth -= n
-    if (depth == 0 && seen_open) { exit }
+    if (depth == 0 && seen_open) { collecting = 0; seen_open = 0; next }
     if (depth > 0) { seen_open = 1 }
   }
 ' "${HOOK}")"
@@ -91,7 +92,7 @@ _raw_body="$(awk '
 # explanation, not an empty exit 1.
 RUNNER_SRC="$(bash --norc --noprofile -c '
   eval "$1" || exit 1
-  declare -f run_bounded
+  declare -f _bounded_reap_group run_bounded
 ' _ "${_raw_body}" 2>/dev/null)" || RUNNER_SRC=""
 
 if [[ -n "${RUNNER_SRC}" ]]; then
@@ -324,21 +325,7 @@ echo "Case: run_bounded escalates to SIGKILL for a SIGTERM-ignoring command"
 IGNORER="${WORKDIR}/ignores-sigterm.sh"
 cat >"${IGNORER}" <<'IGNORER_EOF'
 #!/usr/bin/env bash
-# Survives SIGTERM; only SIGKILL can stop this.
-#
-# The `sleep` is a foreground CHILD of this script, and it does NOT die with
-# it on the watchdog path. An earlier version of this comment claimed the
-# opposite — "killing this script tears it down with it... none left behind"
-# — and that is measurably false: `kill -KILL <script-pid>` leaves the sleep
-# running, because the watchdog signals a pid rather than a process group.
-# That is the hook defect tracked in dotfiles#350; GNU `timeout` signals the
-# group and does tear it down, which is why only the fallback path was slow.
-#
-# The child shape is kept deliberately rather than collapsed into an `exec`:
-# semgrep spawns workers, so a fixture whose children outlive it is the
-# representative case, and #350's eventual fix needs it to assert against.
-# The driver redirects this command's output away from the caller's pipe, so
-# a leaked child no longer holds the command substitution open.
+# Only SIGKILL stops this. The child sleep inherits the ignored TERM, so only a group SIGKILL ends it (#350).
 trap '' TERM
 sleep 10
 IGNORER_EOF
@@ -376,6 +363,73 @@ for mode in timeout fallback; do
     _pass "${label}: the caller also returned in ${CASE_WALL}s"
   else
     _fail "${label}: run_bounded reported ${elapsed}s but the caller blocked ${CASE_WALL}s — the killed command left a child holding the pipe (#350)"
+  fi
+done
+
+# A timed-out command's TERM-ignoring grandchild must die too (#350); semgrep spawns workers.
+echo "Case: run_bounded kills a timed-out command's grandchildren"
+
+# Only the grandchild ignores TERM, so the spawner dies first and the watchdog must still escalate.
+GRANDCHILD="${WORKDIR}/grandchild.sh"
+cat >"${GRANDCHILD}" <<'GRANDCHILD_EOF'
+#!/usr/bin/env bash
+trap '' TERM
+exec sleep 30
+GRANDCHILD_EOF
+
+# Args: <pidfile>. Starts the grandchild, records its pid, waits on it.
+SPAWNER="${WORKDIR}/spawner.sh"
+cat >"${SPAWNER}" <<SPAWNER_EOF
+#!/usr/bin/env bash
+"${GRANDCHILD}" &
+echo "\$!" >"\$1"
+wait
+SPAWNER_EOF
+chmod +x "${GRANDCHILD}" "${SPAWNER}"
+
+# Both paths: GNU timeout exits with its direct child, before --kill-after, so it leaked this too.
+for mode in timeout fallback; do
+  force=0
+  label="GNU timeout"
+  if [[ "${mode}" == "fallback" ]]; then
+    force=1
+    label="watchdog fallback"
+  fi
+
+  pidfile="${WORKDIR}/grandchild-${mode}.pid"
+  _timed "${force}" 1 "${SPAWNER}" "${pidfile}"
+  read -r rc _ <<<"${case_out}"
+  gc_pid="$(cat "${pidfile}" 2>/dev/null)"
+
+  if [[ "${rc}" == "124" ]]; then
+    _pass "${label}: a command whose grandchild ignores TERM reports 124"
+  else
+    _fail "${label}: grandchild case exited ${rc}, expected 124"
+  fi
+
+  if [[ -z "${gc_pid}" ]]; then
+    _fail "${label}: the fixture never recorded its grandchild's pid"
+  else
+    # The orphan is reaped asynchronously and a zombie answers kill -0, so settle first.
+    gone=0
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if ! kill -0 "${gc_pid}" 2>/dev/null; then
+        gone=1
+        break
+      fi
+      sleep 0.2
+    done
+    if ((gone)); then
+      _pass "${label}: the grandchild is gone after run_bounded returns"
+    else
+      _fail "${label}: grandchild ${gc_pid} survived the timeout (#350)"
+      kill -KILL "${gc_pid}" 2>/dev/null
+    fi
+  fi
+  if ((CASE_WALL <= 6)); then
+    _pass "${label}: the caller returned in ${CASE_WALL}s"
+  else
+    _fail "${label}: caller blocked ${CASE_WALL}s on a 1s budget"
   fi
 done
 

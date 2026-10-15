@@ -169,10 +169,8 @@ done
 ((overreach == 0)) && _pass "real config paths are still symlinked"
 
 # --- Case 7: nested test directories are excluded ------------------------
-# A bash `case` glob does not cross directory levels, so `tests/*` matches
-# only at the repo root. Before #227 that let every file under bash/tests/
-# get symlinked into ~/.config/bash/tests. These cases pin the `*/tests/*`
-# and `*/test/*` patterns that close it.
+# A case pattern is anchored at the string start (`*` does match /), so
+# tests/* misses bash/tests/x. These pin */tests/* and */test/* (#227).
 echo "Case: nested test directories are excluded"
 nested_missing=0
 nested_must_exclude=(
