@@ -69,7 +69,7 @@ run_notrash() {
 trash_empty() {
   local items
   items=("${TRASHED}"/*)
-  [[ ! -e "${items[0]}" ]]
+  [[ ! -e "${items[0]}" && ! -L "${items[0]}" ]]
 }
 dead_gone() { [[ ! -L "${BIN}/dead-abs" && ! -L "${BIN}/dead-rel" ]]; }
 dead_kept() { [[ -L "${BIN}/dead-abs" && -L "${BIN}/dead-rel" ]]; }
