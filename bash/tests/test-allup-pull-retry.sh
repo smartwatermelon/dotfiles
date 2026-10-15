@@ -18,15 +18,23 @@ trap 'rm -rf "${WORKDIR}"' EXIT
 # test-allup-continue-state.sh does, rather than slicing the file by text.
 _fn_src="$(bash --norc --noprofile -c '
   source "$1" >/dev/null 2>&1 || exit 1
-  declare -f allup _allup_pull_step _updates_noninteractive
+  declare -f allup _allup_pull_step _updates_noninteractive \
+    _allup_scripts_dir _allup_scripts_current _allup_check_scripts _allup_versions
+  declare -p _ALLUP_MIN_SCRIPTS
 ' _ "${REPO_ROOT}/bash/functions.sh")"
-for fn in allup _allup_pull_step _updates_noninteractive; do
+for fn in allup _allup_pull_step _updates_noninteractive \
+  _allup_scripts_dir _allup_scripts_current _allup_check_scripts _allup_versions; do
   if [[ "${_fn_src}" != *"${fn} ()"* ]]; then
     echo "FAIL: could not extract ${fn} from functions.sh" >&2
     exit 1
   fi
 done
 eval "${_fn_src}"
+# The same value, read into a name shellcheck can see assigned.
+MIN="$(bash --norc --noprofile -c '
+  source "$1" >/dev/null 2>&1 || exit 1
+  echo "${_ALLUP_MIN_SCRIPTS:?}"
+' _ "${REPO_ROOT}/bash/functions.sh")"
 
 # Stubs for allup's other calls. Sourced from a file: shellcheck cannot see
 # calls from eval'd code.
@@ -100,8 +108,34 @@ case "${outcome}" in
 esac
 EOF
 chmod +x "${BIN}/walker-stub"
-ln -s walker-stub "${BIN}/my-repos"
-ln -s walker-stub "${BIN}/beacon-repos"
+
+# allup checks the clone my-repos runs from, so the stub lives in one.
+# Upstream has "old", then "new" tagged with the minimum.
+fgit() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git "$@"; }
+SCRIPTS_UP="${WORKDIR}/scripts-up.git"
+SCRIPTS_SEED="${WORKDIR}/scripts-seed"
+SCRIPTS="${WORKDIR}/scripts"
+fgit init -q --bare -b main "${SCRIPTS_UP}"
+fgit init -q --template= -b main "${SCRIPTS_SEED}"
+cp "${BIN}/walker-stub" "${SCRIPTS_SEED}/walker-stub"
+fgit -C "${SCRIPTS_SEED}" add walker-stub
+fgit -C "${SCRIPTS_SEED}" -c user.name=t -c user.email=t@t commit -qm old
+OLD_SHA="$(fgit -C "${SCRIPTS_SEED}" rev-parse HEAD)"
+: >"${SCRIPTS_SEED}/fixed"
+fgit -C "${SCRIPTS_SEED}" add fixed
+fgit -C "${SCRIPTS_SEED}" -c user.name=t -c user.email=t@t commit -qm new
+fgit -C "${SCRIPTS_SEED}" tag "${MIN}"
+fgit -C "${SCRIPTS_SEED}" push -q "${SCRIPTS_UP}" main "${MIN}"
+fgit clone -q "${SCRIPTS_UP}" "${SCRIPTS}"
+ln -s "${SCRIPTS}/walker-stub" "${BIN}/my-repos"
+ln -s "${SCRIPTS}/walker-stub" "${BIN}/beacon-repos"
+
+# Puts the scripts clone back at the tagged head, with the tag present.
+reset_scripts() {
+  fgit -C "${SCRIPTS}" checkout -q main
+  fgit -C "${SCRIPTS}" reset -q --hard origin/main
+  fgit -C "${SCRIPTS}" fetch -q --tags origin
+}
 
 check() {
   local label="$1" expected="$2" actual="$3"
@@ -239,6 +273,50 @@ run_allup "" --continue
 check "status" "0" "${rc}"
 check "no pulls; installs and updates run" "${INSTALLS},updates --continue" "${calls}"
 unset STATE_EP
+
+echo "Case: a successful run ends with the version table"
+export PLAN_my_repos="ok" PLAN_beacon_repos="ok"
+mkdir -p "${FAKE_HOME}/.local/state/dotfiles"
+echo "v1.0.7" >"${FAKE_HOME}/.local/state/dotfiles/version"
+run_allup ""
+check "status" "0" "${rc}"
+check_contains "dotfiles row" "dotfiles       v1.0.7" "${out}"
+check_contains "claude-config row" "claude-config  not recorded" "${out}"
+check_contains "scripts row" "scripts        ${MIN}" "${out}"
+
+echo "Case: scripts older than the minimum is pulled before the walk"
+fgit -C "${SCRIPTS}" reset -q --hard "${OLD_SHA}"
+run_allup ""
+check "status" "0" "${rc}"
+check_contains "says it pulls scripts first" "older than ${MIN}; pulling it first" "${out}"
+check "every step runs once" "my-repos,beacon-repos,${INSTALLS},updates " "${calls}"
+want_sha="$(fgit -C "${SCRIPTS}" rev-parse "${MIN}^{commit}")"
+head_sha="$(fgit -C "${SCRIPTS}" rev-parse HEAD)"
+check "scripts is now at the tag" "${want_sha}" "${head_sha}"
+
+echo "Case: scripts that cannot reach the minimum stops allup before any pull"
+reset_scripts
+fgit -C "${SCRIPTS}" reset -q --hard "${OLD_SHA}"
+# An untracked file where the incoming commit adds one makes the pull refuse.
+echo "local" >"${SCRIPTS}/fixed"
+run_allup ""
+check "status" "1" "${rc}"
+check "nothing runs" "" "${calls}"
+# realpath: on macOS /tmp resolves to /private/tmp.
+scripts_real="$(realpath "${SCRIPTS}")"
+check_contains "names the clone and the minimum" \
+  "allup needs scripts ${MIN} or later at ${scripts_real}" "${out}"
+rm -f "${SCRIPTS}/fixed"
+reset_scripts
+
+echo "Case: allup --continue does not check scripts (no walk runs)"
+fgit -C "${SCRIPTS}" reset -q --hard "${OLD_SHA}"
+export STATE_EP=allup
+run_allup "" --continue
+check "status" "0" "${rc}"
+check "no pulls; installs and updates run" "${INSTALLS},updates --continue" "${calls}"
+unset STATE_EP
+reset_scripts
 
 # allup needs a failed pull to exit non-zero. Checked on the real walker
 # when installed (not in CI); the fixture's origin does not exist.

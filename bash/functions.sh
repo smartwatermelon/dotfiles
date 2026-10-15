@@ -977,6 +977,59 @@ _allup_pull_step() {
 }
 # Not exported - internal helper
 
+# The first scripts tag whose walker exits non-zero on a failed pull
+# (smartwatermelon/scripts#6). _allup_pull_step trusts that exit status.
+_ALLUP_MIN_SCRIPTS=v1.0.0
+
+# The scripts clone that my-repos runs from, through its ~/.local/bin link.
+_allup_scripts_dir() {
+  local walker
+  walker="$(command -v my-repos)" || return 1
+  walker="$(realpath "${walker}")" || return 1
+  dirname "${walker}"
+}
+# Not exported - internal helper
+
+# True when the clone at $1 contains _ALLUP_MIN_SCRIPTS. Fetches tags once
+# if the tag is missing locally.
+_allup_scripts_current() {
+  if ! git -C "$1" rev-parse -q --verify "refs/tags/${_ALLUP_MIN_SCRIPTS}" >/dev/null; then
+    git -C "$1" fetch -q --tags origin 2>/dev/null || return 1
+  fi
+  git -C "$1" merge-base --is-ancestor "${_ALLUP_MIN_SCRIPTS}" HEAD 2>/dev/null
+}
+# Not exported - internal helper
+
+# An older walker exits 0 on a failed pull, so allup would report success.
+# Bring the scripts clone up first, or stop before any pull runs.
+_allup_check_scripts() {
+  local dir
+  dir="$(_allup_scripts_dir)" || return 0
+  _allup_scripts_current "${dir}" && return 0
+  _notif "scripts at ${dir} is older than ${_ALLUP_MIN_SCRIPTS}; pulling it first"
+  git -C "${dir}" pull --ff-only --quiet || true
+  _allup_scripts_current "${dir}" && return 0
+  _notif "allup needs scripts ${_ALLUP_MIN_SCRIPTS} or later at ${dir}: an older walker hides failed pulls. Pull or clean that clone, then rerun allup."
+  return 1
+}
+# Not exported - internal helper
+
+# One line per repo allup installs or runs from (dev-env#72).
+_allup_versions() {
+  local state="${XDG_STATE_HOME:-${HOME}/.local/state}" repo version dir
+  echo "Installed versions:"
+  for repo in dotfiles claude-config; do
+    version="$(cat "${state}/${repo}/version" 2>/dev/null)" || version="not recorded"
+    printf '  %-14s %s\n' "${repo}" "${version}"
+  done
+  version="not found"
+  if dir="$(_allup_scripts_dir)"; then
+    version="$(git -C "${dir}" describe --tags --match 'v[0-9]*' --dirty --always 2>/dev/null)" || version="unknown"
+  fi
+  printf '  %-14s %s\n' scripts "${version}"
+}
+# Not exported - internal helper
+
 # Update all local repos, repair local config symlinks, run software updates
 # my-repos and beacon-repos are from ~/Developer/scripts, symlinked into ~/.local/bin
 # `allup --continue` resumes after a failed step without re-running the
@@ -1012,6 +1065,10 @@ allup() {
     esac
   fi
 
+  if [[ "${skip_pulls}" != true ]]; then
+    _allup_check_scripts || return $?
+  fi
+
   # A failed pull prompts (_allup_pull_step). Skip sets skip_pulls, so it is
   # checked again before beacon-repos.
   if [[ "${skip_pulls}" != true ]] && command -v my-repos &>/dev/null; then
@@ -1023,6 +1080,7 @@ allup() {
 
   "${HOME}/Developer/dotfiles/install.sh" --sync || return $?
   "${HOME}/Developer/claude-config/install.sh" --sync || return $?
+  _allup_versions
   # Refresh the calling shell's environment with whatever the two --sync
   # runs just deployed. allup is a function, not a script, so this affects
   # the interactive shell that invoked it rather than a subshell.
