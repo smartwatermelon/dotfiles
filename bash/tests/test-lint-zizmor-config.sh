@@ -13,7 +13,7 @@
 # fleet remediation. See twistedmelonman/claude-config#531.
 #
 # Unlike the markdownlint wrapper, this does NOT merge configs: zizmor's
-# --config loads a single file, and CI (run-standards.sh:177) is likewise
+# --config loads a single file, and CI (run-standards.sh:267) is likewise
 # either/or. The assertions below encode that difference deliberately.
 set -uo pipefail
 unset CDPATH
@@ -100,7 +100,7 @@ fi
 
 # ---------------------------------------------------------------------
 # Case 2: repo config present. It must WIN over the canonical file, matching
-# run-standards.sh:177. Asserted with a repo config that is deliberately
+# run-standards.sh:267. Asserted with a repo config that is deliberately
 # stricter than canonical — if the canonical were used instead, the finding
 # would not fire and this would silently pass.
 # ---------------------------------------------------------------------
@@ -165,24 +165,35 @@ else
 fi
 
 # ---------------------------------------------------------------------
-# Case 5: the vendored canonical copy must match the upstream policy byte for
-# byte when the github-workflows checkout is present. A second copy of a
-# policy file is a drift risk (twistedmelonman/claude-config#531 discussion,
-# and the truncated copy in smartwatermelon/gmail-newsletter-filter); this
-# catches the cheap half of that. Skipped when the sibling checkout is absent,
-# so CI and other machines do not fail on a path that is not theirs.
+# Case 5: env var unset, a fake HOME holds the policy at the default path.
 # ---------------------------------------------------------------------
-UPSTREAM="${ZIZMOR_UPSTREAM_CONFIG:-${HOME}/Developer/github-workflows/zizmor.yml}"
-VENDORED="${REPO_ROOT}/zizmor/zizmor.yml"
-if [[ -f "${UPSTREAM}" ]]; then
-  if cmp -s "${UPSTREAM}" "${VENDORED}"; then
-    _pass "vendored canonical config matches upstream byte for byte"
-  else
-    _fail "vendored zizmor/zizmor.yml has drifted from ${UPSTREAM}"
-    diff -u "${UPSTREAM}" "${VENDORED}" >&2 || true
-  fi
+c5="${TMPROOT}/case5"
+_write_case "${c5}"
+fakehome="${TMPROOT}/fakehome"
+mkdir -p "${fakehome}/Developer/github-workflows"
+cp "${CANONICAL}" "${fakehome}/Developer/github-workflows/zizmor.yml"
+c5_out="$(cd "${c5}" && env -u ZIZMOR_CANONICAL_CONFIG HOME="${fakehome}" bash "${HOOK}" .github/workflows/claude.yml 2>&1)"
+c5_rc=$?
+if ((c5_rc == 0)) && ! grep -q 'unpinned-uses\|canonical config not found' <<<"${c5_out}"; then
+  _pass "default canonical resolves to \$HOME/Developer/github-workflows/zizmor.yml"
 else
-  echo "  SKIP: upstream checkout not present at ${UPSTREAM}"
+  _fail "default canonical did not resolve to the github-workflows checkout, rc=${c5_rc}"
+  echo "${c5_out}" >&2
+fi
+
+# Case 6: no checkout at the default path. The warning must name the path and
+# tell the user to clone github-workflows.
+c6="${TMPROOT}/case6"
+_write_case "${c6}"
+emptyhome="${TMPROOT}/emptyhome"
+mkdir -p "${emptyhome}"
+c6_out="$(cd "${c6}" && env -u ZIZMOR_CANONICAL_CONFIG HOME="${emptyhome}" bash "${HOOK}" .github/workflows/claude.yml 2>&1)"
+if grep -q "${emptyhome}/Developer/github-workflows/zizmor.yml" <<<"${c6_out}" \
+  && grep -q 'clone smartwatermelon/github-workflows into ~/Developer' <<<"${c6_out}"; then
+  _pass "missing default: warning names the path and says to clone github-workflows"
+else
+  _fail "missing default: warning lacks the path or the clone instruction"
+  echo "${c6_out}" >&2
 fi
 
 if ((fail)); then
