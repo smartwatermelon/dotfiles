@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-CANONICAL="${SHELLCHECK_CANONICAL_CONFIG:-${HOME}/.config/shellcheck/shellcheckrc}"
+CANONICAL="${SHELLCHECK_CANONICAL_CONFIG:-${HOME}/.config/shellcheck/shellcheckrc-canonical}"
 
 main() {
   # Repo root, not cwd: pre-commit invokes from the top level but a direct call
