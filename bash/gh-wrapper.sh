@@ -392,14 +392,21 @@ _gh_wrapper_scoped_fallback() {
   local why="$1"
   [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]] && return 0
   [[ -z "${GH_TOKEN_SWM:-}" && -z "${GH_TOKEN_NOS:-}" && -z "${GH_TOKEN_TWM:-}" ]] && return 0
+  # Recovery Andrew named in dotfiles#374 for a GH_TOKEN_* that is not set.
+  local refresh="[gh] Token missing: refresh it in 1Password, then restart through claude-wrapper."
   if [[ -z "${GH_TOKEN_TWM:-}" ]]; then
     echo "[gh] ERROR: ${why}, and GH_TOKEN_TWM is not set." >&2
     echo "[gh] Failing closed rather than using the full-scope keyring token." >&2
     echo "[gh] Fix: pass -R OWNER/REPO or run inside the repo, or set GH_TOKEN_TWM." >&2
+    echo "${refresh}" >&2
     return 1
   fi
   echo "[gh] WARNING: ${why}; using GH_TOKEN_TWM instead of the keyring token." >&2
-  echo "[gh] Reaching this fallback means owner detection failed." >&2
+  if [[ "${why}" == *"which is not set" ]]; then
+    echo "${refresh}" >&2
+  else
+    echo "[gh] Reaching this fallback means owner detection failed." >&2
+  fi
   echo "[gh] Fix: pass -R OWNER/REPO or run inside the repo." >&2
   _gh_wrapper_token_var="GH_TOKEN_TWM"
   return 2
