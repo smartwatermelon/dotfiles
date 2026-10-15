@@ -45,12 +45,15 @@ _append_path_once() {
 
 HOMEBREW_ROOT=$(_get_homebrew_root)
 
+# Absolute path: before PATH is built, `ruby` resolves to system Ruby 2.6,
+# whose gem bindir is /usr/local/bin. System Ruby gets no tier.
 GEM_EXE_DIR=""
-if command -v ruby &>/dev/null; then
+_brew_ruby="${HOMEBREW_ROOT}/opt/ruby/bin/ruby"
+if [[ -x "${_brew_ruby}" ]]; then
   if [[ $(type -t _profile_time) == "function" ]] && [[ "$-" == *i* ]]; then
     _pf_start=$(date +%s.%N)
   fi
-  GEM_EXE_DIR="$(ruby -e 'puts Gem.bindir' 2>/dev/null)"
+  GEM_EXE_DIR="$("${_brew_ruby}" -e 'puts Gem.bindir' 2>/dev/null)"
   if [[ $(type -t _profile_time) == "function" ]] && [[ "$-" == *i* ]]; then
     _pf_end=$(date +%s.%N)
     _pf_duration=$(awk "BEGIN {printf \"%.3f\", ${_pf_end} - ${_pf_start}}")
@@ -96,7 +99,7 @@ for _dir in "${_path_tiers[@]}"; do
   _new_path="${_new_path:+${_new_path}:}${_dir}"
 done
 export PATH="${_new_path}${_new_path:+${PATH:+:}}${PATH}"
-unset _path_tiers _dir _new_path GEM_EXE_DIR
+unset _path_tiers _dir _new_path GEM_EXE_DIR _brew_ruby
 
 # ============================================================================
 # LOWEST PRIORITY — appended, not prepended

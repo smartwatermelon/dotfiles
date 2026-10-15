@@ -270,6 +270,43 @@ for mode in standalone function; do
   _pos_case "positional after -- is ignored" "${SWM}" swm-stub \
     repo clone -- nightowlstudiollc/x
 
+  # (2d) gh repo list OWNER names a bare owner (#422). A cwd token lists only
+  # OWNER's public repos, with exit 0, so a wrong pick is silent.
+  _pos_case "repo list OWNER beats cwd" "${SWM}" nos-stub \
+    repo list nightowlstudiollc
+  _pos_case "repo ls OWNER (alias)" "${SWM}" nos-stub \
+    repo ls nightowlstudiollc
+  _pos_case "repo list OWNER from a non-repo cwd" "${NEUTRAL}" nos-stub \
+    repo list nightowlstudiollc
+  _pos_case "repo list skips value flags before OWNER" "${SWM}" nos-stub \
+    repo list -L 200 --json name -q .name --visibility private --topic t \
+    -l go -t '{{.a}}' nightowlstudiollc
+  _pos_case "repo list boolean flags before OWNER" "${SWM}" nos-stub \
+    repo list --source --no-archived nightowlstudiollc
+  _pos_case "repo list, no OWNER, falls back to cwd" "${SWM}" swm-stub \
+    repo list --limit 5
+  _pos_case "repo list OWNER after -- is ignored" "${SWM}" swm-stub \
+    repo list -- nightowlstudiollc
+
+  # gh repo create OWNER/NAME creates under OWNER; a bare NAME keeps cwd.
+  _pos_case "repo create OWNER/NAME beats cwd" "${SWM}" nos-stub \
+    repo create nightowlstudiollc/x --private
+  _pos_case "repo new OWNER/NAME (alias)" "${SWM}" nos-stub \
+    repo new nightowlstudiollc/x
+  _pos_case "repo create skips a slashed --template value" "${TWM}" swm-stub \
+    repo create -p nightowlstudiollc/tmpl --public smartwatermelon/x
+  _pos_case "repo create bare NAME falls back to cwd" "${SWM}" swm-stub \
+    repo create x --private
+
+  # gh search --owner OWNER (one owner) beats cwd; pinned here for the token
+  # path, test-gh-wrapper-identity.sh covers the identity path.
+  _pos_case "search repos --owner OWNER beats cwd" "${SWM}" nos-stub \
+    search repos --owner nightowlstudiollc
+  _pos_case "search prs --owner=OWNER beats cwd" "${SWM}" nos-stub \
+    search prs --owner=nightowlstudiollc --state open
+  _pos_case "search --owner list falls back to cwd" "${SWM}" swm-stub \
+    search issues --owner=nightowlstudiollc,twistedmelonman
+
   # (4) claude-wrapper#124: GH_TOKEN unset or empty still selects the owner token.
   _run "${mode}" "${SWM}" GH_TOKEN_SWM=swm-stub GH_TOKEN_TWM=twm-stub -- pr list
   if [[ "${rc}" -eq 0 && "${logged}" == "swm-stub" ]]; then

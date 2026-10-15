@@ -128,10 +128,17 @@ _gh_wrapper_resolve_owner() {
 
   # gh repo <sub> OWNER/REPO names the owner positionally (#330). rename takes
   # a new name; a bare REPO is left to cwd.
+  # `repo list OWNER` names a bare owner (#422); a wrong token hides private repos.
   if [[ -z "${repo_flag_value}" && "${1:-}" == "repo" ]]; then
     # Flags taking a separate value, per subcommand (gh 2.x --help).
-    local value_flags="" positional=1
+    local value_flags="" positional=1 bare_owner=0
     case "${2:-}" in
+      list | ls)
+        value_flags="-q --jq --json -l --language -L --limit -t --template --topic --visibility"
+        bare_owner=1
+        ;;
+      create | new) value_flags="-d --description -g --gitignore -h --homepage
+        -l --license -r --remote -s --source -t --team -p --template" ;;
       view) value_flags="-b --branch -q --jq --json -t --template" ;;
       clone) value_flags="-u --upstream-remote-name" ;;
       fork) value_flags="--fork-name --org --remote-name" ;;
@@ -157,7 +164,10 @@ _gh_wrapper_resolve_owner() {
             repo_flag_value="${arg}"
             break
             ;;
-          *) break ;;
+          *)
+            [[ "${bare_owner}" == "1" ]] && repo_flag_value="${arg}"
+            break
+            ;;
         esac
       done
     fi

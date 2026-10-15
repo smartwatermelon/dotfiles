@@ -8,8 +8,9 @@
 # logic to duplicate, since gpush already goes through the git and gh
 # wrappers for anything security-relevant):
 #
-# Usage: gpush [--no-merge]
+# Usage: gpush [--no-merge] [--yes | -y]
 #   --no-merge  Stop after CI passes (don't authorize or merge)
+#   --yes, -y   Skip the merge question only; CI, merge-lock, review still run
 #
 #   1. Sourced from functions.sh: defines gpush() as a bash function.
 #   2. Symlinked as ~/.local/bin/gpush and executed directly: runs gpush
@@ -97,19 +98,19 @@ _gpush_print_failure_detail() {
 
 gpush() {
   # Validate arguments
-  case "${1:-}" in
-    --no-merge) ;;
-    "") ;;
-    *)
-      echo "Usage: gpush [--no-merge]" >&2
-      return 1
-      ;;
-  esac
-
   local no_merge=false
-  if [[ "${1:-}" == "--no-merge" ]]; then
-    no_merge=true
-  fi
+  local assume_yes=false
+  local arg
+  for arg in "$@"; do
+    case "${arg}" in
+      --no-merge) no_merge=true ;;
+      --yes | -y) assume_yes=true ;;
+      *)
+        echo "Usage: gpush [--no-merge] [--yes | -y]" >&2
+        return 1
+        ;;
+    esac
+  done
 
   local GREEN='\033[0;32m'
   local RED='\033[0;31m'
@@ -266,12 +267,18 @@ gpush() {
   fi
 
   # Step 5: Confirm and authorize merge
+  # --yes answers only this question. Everything after it (merge-lock auth,
+  # the gh wrapper's pre-merge review) runs unchanged.
   local confirm
   echo ""
-  read -r -p "[gpush] Merge PR #${pr_number}? [y/N] " confirm
-  if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
-    echo -e "${BLUE}[gpush]${NC} Merge cancelled. PR #${pr_number} is ready for manual merge."
-    return 0
+  if [[ "${assume_yes}" == true ]]; then
+    echo -e "${BLUE}[gpush]${NC} --yes: merge PR #${pr_number} without prompting."
+  else
+    read -r -p "[gpush] Merge PR #${pr_number}? [y/N] " confirm
+    if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
+      echo -e "${BLUE}[gpush]${NC} Merge cancelled. PR #${pr_number} is ready for manual merge."
+      return 0
+    fi
   fi
 
   if ! command -v merge-lock &>/dev/null; then
