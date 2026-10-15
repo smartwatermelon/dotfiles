@@ -926,50 +926,18 @@ updates() {
 }
 # Not exported - interactive command only
 
-# Print the repos under "Failed:" in a walker log's summary. Anchored on that
-# header: "Skipped (dirty):" uses the same bullets.
-_allup_failed_repos() {
-  sed $'s/\x1b\\[[0-9;]*m//g' "$1" | awk '
-    /━━━ Summary ━━━/ { summary = 1; next }
-    summary && /^  Failed:$/ { failed = 1; next }
-    failed && /^    - / { sub(/^    - /, ""); print; next }
-    failed { failed = 0 }
-  '
-}
-# Not exported - internal helper
-
-# Run my-repos or beacon-repos for allup. The walker exits 0 on a failed
-# pull, so its summary's Failed count is read too.
+# Run my-repos or beacon-repos for allup. A failed repo makes the walker
+# exit 1 (smartwatermelon/scripts#6).
 _allup_pull_step() {
-  local cmd="$1" log status count reply failed_list
-  local -a failed_repos
+  local cmd="$1" status reply
 
   while true; do
-    log="$(mktemp "${TMPDIR:-/tmp}/allup-${cmd}.XXXXXX")" || return 1
-    "${cmd}" 2>&1 | tee "${log}"
-    status="${PIPESTATUS[0]}"
-
-    failed_list="$(_allup_failed_repos "${log}")"
-    failed_repos=()
-    [[ -z "${failed_list}" ]] || mapfile -t failed_repos <<<"${failed_list}"
-    count="$(sed $'s/\x1b\\[[0-9;]*m//g' "${log}" \
-      | sed -nE 's/^  Total: .*Failed: ([0-9]+).*/\1/p' | tail -n 1)"
-    rm -f "${log}"
-
-    if [[ "${status}" -eq 0 && "${count:-0}" -eq 0 && ${#failed_repos[@]} -eq 0 ]]; then
+    status=0
+    "${cmd}" || status=$?
+    if [[ "${status}" -eq 0 ]]; then
       return 0
     fi
-    # Report the walker's real exit code, but return non-zero even when it
-    # exited 0, so q still stops allup.
     _notif "${cmd} failed (exit ${status})"
-    [[ "${status}" -ne 0 ]] || status=1
-
-    if ((${#failed_repos[@]} > 0)); then
-      echo "Failed repos:"
-      printf '  - %s\n' "${failed_repos[@]}"
-    elif [[ "${count:-0}" -gt 0 ]]; then
-      echo "${cmd} reported ${count} failed repo(s), but the list could not be read"
-    fi
 
     # No TTY: stop with the status, as before.
     if _updates_noninteractive; then

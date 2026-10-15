@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Tests allup's failed-pull prompt: _allup_pull_step and _allup_failed_repos
-# in bash/functions.sh (smartwatermelon/scripts#2).
+# Tests allup's failed-pull prompt: _allup_pull_step in bash/functions.sh
+# (smartwatermelon/scripts#2, #6).
 set -euo pipefail
 unset CDPATH
 
@@ -18,9 +18,9 @@ trap 'rm -rf "${WORKDIR}"' EXIT
 # test-allup-continue-state.sh does, rather than slicing the file by text.
 _fn_src="$(bash --norc --noprofile -c '
   source "$1" >/dev/null 2>&1 || exit 1
-  declare -f allup _allup_pull_step _allup_failed_repos _updates_noninteractive
+  declare -f allup _allup_pull_step _updates_noninteractive
 ' _ "${REPO_ROOT}/bash/functions.sh")"
-for fn in allup _allup_pull_step _allup_failed_repos _updates_noninteractive; do
+for fn in allup _allup_pull_step _updates_noninteractive; do
   if [[ "${_fn_src}" != *"${fn} ()"* ]]; then
     echo "FAIL: could not extract ${fn} from functions.sh" >&2
     exit 1
@@ -53,7 +53,7 @@ EOF
 done
 : >"${FAKE_HOME}/.bash_profile"
 
-# Walker stub. PLAN_<name> lists one outcome per call: ok, fail (exit 0),
+# Walker stub. PLAN_<name> lists one outcome per call: ok, fail (exit 1),
 # crash (exit 2), dirty.
 BIN="${WORKDIR}/bin"
 mkdir -p "${BIN}"
@@ -84,6 +84,7 @@ case "${outcome}" in
     echo ""
     echo "  ${R}Failed:${Z}"
     echo "    - badrepo"
+    exit 1
     ;;
   dirty)
     summary 1 1 0
@@ -185,7 +186,7 @@ run_allup "q"
 check "status" "1" "${rc}"
 check "nothing after my-repos runs" "my-repos" "${calls}"
 check_contains "says how to resume" "fix the failed repos and rerun 'allup'" "${out}"
-check_contains "reports the walker's real exit code" "my-repos failed (exit 0)" "${out}"
+check_contains "reports the walker's real exit code" "my-repos failed (exit 1)" "${out}"
 
 echo "Case: my-repos exits non-zero, q keeps its status"
 export PLAN_my_repos="crash"
@@ -239,9 +240,9 @@ check "status" "0" "${rc}"
 check "no pulls; installs and updates run" "${INSTALLS},updates --continue" "${calls}"
 unset STATE_EP
 
-# Check the parser against the real walker, when installed (not in CI).
-# The fixture's origin does not exist, so its pull fails.
-echo "Case: the real walker's summary"
+# allup needs a failed pull to exit non-zero. Checked on the real walker
+# when installed (not in CI); the fixture's origin does not exist.
+echo "Case: the real walker's exit status"
 real_walker="${HOME}/Developer/scripts/my-repos.sh"
 if [[ -x "${real_walker}" ]]; then
   devdir="${WORKDIR}/devdir"
@@ -255,9 +256,9 @@ if [[ -x "${real_walker}" ]]; then
   real_rc=0
   GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 MY_REPOS_DIR="${devdir}" \
     "${real_walker}" >"${real_log}" 2>&1 || real_rc=$?
-  check "real walker exits 0 on a failed pull (why allup reads the summary)" "0" "${real_rc}"
-  parsed="$(_allup_failed_repos "${real_log}")"
-  check "parser finds the failed repo" "brokenrepo" "${parsed}"
+  check "real walker exits 1 on a failed pull" "1" "${real_rc}"
+  real_out="$(<"${real_log}")"
+  check_contains "real walker lists the failed repo" "- brokenrepo" "${real_out}"
 else
   echo "  SKIP: ${real_walker} not present"
 fi
