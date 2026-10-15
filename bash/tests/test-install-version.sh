@@ -31,10 +31,10 @@ fgit -C "${REPO}" tag v1.2.3
 
 # Runs the block, then exits with $1. Sets out and rc.
 run_block() {
-  local code="$1" dry="$2"
+  local code="$1" dry="$2" repair="${3:-false}"
   rc=0
   out="$(
-    REPO_DIR="${REPO}" DRY_RUN="${dry}" XDG_STATE_HOME="${WORKDIR}/state" \
+    REPO_DIR="${REPO}" DRY_RUN="${dry}" REPAIR_ONLY="${repair}" XDG_STATE_HOME="${WORKDIR}/state" \
       bash -c '
         _info() { echo "INFO $*"; }
         _ok() { echo "OK $*"; }
@@ -81,6 +81,13 @@ echo "Case: a failed run reports the exit code and records nothing"
 run_block 3 false
 check "status kept" "3" "${rc}"
 check_contains "failed line" "ERR dotfiles: install of v1.2.3 failed (exit 3)" "${out}"
+present_or_absent="$(state_file)"
+check "no state file" "absent" "${present_or_absent}"
+
+echo "Case: a repair run does not claim an install or record a version"
+run_block 0 false true
+check "status" "0" "${rc}"
+check_contains "repair line" "OK dotfiles: repaired links for v1.2.3; no new files installed" "${out}"
 present_or_absent="$(state_file)"
 check "no state file" "absent" "${present_or_absent}"
 

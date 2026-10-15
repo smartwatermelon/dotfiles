@@ -309,6 +309,19 @@ check_contains "names the clone and the minimum" \
 rm -f "${SCRIPTS}/fixed"
 reset_scripts
 
+echo "Case: a my-repos that cannot be resolved stops allup, not the check"
+SHIM="${WORKDIR}/shim"
+mkdir -p "${SHIM}"
+printf '#!/bin/sh\nexit 1\n' >"${SHIM}/realpath"
+chmod +x "${SHIM}/realpath"
+saved_path="${PATH}"
+PATH="${SHIM}:${PATH}"
+run_allup ""
+PATH="${saved_path}"
+check "status" "1" "${rc}"
+check "nothing runs" "" "${calls}"
+check_contains "says why" "cannot find the scripts clone behind my-repos" "${out}"
+
 echo "Case: allup --continue does not check scripts (no walk runs)"
 fgit -C "${SCRIPTS}" reset -q --hard "${OLD_SHA}"
 export STATE_EP=allup

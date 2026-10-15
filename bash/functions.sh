@@ -1004,7 +1004,13 @@ _allup_scripts_current() {
 # Bring the scripts clone up first, or stop before any pull runs.
 _allup_check_scripts() {
   local dir
-  dir="$(_allup_scripts_dir)" || return 0
+  # No walker means no pulls to protect. A walker that cannot be resolved
+  # must not skip the check.
+  command -v my-repos &>/dev/null || return 0
+  if ! dir="$(_allup_scripts_dir)"; then
+    _notif "allup cannot find the scripts clone behind my-repos, so it cannot check its version"
+    return 1
+  fi
   _allup_scripts_current "${dir}" && return 0
   _notif "scripts at ${dir} is older than ${_ALLUP_MIN_SCRIPTS}; pulling it first"
   git -C "${dir}" pull --ff-only --quiet || true
