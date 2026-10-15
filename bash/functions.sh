@@ -548,6 +548,29 @@ _gem_update() {
   _notif "Updating Ruby gems..."
   echo "=== gem update ${timestamp} ===" | _update_log
 
+  # Gems the ruby keg ships (default or bundled) upgrade with `brew upgrade
+  # ruby`. A rubygems.org copy would be a second version of each.
+  local names_raw
+  names_raw=$(ruby -e '
+    prefix = File.realpath(RbConfig::CONFIG["prefix"]) + "/"
+    owned = Gem::Specification.select do |s|
+      s.default_gem? || File.realpath(s.loaded_from).start_with?(prefix)
+    end.map(&:name)
+    puts Gem::Specification.outdated - owned
+  ' 2>>"${HOME}/.local/state/updates.out")
+  result=$?
+  if [[ "${result}" -ne 0 ]]; then
+    _notif "gem outdated check failed (exit ${result})"
+    return "${result}"
+  fi
+  local -a names=()
+  [[ -n "${names_raw}" ]] && mapfile -t names <<<"${names_raw}"
+  if [[ "${#names[@]}" -eq 0 ]]; then
+    echo "No gems outside the ruby keg are outdated" | _update_log
+    _notif "gem update: nothing to update"
+    return 0
+  fi
+
   # --no-document: Homebrew's rubygems plugin shim
   # (lib/ruby/gems/*/plugins/rdoc_plugin.rb) hardcodes the RDoc version shipped
   # with the ruby formula, so every gem process loads that RDoc at startup.
@@ -558,7 +581,7 @@ _gem_update() {
   # that reaches the colliding code, so skipping it avoids the collision
   # regardless of which RDoc versions are installed. Regenerate on demand with
   # `gem rdoc <gemname>`.
-  output=$(gem update --no-document --verbose 2>&1)
+  output=$(gem update --no-document --verbose "${names[@]}" 2>&1)
   result=$?
   echo "${output}" | _update_log
 
@@ -973,6 +996,7 @@ wf() {
 # Reinstall dotfiles and source profile in one step
 dotfiles() {
   "${HOME}/Developer/dotfiles/install.sh" --sync || return $?
+  #shellcheck source=/dev/null
   source "${HOME}/.bash_profile"
 }
 # Not exported
@@ -980,6 +1004,7 @@ dotfiles() {
 # Reinstall claude-config
 dotclaude() {
   "${HOME}/Developer/claude-config/install.sh" --sync || return $?
+  #shellcheck source=/dev/null
   source "${HOME}/.bash_profile"
 }
 # Not exported
