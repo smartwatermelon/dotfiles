@@ -324,21 +324,7 @@ echo "Case: run_bounded escalates to SIGKILL for a SIGTERM-ignoring command"
 IGNORER="${WORKDIR}/ignores-sigterm.sh"
 cat >"${IGNORER}" <<'IGNORER_EOF'
 #!/usr/bin/env bash
-# Survives SIGTERM; only SIGKILL can stop this.
-#
-# The `sleep` is a foreground CHILD of this script, and it does NOT die with
-# it on the watchdog path. An earlier version of this comment claimed the
-# opposite — "killing this script tears it down with it... none left behind"
-# — and that is measurably false: `kill -KILL <script-pid>` leaves the sleep
-# running, because the watchdog signals a pid rather than a process group.
-# That is the hook defect tracked in dotfiles#350; GNU `timeout` signals the
-# group and does tear it down, which is why only the fallback path was slow.
-#
-# The child shape is kept deliberately rather than collapsed into an `exec`:
-# semgrep spawns workers, so a fixture whose children outlive it is the
-# representative case, and #350's eventual fix needs it to assert against.
-# The driver redirects this command's output away from the caller's pipe, so
-# a leaked child no longer holds the command substitution open.
+# Only SIGKILL stops this. The child sleep inherits the ignored TERM, so only a group SIGKILL ends it (#350).
 trap '' TERM
 sleep 10
 IGNORER_EOF
@@ -378,6 +364,64 @@ for mode in timeout fallback; do
     _fail "${label}: run_bounded reported ${elapsed}s but the caller blocked ${CASE_WALL}s — the killed command left a child holding the pipe (#350)"
   fi
 done
+
+# A timed-out command's TERM-ignoring grandchild must die too (#350); semgrep spawns workers.
+echo "Case: run_bounded kills a timed-out command's grandchildren"
+
+# Only the grandchild ignores TERM, so the spawner dies first and the watchdog must still escalate.
+GRANDCHILD="${WORKDIR}/grandchild.sh"
+cat >"${GRANDCHILD}" <<'GRANDCHILD_EOF'
+#!/usr/bin/env bash
+trap '' TERM
+exec sleep 30
+GRANDCHILD_EOF
+
+# Args: <pidfile>. Starts the grandchild, records its pid, waits on it.
+SPAWNER="${WORKDIR}/spawner.sh"
+cat >"${SPAWNER}" <<SPAWNER_EOF
+#!/usr/bin/env bash
+"${GRANDCHILD}" &
+echo "\$!" >"\$1"
+wait
+SPAWNER_EOF
+chmod +x "${GRANDCHILD}" "${SPAWNER}"
+
+# Fallback only (leading 1). GNU timeout exits with its child, before --kill-after: measured to fail.
+pidfile="${WORKDIR}/grandchild.pid"
+_timed 1 1 "${SPAWNER}" "${pidfile}"
+read -r rc _ <<<"${case_out}"
+gc_pid="$(cat "${pidfile}" 2>/dev/null)"
+
+if [[ "${rc}" == "124" ]]; then
+  _pass "watchdog fallback: a command whose grandchild ignores TERM reports 124"
+else
+  _fail "watchdog fallback: grandchild case exited ${rc}, expected 124"
+fi
+
+if [[ -z "${gc_pid}" ]]; then
+  _fail "watchdog fallback: the fixture never recorded its grandchild's pid"
+else
+  # The orphan is reaped asynchronously and a zombie answers kill -0, so settle first.
+  gone=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if ! kill -0 "${gc_pid}" 2>/dev/null; then
+      gone=1
+      break
+    fi
+    sleep 0.2
+  done
+  if ((gone)); then
+    _pass "watchdog fallback: the grandchild is gone after run_bounded returns"
+  else
+    _fail "watchdog fallback: grandchild ${gc_pid} survived the timeout (#350)"
+    kill -KILL "${gc_pid}" 2>/dev/null
+  fi
+fi
+if ((CASE_WALL <= 6)); then
+  _pass "watchdog fallback: the caller returned in ${CASE_WALL}s"
+else
+  _fail "watchdog fallback: caller blocked ${CASE_WALL}s on a 1s budget"
+fi
 
 # ---------------------------------------------------------------
 # A signal death inside the budget is not an expiry

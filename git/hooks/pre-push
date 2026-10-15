@@ -385,13 +385,35 @@ run_bounded() {
   # empty file under TMPDIR with a recognizable prefix, which the OS collects.
   # Trading a real crash for that is not a good exchange.
 
-  "$@" &
+  # The command runs in its OWN process group, and every signal below goes to
+  # that group (`kill -- -PGID`), not to one pid. Signalling only the pid left a
+  # timed-out command's children running after this function returned
+  # (smartwatermelon/dotfiles#350); semgrep spawns workers, so that is the case
+  # that matters here.
+  #
+  # Why `set -m`: it makes bash put the next background job in a new group whose
+  # id is the job's pid. Stock macOS has no `setsid`, and a `pkill -P` walk of
+  # the tree is not atomic: a fork between listing and killing escapes, and a
+  # grandchild whose parent dies first is reparented out of the tree. A group
+  # signal reaches every member in one call, orphans included. The one escape is
+  # a descendant that calls setsid/setpgid itself; GNU `timeout` has it too.
+  #
+  # `-m` is on for this one line only, so the watchdog stays in the hook's own
+  # group. Stdin is /dev/null so a job outside the terminal's foreground group
+  # cannot stop on SIGTTIN; bash 3.2 and 5.x also differ on async stdin under
+  # `-m`, and this makes both behave the same.
+  local had_monitor=0
+  [[ $- == *m* ]] && had_monitor=1
+  set -m
+  "$@" </dev/null &
   local cmd_pid=$!
+  ((had_monitor)) || set +m
 
   (
     # Poll rather than `sleep ${secs}` in one shot so the watchdog exits
     # promptly once the command finishes, instead of lingering for the full
-    # budget on every invocation.
+    # budget on every invocation. This one checks the leader pid, not the
+    # group: a command that finished but left a child behind is not an expiry.
     local waited=0
     while ((waited < secs)); do
       kill -0 "${cmd_pid}" 2>/dev/null || exit 0
@@ -399,7 +421,7 @@ run_bounded() {
       ((waited += 1))
     done
     : >"${expiry_marker}"
-    kill -TERM "${cmd_pid}" 2>/dev/null || true
+    kill -TERM -- "-${cmd_pid}" 2>/dev/null || true
 
     # Escalate to SIGKILL only while the process is still ours to signal.
     #
@@ -414,6 +436,11 @@ run_bounded() {
     # "check liveness, then signal" atomic. It cannot be closed from a shell
     # without process groups or pidfds, and the residual window is now a few
     # milliseconds on a path that runs once per push.
+    #
+    # The checks and signals now target the group (#350). The race is the same
+    # in kind: an id is not reused while its group has a live member, but once
+    # the group empties the id is free again. Liveness is a GROUP test, so the
+    # loop keeps escalating after the leader dies if a TERM-ignoring child lives.
     #
     # Poll in 0.1s steps for SEMGREP_TIMEOUT_KILL_GRACE seconds. The GNU path
     # at the top of this function passes the same variable to `timeout
@@ -432,24 +459,35 @@ run_bounded() {
       # watchdog has no further work. The counter uses `+= 1` rather than
       # `++` because `((v++))` evaluates to 0 when v is 0 and would abort
       # this subshell under the inherited `set -e`.
-      kill -0 "${cmd_pid}" 2>/dev/null || exit 0
+      kill -0 -- "-${cmd_pid}" 2>/dev/null || exit 0
       sleep 0.1
       ((grace += 1))
     done
-    kill -0 "${cmd_pid}" 2>/dev/null && kill -KILL "${cmd_pid}" 2>/dev/null
+    kill -0 -- "-${cmd_pid}" 2>/dev/null && kill -KILL -- "-${cmd_pid}" 2>/dev/null
     exit 0
   ) &
   local watchdog_pid=$!
 
   local status=0
   wait "${cmd_pid}" 2>/dev/null || status=$?
-  # SIGTERM to the watchdog also takes down whatever `sleep` it is sitting in:
-  # that sleep is a foreground child of the subshell, not a background job, so
-  # it dies with its parent. Checked by sampling the process table across
-  # repeated calls — no `sleep` survives run_bounded's return
-  # (smartwatermelon/dotfiles#264).
-  kill -TERM "${watchdog_pid}" 2>/dev/null || true
-  wait "${watchdog_pid}" 2>/dev/null || true
+
+  # On expiry, let the watchdog FINISH. The group TERM usually kills the leader
+  # at once, so `wait` returns while a TERM-ignoring child may still live; only
+  # the watchdog's grace loop will SIGKILL it. Killing the watchdog here, as the
+  # normal path does, would cancel that escalation and leak the child (#350).
+  # This adds at most SEMGREP_TIMEOUT_KILL_GRACE, and only when one ignores TERM.
+  # The marker is written before the TERM, so it is present on this path.
+  if [[ -f "${expiry_marker}" ]]; then
+    wait "${watchdog_pid}" 2>/dev/null || true
+  else
+    # SIGTERM to the watchdog also takes down whatever `sleep` it is sitting in:
+    # that sleep is a foreground child of the subshell, not a background job, so
+    # it dies with its parent. Checked by sampling the process table across
+    # repeated calls — no `sleep` survives run_bounded's return
+    # (smartwatermelon/dotfiles#264).
+    kill -TERM "${watchdog_pid}" 2>/dev/null || true
+    wait "${watchdog_pid}" 2>/dev/null || true
+  fi
 
   # Report expiry only when the WATCHDOG is what killed the command.
   #
