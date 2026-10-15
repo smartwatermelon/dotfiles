@@ -314,7 +314,6 @@ SEMGREP_TIMEOUT_SECS="${SEMGREP_TIMEOUT_SECS:-300}"
 # this, so expiry cleanup has one implementation (smartwatermelon/dotfiles#350).
 _bounded_reap_group() {
   local pgid="$1"
-  # Nothing to do if the group is already empty.
   kill -TERM -- "-${pgid}" 2>/dev/null || return 0
 
   # Escalate to SIGKILL only while the group still has a member.
@@ -405,6 +404,9 @@ run_bounded() {
   # hook's own group. Stdin is /dev/null so a job outside the terminal's
   # foreground group cannot stop on SIGTTIN; bash 3.2 and 5.x also differ on
   # async stdin under `-m`, and this makes both behave the same.
+  #
+  # Ctrl-C ends the hook at once. The job is outside the terminal's group: timeout still bounds it,
+  # but on the fallback the watchdog dies with the hook and the job runs on, as it did before #350.
   local had_monitor=0
   [[ $- == *m* ]] && had_monitor=1
   set -m
