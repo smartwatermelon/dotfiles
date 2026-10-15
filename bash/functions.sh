@@ -926,6 +926,89 @@ updates() {
 }
 # Not exported - interactive command only
 
+# Print the repos under "Failed:" in a walker log's summary. Anchored on that
+# header: "Skipped (dirty):" uses the same bullets.
+_allup_failed_repos() {
+  sed $'s/\x1b\\[[0-9;]*m//g' "$1" | awk '
+    /━━━ Summary ━━━/ { summary = 1; next }
+    summary && /^  Failed:$/ { failed = 1; next }
+    failed && /^    - / { sub(/^    - /, ""); print; next }
+    failed { failed = 0 }
+  '
+}
+# Not exported - internal helper
+
+# Run my-repos or beacon-repos for allup. The walker exits 0 on a failed
+# pull, so its summary's Failed count is read too.
+_allup_pull_step() {
+  local cmd="$1" log status count reply failed_list
+  local -a failed_repos
+
+  while true; do
+    log="$(mktemp "${TMPDIR:-/tmp}/allup-${cmd}.XXXXXX")" || return 1
+    "${cmd}" 2>&1 | tee "${log}"
+    status="${PIPESTATUS[0]}"
+
+    failed_list="$(_allup_failed_repos "${log}")"
+    failed_repos=()
+    [[ -z "${failed_list}" ]] || mapfile -t failed_repos <<<"${failed_list}"
+    count="$(sed $'s/\x1b\\[[0-9;]*m//g' "${log}" \
+      | sed -nE 's/^  Total: .*Failed: ([0-9]+).*/\1/p' | tail -n 1)"
+    rm -f "${log}"
+
+    if [[ "${status}" -eq 0 && "${count:-0}" -eq 0 && ${#failed_repos[@]} -eq 0 ]]; then
+      return 0
+    fi
+    # Exit 0 with failed repos still has to stop allup on q, so give it a
+    # non-zero status of its own.
+    [[ "${status}" -ne 0 ]] || status=1
+
+    _notif "${cmd} failed (exit ${status})"
+    if ((${#failed_repos[@]} > 0)); then
+      echo "Failed repos:"
+      printf '  - %s\n' "${failed_repos[@]}"
+    elif [[ "${count:-0}" -gt 0 ]]; then
+      echo "${cmd} reported ${count} failed repo(s), but the list could not be read"
+    fi
+
+    # No TTY: stop with the status, as before.
+    if _updates_noninteractive; then
+      _notif "allup stopped at ${cmd}; fix the failed repos and rerun 'allup'"
+      return "${status}"
+    fi
+
+    while true; do
+      printf 'Fix the problem, then press Enter to retry %s, s to skip the remaining pulls, or q to quit: ' "${cmd}"
+      # EOF counts as q.
+      if ! read -r reply; then
+        echo
+        reply=q
+      fi
+      case "${reply}" in
+        # The walker cannot pull only named repos, so retry re-runs the step.
+        "")
+          _notif "Retrying ${cmd} (all repos; the walker cannot pull only the failed ones)"
+          break
+          ;;
+        # Sets allup's local skip_pulls (bash dynamic scope).
+        s | S)
+          _notif "Skipping the remaining repo pulls"
+          skip_pulls=true
+          return 0
+          ;;
+        q | Q)
+          _notif "allup stopped at ${cmd}; fix the failed repos and rerun 'allup'"
+          return "${status}"
+          ;;
+        *)
+          echo "Unrecognized reply '${reply}'"
+          ;;
+      esac
+    done
+  done
+}
+# Not exported - internal helper
+
 # Update all local repos, repair local config symlinks, run software updates
 # my-repos and beacon-repos are from ~/Developer/scripts, symlinked into ~/.local/bin
 # `allup --continue` resumes after a failed step without re-running the
@@ -961,9 +1044,13 @@ allup() {
     esac
   fi
 
-  if [[ "${skip_pulls}" != true ]]; then
-    if command -v my-repos &>/dev/null; then my-repos || return $?; fi
-    if command -v beacon-repos &>/dev/null; then beacon-repos || return $?; fi
+  # A failed pull prompts (_allup_pull_step). Skip sets skip_pulls, so it is
+  # checked again before beacon-repos.
+  if [[ "${skip_pulls}" != true ]] && command -v my-repos &>/dev/null; then
+    _allup_pull_step my-repos || return $?
+  fi
+  if [[ "${skip_pulls}" != true ]] && command -v beacon-repos &>/dev/null; then
+    _allup_pull_step beacon-repos || return $?
   fi
 
   "${HOME}/Developer/dotfiles/install.sh" --sync || return $?
