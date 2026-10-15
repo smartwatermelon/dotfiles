@@ -185,6 +185,7 @@ run_allup "q"
 check "status" "1" "${rc}"
 check "nothing after my-repos runs" "my-repos" "${calls}"
 check_contains "says how to resume" "fix the failed repos and rerun 'allup'" "${out}"
+check_contains "reports the walker's real exit code" "my-repos failed (exit 0)" "${out}"
 
 echo "Case: my-repos exits non-zero, q keeps its status"
 export PLAN_my_repos="crash"

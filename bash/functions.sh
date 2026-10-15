@@ -959,11 +959,11 @@ _allup_pull_step() {
     if [[ "${status}" -eq 0 && "${count:-0}" -eq 0 && ${#failed_repos[@]} -eq 0 ]]; then
       return 0
     fi
-    # Exit 0 with failed repos still has to stop allup on q, so give it a
-    # non-zero status of its own.
+    # Report the walker's real exit code, but return non-zero even when it
+    # exited 0, so q still stops allup.
+    _notif "${cmd} failed (exit ${status})"
     [[ "${status}" -ne 0 ]] || status=1
 
-    _notif "${cmd} failed (exit ${status})"
     if ((${#failed_repos[@]} > 0)); then
       echo "Failed repos:"
       printf '  - %s\n' "${failed_repos[@]}"
