@@ -93,6 +93,30 @@ fi
 
 _ok "Pre-flight checks passed (macOS, git repo at ${REPO_DIR}, non-root)"
 
+# ── Version ──────────────────────────────────────────────
+# Tagged on each merge to main (dev-env#72); -dirty marks local edits.
+INSTALL_VERSION="$(git -C "${REPO_DIR}" describe --tags --match 'v[0-9]*' --dirty --always 2>/dev/null || echo unknown)"
+VERSION_STATE="${XDG_STATE_HOME:-${HOME}/.local/state}/dotfiles/version"
+
+# An EXIT trap, so every exit path below reports the version it left behind.
+_report_version() {
+  local rc=$?
+  if ((rc != 0)); then
+    _err "dotfiles: install of ${INSTALL_VERSION} failed (exit ${rc})"
+  elif [[ "${DRY_RUN}" == true ]]; then
+    _info "dotfiles: dry run of ${INSTALL_VERSION}; nothing installed"
+  elif [[ "${REPAIR_ONLY}" == true ]]; then
+    _ok "dotfiles: repaired links for ${INSTALL_VERSION}; no new files installed"
+  else
+    if ! { mkdir -p "${VERSION_STATE%/*}" && printf '%s\n' "${INSTALL_VERSION}" >"${VERSION_STATE}"; }; then
+      _warn "could not record the version in ${VERSION_STATE}"
+    fi
+    _ok "dotfiles: installed ${INSTALL_VERSION}"
+  fi
+}
+_info "dotfiles: installing ${INSTALL_VERSION}"
+trap _report_version EXIT
+
 # ── Repair-only mode ─────────────────────────────────────
 if ${REPAIR_ONLY}; then
   _info "Repair mode — checking symlinks only"
