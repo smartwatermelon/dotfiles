@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # GitHub Actions security lint wrapper for the `zizmor` pre-commit hook.
 #
-# Resolves the config the way CI does (standards/run-standards.sh:177):
+# Resolves the config the way CI does (standards/run-standards.sh:267 in
+# smartwatermelon/github-workflows):
 #
 #   cfg="${repo}/zizmor.yml"; [[ -f "${cfg}" ]] || cfg="${config_dir}/../zizmor.yml"
 #
@@ -22,7 +23,7 @@
 #
 # UNLIKE the markdownlint wrapper next door, this does NOT merge configs.
 # zizmor's --config "loads a single configuration file" (zizmor 1.30.1
-# --help), and CI's own resolution at run-standards.sh:177 is likewise
+# --help), and CI's own resolution at run-standards.sh:267 is likewise
 # either/or. Matching CI is the whole point, so either/or is correct here.
 # Do not port lint-markdown.sh's jq merge into this file: for markdownlint CI
 # merges, and the hook's failure to merge was the bug (claude-config#533).
@@ -30,13 +31,15 @@
 #
 # Discovery discrepancy, deliberate: zizmor also honours `.github/zizmor.yml`,
 # and prefers it over the repo root when both exist (measured, zizmor 1.30.1).
-# run-standards.sh:177 checks the repo root only. This wrapper matches CI
+# run-standards.sh:267 checks the repo root only. This wrapper matches CI
 # rather than zizmor, so a repo keeping its config at `.github/zizmor.yml`
 # would get the canonical policy here and its own config in CI. No repo in the
 # fleet does that today (every config found lives at the repo root), so the
 # case is unexercised — but it is a real divergence, and widening this wrapper
 # alone would make local and CI disagree in the opposite direction. If it ever
 # matters, fix run-standards.sh first and follow it here.
+#
+# Canonical policy: github-workflows' zizmor.yml is the only copy (dotfiles#345).
 #
 # Flags: CI passes --min-severity low --no-online-audits. The bare hook passed
 # neither, which is the "local gates disagree with CI by construction" problem
@@ -45,7 +48,7 @@
 
 set -euo pipefail
 
-CANONICAL="${ZIZMOR_CANONICAL_CONFIG:-${HOME}/.config/zizmor/zizmor.yml}"
+CANONICAL="${ZIZMOR_CANONICAL_CONFIG:-${HOME}/Developer/github-workflows/zizmor.yml}"
 
 main() {
   # Nothing staged for this hook: pre-commit still invokes it. zizmor with no
@@ -60,8 +63,8 @@ main() {
     exec zizmor --config zizmor.yml --min-severity low --no-online-audits "$@"
   fi
 
-  # No repo config and no canonical file: a fresh machine where dotfiles is
-  # cloned but not yet installed. Passing a nonexistent path makes zizmor
+  # No repo config and no canonical file: a machine without the
+  # github-workflows checkout. Passing a nonexistent path makes zizmor
   # fail on a path the user never configured, blocking the commit with a
   # confusing error. Warn and fall back to zizmor's built-in defaults, which
   # still lint — they are merely stricter than fleet policy about
@@ -69,6 +72,7 @@ main() {
   if [[ ! -f "${CANONICAL}" ]]; then
     printf 'lint-zizmor: canonical config not found at %s; using zizmor defaults\n' \
       "${CANONICAL}" >&2
+    printf 'lint-zizmor: clone smartwatermelon/github-workflows into ~/Developer to get the fleet policy\n' >&2
     printf 'lint-zizmor: first-party reusable-workflow refs may report unpinned-uses\n' >&2
     exec zizmor --min-severity low --no-online-audits "$@"
   fi
