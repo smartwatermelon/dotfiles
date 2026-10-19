@@ -91,10 +91,10 @@ else
   echo "FAIL: interactive shell: expected 'shell=${WORKDIR}/Developer child=unset', got '${case4_interactive}'"
   fail=1
 fi
-if [[ "${case4_script}" == "shell=/inherited child=unset" ]]; then
-  echo "PASS: non-interactive shell sets no CDPATH and stops exporting the inherited one"
+if [[ "${case4_script}" == "shell= child=unset" ]]; then
+  echo "PASS: non-interactive shell drops the inherited CDPATH"
 else
-  echo "FAIL: non-interactive shell: expected 'shell=/inherited child=unset', got '${case4_script}'"
+  echo "FAIL: non-interactive shell: expected 'shell= child=unset', got '${case4_script}'"
   fail=1
 fi
 
@@ -139,10 +139,10 @@ beacon_dir="${beacon_home}/Developer/beacon-biosignals"
 
 # 5a: directory absent — must NOT appear in CDPATH.
 absent_cdpath="$(_cdpath_under_home)"
-if [[ ":${absent_cdpath}:" != *":${beacon_dir}:"* ]]; then
+if [[ "${absent_cdpath}" == "${beacon_home}/Developer" ]]; then
   echo "PASS: beacon dir absent — not added to CDPATH"
 else
-  echo "FAIL: beacon dir absent but present in CDPATH: '${absent_cdpath}'"
+  echo "FAIL: beacon dir absent: expected CDPATH '${beacon_home}/Developer', got '${absent_cdpath}'"
   fail=1
 fi
 

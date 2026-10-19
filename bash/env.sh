@@ -180,6 +180,8 @@ fi
 # $PWD, so in a script it hijacks relative cd (#437).
 if [[ $- == *i* ]]; then
   CDPATH="${HOME}/Developer"
+else
+  unset CDPATH
 fi
 
 # Append the work (Beacon) checkout root, but only on machines where it
