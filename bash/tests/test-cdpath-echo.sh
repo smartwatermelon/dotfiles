@@ -1,20 +1,8 @@
 #!/usr/bin/env bash
 #shellcheck shell=bash
-# Standalone verification that `cd` does not leak an echoed path to stdout
-# when CDPATH is set. Run directly: bash bash/tests/test-cdpath-echo.sh
-#
-# Regression coverage for smartwatermelon/dotfiles#176: bash/env.sh's comment
-# claims that omitting "." from CDPATH is enough to keep `cd` silent, but
-# that's only true for the $PWD-relative case. If a script sources env.sh
-# (so CDPATH is exported) and later does `cd somename` where "somename"
-# happens to match a CDPATH component by bare name — NOT the current
-# directory — bash's cd builtin still resolves it via CDPATH search and
-# still echoes the resolved absolute path to stdout. Every other test in
-# this directory sidesteps the whole problem by unsetting CDPATH up front,
-# which is correct for those tests but means none of them actually exercise
-# the CDPATH-resolved-echo case this issue is about. This test exercises it
-# directly, first proving the vulnerable behavior actually occurs, then
-# proving the two documented mitigations (unset CDPATH; CDPATH='' cd) close it.
+
+# CDPATH-resolved cd echoes to stdout (#176); env.sh keeps CDPATH out of
+# scripts (#437). Run: bash bash/tests/test-cdpath-echo.sh
 set -euo pipefail
 
 REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -82,21 +70,31 @@ else
   fail=1
 fi
 
-# --- Case 4: repo's own env.sh sets CDPATH without triggering this repo's
-# own hardened cd sites into echoing. Source env.sh for real (as a login
-# shell would) and confirm the exported CDPATH still exhibits the
-# vulnerable behavior when used carelessly, proving env.sh's CDPATH really
-# is exported into script contexts and this is not just a synthetic setup.
-export BASH_CONFIG_DIR="${REPO_ROOT}/bash"
-env_cdpath="$(
-  #shellcheck source=/dev/null
-  source "${BASH_CONFIG_DIR}/env.sh" >/dev/null 2>&1
-  printf '%s' "${CDPATH:-}"
-)"
-if [[ -n "${env_cdpath}" ]]; then
-  echo "PASS: bash/env.sh exports a non-empty CDPATH (${env_cdpath})"
+# --- Case 4: env.sh sets CDPATH only in interactive shells, never exported (#437).
+case4_probe="${WORKDIR}/case4-probe.sh"
+cat >"${case4_probe}" <<'PROBE'
+_get_homebrew_root() { echo /opt/homebrew; }
+#shellcheck source=/dev/null
+source "${BASH_CONFIG_DIR}/env.sh" >/dev/null 2>&1
+printf 'shell=%s child=%s' "${CDPATH:-}" "$(bash --norc -c 'printf %s "${CDPATH-unset}"')"
+PROBE
+# Inherited exported CDPATH: a parent shell started before the change.
+_case4() {
+  env -i HOME="${WORKDIR}" BASH_CONFIG_DIR="${REPO_ROOT}/bash" PATH="/usr/bin:/bin" \
+    CDPATH=/inherited bash --norc "$@" "${case4_probe}" 2>/dev/null
+}
+case4_interactive="$(_case4 -i)"
+case4_script="$(_case4)"
+if [[ "${case4_interactive}" == "shell=${WORKDIR}/Developer child=unset" ]]; then
+  echo "PASS: interactive shell gets CDPATH; its children do not (${case4_interactive})"
 else
-  echo "FAIL: expected bash/env.sh to export a non-empty CDPATH"
+  echo "FAIL: interactive shell: expected 'shell=${WORKDIR}/Developer child=unset', got '${case4_interactive}'"
+  fail=1
+fi
+if [[ "${case4_script}" == "shell=/inherited child=unset" ]]; then
+  echo "PASS: non-interactive shell sets no CDPATH and stops exporting the inherited one"
+else
+  echo "FAIL: non-interactive shell: expected 'shell=/inherited child=unset', got '${case4_script}'"
   fail=1
 fi
 
@@ -134,7 +132,7 @@ PROBE
 
 _cdpath_under_home() {
   env -i HOME="${beacon_home}" BASH_CONFIG_DIR="${REPO_ROOT}/bash" \
-    PATH="/usr/bin:/bin" bash --norc "${beacon_probe}"
+    PATH="/usr/bin:/bin" bash --norc -i "${beacon_probe}" 2>/dev/null
 }
 
 beacon_dir="${beacon_home}/Developer/beacon-biosignals"
