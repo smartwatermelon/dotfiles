@@ -176,37 +176,24 @@ else
   export EDITOR="nano"
 fi
 
-# Directory navigation
-# Set CDPATH to include Developer directory (from previous .profile).
-# Deliberately omits "." as the first entry: when cd resolves via CDPATH
-# (even a "." entry), bash's cd builtin echoes the resolved path to
-# stdout as a side effect — this silently corrupts any script's
-# `cd -- "$dir" && pwd` idiom (a very common pattern) by duplicating the
-# captured output whenever the script is invoked with a relative path.
-# Without "." here, cd only consults CDPATH for paths that aren't already
-# resolvable relative to $PWD, which is the behavior actually wanted.
-#
-# IMPORTANT — this only protects the "$PWD-relative" case. If a script
-# invoked with this file already sourced does `cd somename` where
-# "somename" happens to match one of the CDPATH entries above by bare
-# name (not the current directory), bash's cd builtin still resolves it
-# via CDPATH search and still echoes the resolved absolute path to
-# stdout — "." being absent from CDPATH does not prevent this. CDPATH is
-# meant purely as an interactive-shell convenience; any script or
-# function in this repo (or elsewhere) that does a `cd` and cares about
-# stdout being clean — e.g. `x=$(cd "$dir" && pwd)` — MUST NOT rely on
-# CDPATH being unset by the caller. Instead, either `unset CDPATH` at the
-# top of the script (see bash/tests/*.sh for the established pattern) or
-# scope it out per-invocation with `CDPATH='' cd -- "$dir"`.
-export CDPATH="${HOME}/Developer"
+# CDPATH: interactive shells only, never exported. bash searches it before
+# $PWD, so in a script it hijacks relative cd (#437).
+if [[ $- == *i* ]]; then
+  CDPATH="${HOME}/Developer"
+else
+  unset CDPATH
+fi
 
 # Append the work (Beacon) checkout root, but only on machines where it
 # actually exists — a CDPATH entry pointing at a missing directory is dead
 # weight that bash stats on every CDPATH-resolved cd. Appended last so work
 # repos never shadow a same-named personal repo under ~/Developer.
-if [[ -d "${BEACON_WORKDIR}" ]]; then
-  export CDPATH="${CDPATH}:${BEACON_WORKDIR}"
+if [[ $- == *i* && -d "${BEACON_WORKDIR}" ]]; then
+  CDPATH="${CDPATH}:${BEACON_WORKDIR}"
 fi
+
+# Also strips an export inherited from a shell started before this change.
+export -n CDPATH
 
 # Set correct terminal type for SSH sessions with color support
 export TERM=xterm-256color
