@@ -75,10 +75,51 @@ assert_branch "a plain branch name passes through" "plain-branch" \
   checkout -b plain-branch
 assert_branch "extra flags disable translation" "FAIL" \
   checkout -q -b 'feat: with flag'
-assert_branch "a scoped type is left to git's validation" "FAIL" \
+assert_branch "a scope joins the subject" "feat/api-add-endpoint" \
   checkout -b 'feat(api): add endpoint'
-assert_branch "a second ': ' is left to git's validation" "FAIL" \
-  checkout -b 'fix: a: b'
+assert_branch "a breaking '!' is dropped" "feat/drop-v1" \
+  checkout -b 'feat!: drop v1'
+assert_branch "scope and '!' together" "feat/api-drop-v1" \
+  switch -c 'feat(api)!: drop v1'
+assert_branch "an empty scope is dropped" "feat/x" \
+  checkout -b 'feat(): x'
+assert_branch "whitespace is trimmed and squeezed" "docs/two-spaces" \
+  checkout -b 'docs:   two  spaces '
+assert_branch "everything is lowercased" "feat/mixed-case" \
+  checkout -b 'Feat(): Mixed CASE'
+assert_branch "a second ': ' is cleaned" "fix/handle-a-b" \
+  checkout -b 'fix: handle a: b'
+assert_branch "characters git rejects are dropped" "fix/what-why" \
+  checkout -b "fix: what? why* ~^[\\"
+assert_branch "'/' and '..' cannot nest or break the ref" "fix/a-b.c" \
+  checkout -b 'fix: a/b..c.'
+assert_branch "an apostrophe is dropped" "fix/users-path" \
+  checkout -b "fix: user's path"
+assert_branch "a subject that cleans to nothing is left to git" "FAIL" \
+  checkout -b 'feat: ?!*'
+assert_branch "no space after the colon is not a header" "FAIL" \
+  checkout -b 'feat:x y'
+
+# Same translation under macOS /bin/bash 3.2 (no ${s,,}; older =~ and globs)
+bash32_script="${WORKDIR}/bash32.sh"
+cat >"${bash32_script}" <<'EOF'
+set -u
+source "$1"
+command git init -q -b main "$2"
+cd "$2" || exit 1
+git checkout -b 'Feat(API)!: Drop  v1?' >/dev/null 2>&1
+command git symbolic-ref --short HEAD
+EOF
+if [[ -x /bin/bash ]]; then
+  out="$(/bin/bash "${bash32_script}" "${BASH_CONFIG_DIR}/git-wrapper.sh" \
+    "${WORKDIR}/repo-bash32" 2>&1)" || true
+  if [[ "${out}" == "feat/api-drop-v1" ]]; then
+    echo "PASS: translation under /bin/bash"
+  else
+    echo "FAIL: translation under /bin/bash — got '${out}'"
+    fail=1
+  fi
+fi
 
 # Zero-argument git under set -u: git prints usage and exits 1. The wrapper
 # must return that, not abort the shell on an unbound expansion.
