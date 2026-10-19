@@ -47,7 +47,7 @@ fi
 
 # Every helper git() reaches at runtime must survive the process boundary.
 # Add to this list if git() grows another callee.
-REQUIRED_EXPORTS=(_git_wrapper_restore_dir)
+REQUIRED_EXPORTS=(_git_wrapper_restore_dir _git_wrapper_slug)
 
 echo "Case: helpers cross a process boundary with the exported git"
 # env -i so nothing is inherited from the shell running this test: the only

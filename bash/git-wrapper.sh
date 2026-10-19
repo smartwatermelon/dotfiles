@@ -27,6 +27,26 @@ _git_wrapper_restore_dir() {
   CDPATH='' cd "${dir}" 2>/dev/null || true
 }
 
+# Make one branch-name segment: lowercase, spaces and "/" become "-", other
+# characters outside [a-z0-9._-] are dropped.
+_git_wrapper_slug() {
+  local s
+  s="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  s="${s//\//-}"
+  s="${s//[[:space:]]/-}"
+  s="${s//[^a-z0-9._-]/}"
+
+  # Squeeze runs of "-" and "." (git rejects ".."), then trim both ends
+  while [[ "${s}" == *--* ]]; do s="${s//--/-}"; done
+  while [[ "${s}" == *..* ]]; do s="${s//../.}"; done
+  while [[ "${s}" == [-.]* ]]; do s="${s#?}"; done
+  while [[ "${s}" == *[-.] ]]; do s="${s%?}"; done
+
+  # Git also rejects a component ending in ".lock"
+  [[ "${s}" == *.lock ]] && s="${s%.lock}-lock"
+  printf '%s' "${s}"
+}
+
 git() {
   # Guard against recursive calls
   if [[ -n "${_GIT_WRAPPER_ACTIVE:-}" ]]; then
@@ -34,24 +54,25 @@ git() {
     return $?
   fi
 
-  # Translate Conventional Commit-style descriptions only when creating a
-  # branch. Keep all other Git invocations and arguments unchanged.
-  # Example: git checkout -b 'feat: do the new thing'
-  #       -> git checkout -b feat/do-the-new-thing
-  # Rewrite "$@", not an array copy: bash 3.2 reads an empty array as unbound
-  # under set -u. Git rejects ": " in ref names.
+  # git checkout -b 'feat(api)!: Add X' -> git checkout -b feat/api-add-x
+  # Exact 3-arg checkout -b / switch -c only; git rejects ": " anyway.
   if (($# == 3)) \
     && { [[ "$1" == "checkout" && "$2" == "-b" ]] \
       || [[ "$1" == "switch" && "$2" == "-c" ]]; }; then
-    local branch="$3"
-    if [[ "${branch}" == *": "* ]]; then
-      local branch_type="${branch%%: *}"
-      local branch_subject="${branch#*: }"
-      # Only recognize a simple Conventional Commit type; leave other
-      # malformed inputs to Git's own ref-name validation.
-      if [[ "${branch_type}" =~ ^[[:alnum:]_-]+$ ]]; then
-        branch_subject="${branch_subject//[[:space:]]/-}"
-        set -- "$1" "$2" "${branch_type}/${branch_subject}"
+    local header_re='^([[:alnum:]_-]+)(\(([^)]*)\))?!?: (.*)$'
+    if [[ "$3" =~ ${header_re} ]]; then
+      local raw_type="${BASH_REMATCH[1]}"
+      local raw_scope="${BASH_REMATCH[3]}"
+      local raw_subject="${BASH_REMATCH[4]}"
+      local branch_type branch_scope branch_subject
+      branch_type="$(_git_wrapper_slug "${raw_type}")"
+      branch_scope="$(_git_wrapper_slug "${raw_scope}")"
+      branch_subject="$(_git_wrapper_slug "${raw_subject}")"
+
+      # Rewrite "$@", not an array copy: bash 3.2 reads an empty one as unbound
+      if [[ -n "${branch_type}" && -n "${branch_subject}" ]]; then
+        set -- "$1" "$2" \
+          "${branch_type}/${branch_scope:+${branch_scope}-}${branch_subject}"
       fi
     fi
   fi
@@ -212,4 +233,4 @@ git() {
 # HOME-relative path, so any child with a rewritten HOME (the test suite's
 # fixtures, for one) resolves it to nothing and the helper vanishes while the
 # inherited git remains. Same reasoning, and the same fix, as gh-wrapper.sh.
-export -f git _git_wrapper_restore_dir # Exported - overrides system git command globally
+export -f git _git_wrapper_restore_dir _git_wrapper_slug # Exported - overrides system git command globally
