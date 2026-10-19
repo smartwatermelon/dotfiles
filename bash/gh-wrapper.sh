@@ -894,6 +894,16 @@ _gh_wrapper_force_draft_for_off_org() {
 # NOT covered: `--input <json>`, which carries a body inside a JSON document.
 # Blocking it outright would also block ruleset and protection writes that
 # carry no prose. Same limit as hook-block-personify.sh.
+
+# gh api flags whose next argument is a value, not the endpoint. Field flags
+# (-f, -F) are left to each caller. Shared by both api walks.
+_gh_wrapper_api_value_flag() {
+  case "$1" in
+    -X | --method | -H | --header | -q | --jq | -t | --template | --input | --cache | -p | --preview | --hostname) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 _gh_wrapper_api_body_fields() {
   local arg flag="" field key val skip_next=0
   local gql_body_re='mutation.*[^[:alnum:]_]body[[:space:]]*:'
@@ -906,11 +916,10 @@ _gh_wrapper_api_body_fields() {
     field=""
     if [[ -n "${flag}" ]]; then
       field="${arg}"
+    elif _gh_wrapper_api_value_flag "${arg}"; then
+      skip_next=1
     else
       case "${arg}" in
-        -X | --method | -H | --header | -q | --jq | -t | --template | --input | --cache | -p | --preview | --hostname)
-          skip_next=1
-          ;;
         -f | -F | --field | --raw-field)
           flag="${arg}"
           continue
@@ -964,7 +973,7 @@ _gh_wrapper_norm_repo() {
 # check can route the text by destination (gate-rules.conf). Sets the caller's
 # locals `dest_repo` (empty: the checkout gh runs in) and `also_cwd`, and
 # returns 1 with the caller's `reason` set when the destination cannot be read.
-# Takes the caller's `sub`, `subsub`, `repo_args` and `url_args`.
+# Takes the caller's `sub`, `subsub`, `api_pos`, `repo_args` and `url_args`.
 #
 # The forms read are the ones hook-block-personify.sh reads, so the two gates
 # route a text the same way: -R/--repo, GH_REPO, a github.com URL given as the
@@ -982,6 +991,12 @@ _gh_wrapper_gate_destination() {
   [[ -n "${GH_REPO:-}" ]] && cands+=("${GH_REPO}")
   [[ "${#repo_args[@]}" -gt 0 ]] && cands+=("${repo_args[@]}")
   if [[ "${sub}" == "api" ]]; then
+    # gh api takes one positional. Zero, or more (an unknown flag's value),
+    # means no endpoint: block, never route by $PWD alone (#434).
+    if [[ "${api_pos:-0}" != "1" ]]; then
+      reason="cannot find the gh api endpoint (${api_pos:-0} positional arguments; gh api takes exactly one)"
+      return 1
+    fi
     ep="${subsub}"
     [[ "${ep}" =~ ^https?://[^/]+(/.*)$ ]] && ep="${BASH_REMATCH[1]}"
     ep="${ep#/}"
@@ -1138,8 +1153,11 @@ _gh_wrapper_dest_exempt() {
 # (claude-config#548); see _gh_wrapper_api_body_fields.
 #
 # Same arg walk as _gh_wrapper_force_draft_for_off_org so detection cannot drift.
+#
+# After `api` it skips flag values and counts positionals (#434). The
+# force-draft walk acts on pr create only.
 _gh_wrapper_approval_gate() {
-  local sub="" subsub="" skip_next=0 arg
+  local sub="" subsub="" skip_next=0 arg api_pos=0
   local body_file="" inline=0 want_path=0 want_repo=0
   local -a repo_args=() url_args=()
 
@@ -1159,6 +1177,21 @@ _gh_wrapper_approval_gate() {
       want_repo=0
       continue
     fi
+    # gh api: skip each flag's value, or `-X POST` reads POST as the endpoint
+    # (#434). Here -F is --field, not --body-file.
+    if [[ "${sub}" == "api" ]]; then
+      case "${arg}" in
+        -f | -F | --field | --raw-field)
+          skip_next=1
+          continue
+          ;;
+        *) ;;
+      esac
+      if _gh_wrapper_api_value_flag "${arg}"; then
+        skip_next=1
+        continue
+      fi
+    fi
     case "${arg}" in
       -R | --repo) want_repo=1 ;;
       --hostname | --config-dir | --token) skip_next=1 ;;
@@ -1176,6 +1209,7 @@ _gh_wrapper_approval_gate() {
       --*=*) ;;
       -*) ;;
       *)
+        [[ "${sub}" == "api" ]] && api_pos=$((api_pos + 1))
         if [[ -z "${sub}" ]]; then
           sub="${arg}"
         elif [[ -z "${subsub}" ]]; then
@@ -1738,6 +1772,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
 fi

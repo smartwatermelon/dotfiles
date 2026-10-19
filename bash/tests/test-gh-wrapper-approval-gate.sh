@@ -312,6 +312,16 @@ if [[ "${HAVE_GATE}" == "1" ]] && grep -q -- '--kind' "${GATE}"; then
     api repos/o/r/issues/5/comments -F "body=@${SANDBOX}/repos/o/r/pulls/5/comments"
   assert_kind "kind: api graphql has no repos endpoint" pr-comment \
     api graphql -F "body=@${BODY}"
+  # A flag value before the endpoint is not the endpoint (#434): `-X POST`
+  # once made POST the endpoint.
+  assert_kind "kind: api -X POST before pulls/N/comments" line-comment \
+    api -X POST repos/o/r/pulls/5/comments -F "body=@${BODY}"
+  assert_kind "kind: api --method=POST before pulls/N/comments" line-comment \
+    api --method=POST repos/o/r/pulls/5/comments -F "body=@${BODY}"
+  assert_kind "kind: api -H value before pulls/N/comments" line-comment \
+    api -H 'Accept: x' repos/o/r/pulls/5/comments -F "body=@${BODY}"
+  assert_kind "kind: api -f field before pulls/N/comments" line-comment \
+    api -f commit_id=abc repos/o/r/pulls/5/comments -F "body=@${BODY}"
 
   # Over the cap blocks even though the bytes are approved; the reason is shown.
   OVER="${SANDBOX}/over.md"
@@ -480,6 +490,9 @@ if [[ "${HAVE_GATE}" == "1" && -x "${SANDBOX}/.claude/scripts/gate-route.sh" ]];
   assert_gate_gh_repo "route: api endpoint and GH_REPO disagree" 1 twistedmelonman/z api repos/twistedmelonman/y/issues/1/comments -F "body=@${BODY}"
   assert_gate "route: -R on another host" 1 pr create --title t --body-file "${BODY}" -R gitlab.example.com/o/n
   assert_gate "route: api repositories/<id>" 1 api repositories/123/issues/1/comments -F "body=@${BODY}"
+  # The endpoint after a value-taking flag still names the destination (#434).
+  assert_gate "route: api -X POST repos/ employer, no record" 1 \
+    api -X POST repos/beacon-biosignals/x/issues/1/comments -F "body=@${BODY}"
   popd >/dev/null
 
   pushd "${EMP}" >/dev/null
@@ -532,6 +545,10 @@ if [[ "${HAVE_GATE}" == "1" && -x "${SANDBOX}/.claude/scripts/gate-route.sh" ]] 
   # A URL with no -R may be a flag value, so the gated checkout must pass too.
   assert_gate "route first: exempt URL from gated checkout still blocked" 1 \
     pr comment https://github.com/smartwatermelon/x/pull/5 --body "inline"
+  # The endpoint after -X names the exempt repo; the gated checkout does not
+  # decide (#434).
+  assert_gate "route first: api -X POST repos/ exempt from gated checkout passes" 0 \
+    api -X POST repos/smartwatermelon/x/pulls/5/comments -f body=inline
   popd >/dev/null
 
   pushd "${SWM}" >/dev/null
@@ -542,6 +559,23 @@ if [[ "${HAVE_GATE}" == "1" && -x "${SANDBOX}/.claude/scripts/gate-route.sh" ]] 
   # GraphQL names its target by node id: no route, never exempt.
   assert_gate "route first: graphql mutation body in exempt checkout still blocked" 1 \
     api graphql -f query='mutation { addComment(input: {subjectId: "X", body: "hi"}) { clientMutationId } }'
+  # gh api from an exempt checkout to a gated repo, with value-taking flags
+  # before the endpoint: the endpoint routes, not the checkout (#434).
+  assert_gate "route first: api -X POST repos/ gated from exempt checkout blocked" 1 \
+    api -X POST repos/nightowlstudiollc/x/pulls/5/comments -f body=inline
+  assert_gate "route first: api --method=POST repos/ gated from exempt checkout blocked" 1 \
+    api --method=POST repos/nightowlstudiollc/x/pulls/5/comments -f body=inline
+  assert_gate "route first: api -H value then repos/ gated from exempt checkout blocked" 1 \
+    api -H 'Accept: x' repos/nightowlstudiollc/x/issues/1/comments -f body=inline
+  # Fail closed when the endpoint cannot be found: an unknown flag's value
+  # leaves two positionals, and none leaves no endpoint at all.
+  assert_gate "route first: api unknown flag value plus endpoint blocked" 1 \
+    api --some-unknown val repos/nightowlstudiollc/x/issues/1/comments -f body=inline
+  assert_gate "route first: api with no endpoint blocked" 1 \
+    api -X POST -f body=inline
+  # {owner}/{repo} is filled from the checkout, so the exempt checkout routes it.
+  assert_gate "route first: api {owner}/{repo} in exempt checkout passes" 0 \
+    api 'repos/{owner}/{repo}/issues/1/comments' -f body=inline
   # An unreadable destination blocks before any route is asked.
   assert_gate "route first: -R and URL disagree still blocked" 1 \
     pr comment https://github.com/smartwatermelon/x/pull/5 -R smartwatermelon/z --body "inline"
