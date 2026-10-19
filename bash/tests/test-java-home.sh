@@ -27,7 +27,9 @@ env_java_home="$(env -i HOME="${WORKDIR}" BASH_CONFIG_DIR="${REPO_ROOT}/bash" \
 
 expected=""
 if [[ -x /usr/libexec/java_home ]]; then
-  expected="$(/usr/libexec/java_home --failfast -v 17 2>/dev/null || true)"
+  # Same scrubbed env as the probe: java_home may also scan ~/Library/Java.
+  expected="$(env -i HOME="${WORKDIR}" PATH="/usr/bin:/bin" \
+    /usr/libexec/java_home --failfast -v 17 2>/dev/null || true)"
 fi
 
 # Case 1: JAVA_HOME is set exactly when a JDK 17 is installed, to that JDK.
