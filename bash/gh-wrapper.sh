@@ -991,7 +991,7 @@ _gh_wrapper_gate_destination() {
   [[ -n "${GH_REPO:-}" ]] && cands+=("${GH_REPO}")
   [[ "${#repo_args[@]}" -gt 0 ]] && cands+=("${repo_args[@]}")
   if [[ "${sub}" == "api" ]]; then
-    # gh api takes one positional. Zero or two (an unknown flag's value)
+    # gh api takes one positional. Zero, or more (an unknown flag's value),
     # means no endpoint: block, never route by $PWD alone (#434).
     if [[ "${api_pos:-0}" != "1" ]]; then
       reason="cannot find the gh api endpoint (${api_pos:-0} positional arguments; gh api takes exactly one)"
@@ -1154,7 +1154,8 @@ _gh_wrapper_dest_exempt() {
 #
 # Same arg walk as _gh_wrapper_force_draft_for_off_org so detection cannot drift.
 #
-# After `api` the walk skips flag values and counts positionals (#434).
+# After `api` it skips flag values and counts positionals (#434). The
+# force-draft walk acts on pr create only.
 _gh_wrapper_approval_gate() {
   local sub="" subsub="" skip_next=0 arg api_pos=0
   local body_file="" inline=0 want_path=0 want_repo=0
