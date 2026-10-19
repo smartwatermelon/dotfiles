@@ -41,6 +41,9 @@ _git_wrapper_slug() {
   while [[ "${s}" == *..* ]]; do s="${s//../.}"; done
   while [[ "${s}" == [-.]* ]]; do s="${s#?}"; done
   while [[ "${s}" == *[-.] ]]; do s="${s%?}"; done
+
+  # Git also rejects a component ending in ".lock"
+  [[ "${s}" == *.lock ]] && s="${s%.lock}-lock"
   printf '%s' "${s}"
 }
 

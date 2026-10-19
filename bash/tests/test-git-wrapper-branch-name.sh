@@ -93,6 +93,8 @@ assert_branch "characters git rejects are dropped" "fix/what-why" \
   checkout -b "fix: what? why* ~^[\\"
 assert_branch "'/' and '..' cannot nest or break the ref" "fix/a-b.c" \
   checkout -b 'fix: a/b..c.'
+assert_branch "a trailing '.lock' is made valid" "fix/update-foo-lock" \
+  checkout -b 'fix: update foo.lock'
 assert_branch "an apostrophe is dropped" "fix/users-path" \
   checkout -b "fix: user's path"
 assert_branch "a subject that cleans to nothing is left to git" "FAIL" \
