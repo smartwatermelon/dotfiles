@@ -34,8 +34,29 @@ git() {
     return $?
   fi
 
+  # Translate Conventional Commit-style descriptions only when creating a
+  # branch. Keep all other Git invocations and arguments unchanged.
+  # Example: git checkout -b 'feat: do the new thing'
+  #       -> git checkout -b feat/do-the-new-thing
+  local -a git_args=("$@")
+  if (( ${#git_args[@]} == 3 )) &&
+     { [[ "${git_args[0]}" == "checkout" && "${git_args[1]}" == "-b" ]] ||
+       [[ "${git_args[0]}" == "switch" && "${git_args[1]}" == "-c" ]]; }; then
+    local branch="${git_args[2]}"
+    if [[ "$branch" == *": "* ]]; then
+      local branch_type="${branch%%: *}"
+      local branch_subject="${branch#*: }"
+      # Only recognize a simple Conventional Commit type; leave other
+      # malformed inputs to Git's own ref-name validation.
+      if [[ "$branch_type" =~ ^[[:alnum:]_-]+$ ]]; then
+        branch_subject="${branch_subject//[[:space:]]/-}"
+        git_args[2]="${branch_type}/${branch_subject}"
+      fi
+    fi
+  fi
+
   # Run the real git command first
-  command git "$@"
+  command git "${git_args[@]}"
   local git_result=$?
 
   # Only proceed if command succeeded and was "git init"
