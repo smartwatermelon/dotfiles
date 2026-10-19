@@ -222,10 +222,13 @@ export LC_ALL="en_US.UTF-8"
 # Android SDK configuration
 # Note: ANDROID_HOME and PATH modifications moved to path.sh
 
-# Java for Android (only if installed)
-if [[ -d /Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home ]]; then
-  export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home
+# JDK 17 for Android builds, any vendor. --failfast: without it, java_home
+# returns the newest JDK, exit 0, when no 17 is installed.
+if [[ -x /usr/libexec/java_home ]] \
+  && _java17_home="$(/usr/libexec/java_home --failfast -v 17 2>/dev/null)"; then
+  export JAVA_HOME="${_java17_home}"
 fi
+unset _java17_home
 
 # Claude Code configuration
 export CLAUDE_CONFIG_DIR="${HOME}/.claude"
