@@ -61,7 +61,8 @@ _git_wrapper_app_minter="${_git_wrapper_app_minter%/*}/gh-app-token.sh"
 _git_wrapper_app_push() {
   local -a args=("$@") globals=() items=()
   local n=$# i=0 sub="" remote="" repo_opt="" branch="" urls="" url item repo rc is_name=0 routed=0 unrouted=0
-  local minter="${_git_wrapper_app_minter:-}" rewrites="" got=""
+  local minter="${_git_wrapper_app_minter:-}" rewrites="" got="" alias_val=""
+  local -a alias_words=()
   _git_wrapper_push_cfg=()
   while ((i < n)); do
     case "${args[i]}" in
@@ -80,6 +81,17 @@ _git_wrapper_app_push() {
         ;;
     esac
   done
+  # An alias that expands to push (alias.pp = push -u) is a push too. A !shell alias runs outside this wrapper.
+  if [[ -n "${sub}" && "${sub}" != "push" ]]; then
+    alias_val="$(command git ${globals[@]+"${globals[@]}"} config --get "alias.${sub}" 2>/dev/null)" || alias_val=""
+    if [[ "${alias_val}" == "push" || "${alias_val}" == "push "* ]]; then
+      read -r -a alias_words <<<"${alias_val}"
+      args=(${alias_words[@]+"${alias_words[@]:1}"} ${args[@]+"${args[@]:i}"})
+      n=${#args[@]}
+      i=0
+      sub="push"
+    fi
+  fi
   [[ "${sub}" == "push" ]] || return 0
   # The first non-option is the repository; --repo only counts when none is given (git push --help).
   while ((i < n)); do
@@ -108,7 +120,10 @@ _git_wrapper_app_push() {
   fi
   if command git ${globals[@]+"${globals[@]}"} config --get "remote.${remote}.url" >/dev/null 2>&1; then
     is_name=1
-    urls="$(command git ${globals[@]+"${globals[@]}"} remote get-url --push --all "${remote}" 2>/dev/null)" || urls=""
+    if ! urls="$(command git ${globals[@]+"${globals[@]}"} remote get-url --push --all "${remote}")"; then
+      echo "[git] ERROR: cannot read the push URLs of remote '${remote}'; refusing rather than guess the route." >&2
+      return 1
+    fi
   else
     urls="${remote}"
   fi
@@ -129,7 +144,10 @@ _git_wrapper_app_push() {
       return 1
     fi
     routed=1
-    repo="$("${BASH}" "${minter}" repo "${url}")" || return 1
+    if ! repo="$("${BASH}" "${minter}" repo "${url}")"; then
+      echo "[git] ERROR: routed URL ${url} names no github.com repo; refusing to push." >&2
+      return 1
+    fi
     # A second, different item on one remote counts as mixed below.
     if ((${#items[@]} == 0)); then
       items=("${item}")
@@ -164,6 +182,12 @@ _git_wrapper_app_push() {
     got="$(command git ${globals[@]+"${globals[@]}"} "${_git_wrapper_push_cfg[@]}" remote get-url --push --all "${remote}")" || got=""
   else
     got="$(command git ${globals[@]+"${globals[@]}"} "${_git_wrapper_push_cfg[@]}" ls-remote --get-url "${remote}")" || got=""
+    # ls-remote ignores pushInsteadOf, which a push to a literal URL applies: with any such rule, refuse.
+    if command git ${globals[@]+"${globals[@]}"} config --get-regexp '^url\..*\.pushinsteadof$' >/dev/null 2>&1; then
+      echo "[git] ERROR: a url.*.pushInsteadOf rule could redirect this routed push; push to a named remote." >&2
+      _git_wrapper_push_cfg=()
+      return 1
+    fi
   fi
   while IFS= read -r url; do
     if [[ "${url}" != https://github.com/* ]]; then
