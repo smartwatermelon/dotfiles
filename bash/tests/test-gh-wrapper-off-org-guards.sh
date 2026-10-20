@@ -4,7 +4,7 @@
 # Each case runs in standalone and function mode against a stub gh. No network.
 
 # Known-bad on origin/main: the pr new, pr ready and api POST refusal cases fail there.
-# #391 added GH_REPO, PR URL and GraphQL cases (sections 4-5); 48 of them fail on the wrapper before that fix.
+# #391 added GH_REPO, PR URL, GraphQL and resolver cases; 54 of them fail on the wrapper before that fix.
 set -uo pipefail
 unset CDPATH
 
@@ -157,6 +157,7 @@ for mode in standalone function; do
   GH_REPO="${OFF}" expect_refused "${mode}" "GH_REPO fills api {owner}/{repo}" api -X POST "repos/{owner}/{repo}/pulls" -f title=x
   # pr create takes no selector: an in-org URL as a flag value must not beat -R.
   expect_passes "${mode}" "pr create URL value does not beat -R" "--draft" pr create -R "${OFF}" --title https://github.com/smartwatermelon/y/pull/1
+  expect_refused "${mode}" "pr ready URL after -R<in-org> combined" pr ready -Rsmartwatermelon/dotfiles "https://github.com/${OFF}/pull/5"
   GH_REPO=smartwatermelon/dotfiles _run "${mode}" pr create --title x
   if [[ "${called}" != *--draft* && "${rc}" -eq 0 ]]; then
     _pass "${mode}: GH_REPO in-org pr create not forced"
@@ -185,5 +186,28 @@ for mode in standalone function; do
   expect_passes "${mode}" "graphql benign --input file" "graphql" api graphql --input "${JSON_BENIGN}"
   expect_passes "${mode}" "REST field naming a mutation" "issues" api "repos/${OFF}/issues" -f title=createPullRequest
 done
+
+# Resolver-only cases (#391 review): mode-independent, so run once against the sourced function.
+echo "--- resolver"
+OWNER_DRIVER="${WORKDIR}/owner-driver.sh"
+{
+  printf 'source %q\n' "${WRAPPER}"
+  printf '%s\n' '_gh_wrapper_resolve_owner "$@"'
+} >"${OWNER_DRIVER}"
+expect_owner() {
+  local label="$1" want="$2" got
+  shift 2
+  got="$(cd "${NEUTRAL}" && bash "${OWNER_DRIVER}" "$@")"
+  if [[ "${got}" == "${want}" ]]; then
+    _pass "${label}"
+  else
+    _fail "${label}: want '${want}', got '${got}'"
+  fi
+}
+expect_owner "URL owner keeps its case" SmartWatermelon pr view https://GitHub.com/SmartWatermelon/x/pull/1
+expect_owner "URL as --body value does not beat -R" smartwatermelon pr comment 5 -R smartwatermelon/dotfiles --body "https://github.com/${OFF}/pull/1"
+expect_owner "URL after a boolean flag counts" someoutsideorg pr merge --squash "https://github.com/${OFF}/pull/1"
+expect_owner "issue URL" someoutsideorg issue view "https://github.com/${OFF}/issues/3"
+expect_owner "-R HOST/OWNER/REPO" o2 pr view 1 -R ghe.example.com/o2/r
 
 exit "${fail}"

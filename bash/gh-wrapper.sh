@@ -103,12 +103,17 @@ _gh_wrapper_resolve_owner() {
 
   _gh_wrapper_find_subcommand "$@"
   if [[ ("${sub}" == "pr" || "${sub}" == "issue") && ! "${subsub}" =~ ^(create|new|list|ls|status)$ ]]; then
+    # A URL after a value flag (--body URL) is that flag's text. pr ready has no value flag, so there any URL counts.
+    local prev="" bool_flags=" --undo --squash --merge --rebase --auto --admin --disable-auto --delete-branch --web --comments -w -d -s "
     for arg in "$@"; do
       [[ "${arg}" == "--" ]] && break
-      if [[ "${arg,,}" =~ ${url_re} ]]; then
-        printf '%s\n' "${BASH_REMATCH[3]}"
+      if [[ "${arg,,}" =~ ${url_re} ]] && [[ "${subsub}" == "ready" || "${prev}" != -* || "${prev}" == *=* ||
+        "${prev}" == -R?* || "${bool_flags}" == *" ${prev} "* ]]; then
+        arg="${arg#*[Gg][Ii][Tt][Hh][Uu][Bb].[Cc][Oo][Mm]/}"
+        printf '%s\n' "${arg%%/*}"
         return 0
       fi
+      prev="${arg}"
     done
   fi
 
