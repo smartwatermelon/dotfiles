@@ -269,7 +269,7 @@ for pat in '/**' '**/**' '/**/*' '**/**/*' '***'; do
 done
 # Patterns that leave some file checked stay allowed: `/*` is top level only,
 # `*/**` skips top-level files.
-for pat in '/*' '*/**' '/vendor/**'; do
+for pat in '/*' '*/**' '/vendor/**' '*9*' '*z*'; do
   norm_n=$((norm_n + 1))
   R="$(new_repo "star-norm-${norm_n}")"
   printf '%s length-caps=off\n' "${pat}" >"${R}/.gitattributes"

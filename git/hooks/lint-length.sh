@@ -48,12 +48,13 @@ set -euo pipefail
 GATE_REVIEW="${HOME}/.claude/scripts/gate-review.sh"
 
 # 0 if git matches the pattern to every probe path, 1 if not, 2 on error.
+# The probes share no characters, so `*9*` is not read as every file.
 _every_file() {
   local probe out
   probe="$(mktemp)" || return 2
   printf '%s length-caps-probe\n' "$1" >"${probe}"
   if ! out="$(GIT_ATTR_NOSYSTEM=1 git -c core.attributesFile="${probe}" \
-    check-attr length-caps-probe -- zq9 .zq9 zq9/zq9/zq9.zq9)"; then
+    check-attr length-caps-probe -- zq9 .AB x/y/k_7)"; then
     rm -f "${probe}"
     return 2
   fi
