@@ -148,13 +148,19 @@ repos:
   # 2026-09-30; revisit if it hurts. Bypass: `SKIP=length-caps git commit` for
   # one commit, or `<glob> length-caps=off` in a tracked .gitattributes (read from
   # the index; info/attributes and core.attributesFile do not count; a line on
-  # `*`, `**` or `**/*` is refused; exempted paths are printed on every run)
+  # an all-files pattern is refused; exempted paths are printed on every run)
   # for a file whose comments are not yours. See lint-length.sh.
+
+  # Fails closed, naming the fix, until install.sh --sync links the script.
   - repo: local
     hooks:
       - id: length-caps
         name: "Comment Length Caps (personify)"
-        entry: bash -c '$HOME/.config/git/hooks/lint-length.sh'
+        entry: >-
+          bash -c 'h="$HOME/.config/git/hooks/lint-length.sh"; if [ -x
+          "$h" ]; then exec "$h"; fi; echo "length-caps: $h is not linked;
+          run install.sh --sync in your dotfiles clone, or bypass once with:
+          SKIP=length-caps git commit ..." >&2; exit 1'
         language: system
         pass_filenames: false
         always_run: true

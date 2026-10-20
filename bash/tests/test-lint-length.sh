@@ -256,6 +256,52 @@ for pat in '*' '**' '**/*'; do
   run_hook "${R}"
   expect "tracked '${pat} length-caps=off' is refused" 1 "exempts every file"
 done
+# Other spellings git also reads as every file (#383), confirmed with check-attr.
+norm_n=0
+for pat in '/**' '**/**' '/**/*' '**/**/*' '***'; do
+  norm_n=$((norm_n + 1))
+  R="$(new_repo "star-norm-${norm_n}")"
+  printf '%s length-caps=off\n' "${pat}" >"${R}/.gitattributes"
+  git -C "${R}" add .gitattributes
+  stage "${R}" a.py "# ${C100}"$'\nx = 2\n'
+  run_hook "${R}"
+  expect "tracked '${pat} length-caps=off' is refused" 1 "exempts every file"
+done
+# Patterns that leave some file checked stay allowed: `/*` is top level only,
+# `*/**` skips top-level files.
+for pat in '/*' '*/**' '/vendor/**'; do
+  norm_n=$((norm_n + 1))
+  R="$(new_repo "star-norm-${norm_n}")"
+  printf '%s length-caps=off\n' "${pat}" >"${R}/.gitattributes"
+  git -C "${R}" add .gitattributes
+  stage "${R}" a.py "# ${C100}"$'\nx = 2\n'
+  run_hook "${R}"
+  expect "tracked '${pat} length-caps=off' is not refused" 0
+done
+R="$(new_repo star-in-subdir-ga)"
+mkdir "${R}/sub"
+printf '** length-caps=off\n' >"${R}/sub/.gitattributes"
+git -C "${R}" add sub/.gitattributes
+stage "${R}" a.py "# ${C100}"$'\nx = 2\n'
+run_hook "${R}"
+expect "sub/.gitattributes '** length-caps=off' is refused" 1 "exempts every file"
+
+# Run by hand from a subdirectory, the root .gitattributes still counts (#383).
+R="$(new_repo star-from-sub)"
+printf '* length-caps=off\n' >"${R}/.gitattributes"
+git -C "${R}" add .gitattributes
+mkdir "${R}/sub"
+stage "${R}" sub/a.py "# ${C150}"$'\nx = 2\n'
+run_hook "${R}" sub
+expect "root '* length-caps=off' is refused when run from a subdirectory" 1 "exempts every file"
+R="$(new_repo anchored-from-sub)"
+printf '/lib.py length-caps=off\n' >"${R}/.gitattributes"
+git -C "${R}" add .gitattributes
+mkdir "${R}/sub"
+stage "${R}" lib.py "# ${C150}"$'\nx = 2\n'
+: >"${R}/sub/keep"
+run_hook "${R}" sub
+expect "root '/lib.py' exemption applies when run from a subdirectory" 0 "skipped lib.py"
 R="$(new_repo star-unstaged-wt)"
 printf '* length-caps=off\n' >"${R}/.gitattributes"
 stage "${R}" a.py "# ${C150}"$'\nx = 2\n'
