@@ -76,6 +76,13 @@ printf '%s\n' '{"query":"mutation{mergePullRequest(input:{pullRequestId:\"PR_x\"
 printf '%s\n' "{\"query\":\"mutation{merge${bs}u0050ullRequest(input:{pullRequestId:${bs}\"PR_x${bs}\"}){clientMutationId}}\"}" >"${JSON_MERGE_ESCAPED}"
 grep -q 'mergePullRequest(' "${GQL_MERGE}" || { echo "fixture error: ${GQL_MERGE}" >&2 && exit 1; }
 grep -q 'mergePullRequest(' "${JSON_MERGE}" || { echo "fixture error: ${JSON_MERGE}" >&2 && exit 1; }
+# Auto-merge lets a PR merge later without the merge-lock, so it is refused like mergePullRequest.
+GQL_AUTO="${WORKDIR}/automerge.graphql"
+JSON_AUTO="${WORKDIR}/automerge.json"
+printf '%s\n' 'mutation {' '  enablePullRequestAutoMerge(input: {pullRequestId: "PR_x"}) { clientMutationId }' '}' >"${GQL_AUTO}"
+printf '%s\n' '{"query":"mutation{enablePullRequestAutoMerge(input:{pullRequestId:\"PR_x\"}){clientMutationId}}"}' >"${JSON_AUTO}"
+grep -q 'enablePullRequestAutoMerge(' "${GQL_AUTO}" || { echo "fixture error: ${GQL_AUTO}" >&2 && exit 1; }
+grep -q 'enablePullRequestAutoMerge(' "${JSON_AUTO}" || { echo "fixture error: ${JSON_AUTO}" >&2 && exit 1; }
 MERGE_MULTILINE="mutation {
   mergePullRequest(input: {pullRequestId: \"PR_x\"}) { clientMutationId }
 }"
@@ -116,6 +123,18 @@ expect_merge_refused() {
     _pass "${mode}: ${label} refused"
   else
     _fail "${mode}: ${label}: expected merge refusal, rc=${rc} called='${called}' err='${err}'"
+  fi
+}
+
+# Same refusal for enablePullRequestAutoMerge: the error names the mutation and points at gh pr merge.
+expect_automerge_refused() {
+  local mode="$1" label="$2"
+  shift 2
+  _run "${mode}" "$@"
+  if [[ "${rc}" -ne 0 && -z "${called}" && "${err}" == *"enablePullRequestAutoMerge"* && "${err}" == *"gh pr merge"* ]]; then
+    _pass "${mode}: ${label} refused"
+  else
+    _fail "${mode}: ${label}: expected auto-merge refusal, rc=${rc} called='${called}' err='${err}'"
   fi
 }
 
@@ -225,6 +244,10 @@ for mode in standalone function; do
   expect_merge_refused "${mode}" "graphql mergePullRequest from -F@file" api graphql "-Fquery=@${GQL_MERGE}"
   expect_merge_refused "${mode}" "graphql mergePullRequest from --input file" api graphql --input "${JSON_MERGE}"
   expect_merge_refused "${mode}" "graphql mergePullRequest from --input= file" api graphql "--input=${JSON_MERGE}"
+  AUTO_Q="query=mutation{enablePullRequestAutoMerge(input:{pullRequestId:\"PR_x\"}){clientMutationId}}"
+  expect_automerge_refused "${mode}" "graphql enablePullRequestAutoMerge inline" api graphql -f "${AUTO_Q}"
+  expect_automerge_refused "${mode}" "graphql enablePullRequestAutoMerge from -F @file" api graphql -F "query=@${GQL_AUTO}"
+  expect_automerge_refused "${mode}" "graphql enablePullRequestAutoMerge from --input file" api graphql --input "${JSON_AUTO}"
   _run "${mode}" api graphql --input "${JSON_MERGE_ESCAPED}"
   if [[ "${rc}" -ne 0 && -z "${called}" && "${err}" == *"escapes"* && "${err}" == *"gh pr merge"* ]]; then
     _pass "${mode}: graphql mergePullRequest --input with \\u escape refused"

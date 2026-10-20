@@ -869,11 +869,11 @@ _gh_wrapper_block_off_org_promotion() {
   return 0
 }
 
-# #391/#444: refuses GraphQL PR create, revert, mark-ready and merge, read from args, -F @file or --input; unreadable = refused.
+# #391/#444: refuses GraphQL PR create, revert, mark-ready, merge and auto-merge, read from args, -F @file or --input; unreadable = refused.
 _gh_wrapper_block_graphql_pr_mutation() {
   local arg skip_next="" field val pos=0 ep="" seen_api=0 f name="" why=""
   local -a files=() inputs=()
-  local mut_re='(^|[^[:alnum:]_])(createPullRequest|revertPullRequest|markPullRequestReadyForReview|mergePullRequest)([^[:alnum:]_]|$)'
+  local mut_re='(^|[^[:alnum:]_])(createPullRequest|revertPullRequest|markPullRequestReadyForReview|mergePullRequest|enablePullRequestAutoMerge)([^[:alnum:]_]|$)'
   for arg in "$@"; do
     [[ "${arg}" == "--" ]] && break
     if [[ "${seen_api}" == "0" ]]; then
@@ -937,8 +937,8 @@ _gh_wrapper_block_graphql_pr_mutation() {
     return 1
   fi
   [[ -z "${name}" ]] && return 0
-  if [[ "${name}" == "mergePullRequest" ]]; then
-    echo "[gh] BLOCKED: GraphQL mergePullRequest mutation bypasses pre-merge review and merge authorization." >&2
+  if [[ "${name}" == "mergePullRequest" || "${name}" == "enablePullRequestAutoMerge" ]]; then
+    echo "[gh] BLOCKED: GraphQL ${name} mutation bypasses pre-merge review and merge authorization." >&2
     echo "[gh] Use 'gh pr merge <number>' instead." >&2
     echo "[gh] If gh pr merge fails, report the failure and ask the human to merge manually." >&2
     return 1
