@@ -41,6 +41,13 @@ if [[ -f "${HOME}/.local/bin/claude-wrapper" ]]; then
   alias clauded="claude --dangerously-skip-permissions"
   alias megaclaude="BUDGET_SESSION_TOKENS=50000000 BUDGET_SUBAGENT_TOKENS=12000000 claude"
   alias megaclauded="BUDGET_SESSION_TOKENS=50000000 BUDGET_SUBAGENT_TOKENS=12000000 clauded"
+elif [[ -f "${HOME}/.local/bin/claude-wrapper-lite" ]]; then
+  # Only adds machine-settings.json, for hosts without the full wrapper.
+  # It runs caffeinate itself.
+  alias claude='${HOME}/.local/bin/claude-wrapper-lite'
+  alias clauded="claude --dangerously-skip-permissions"
+  alias megaclaude="BUDGET_SESSION_TOKENS=50000000 BUDGET_SUBAGENT_TOKENS=12000000 claude"
+  alias megaclauded="BUDGET_SESSION_TOKENS=50000000 BUDGET_SUBAGENT_TOKENS=12000000 clauded"
 else
   alias claude='/usr/bin/caffeinate -i ${HOME}/.local/bin/claude'
   alias clauded="claude --dangerously-skip-permissions"
