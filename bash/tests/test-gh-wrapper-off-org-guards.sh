@@ -5,6 +5,7 @@
 
 # Known-bad on origin/main: the pr new, pr ready and api POST refusal cases fail there.
 # #391 added GH_REPO, PR URL, GraphQL and resolver cases; 54 of them fail on the wrapper before that fix.
+# #444 added GraphQL mergePullRequest cases and a REST merge after -R (section 6); 22 of them fail on the wrapper before that fix.
 set -uo pipefail
 unset CDPATH
 
@@ -66,6 +67,19 @@ bs="\\"
 printf '%s\n' "{\"query\":\"mutation{mark${bs}u0050ullRequestReadyForReview(input:{pullRequestId:${bs}\"PR_x${bs}\"}){clientMutationId}}\"}" >"${JSON_ESCAPED}"
 grep -q 'markPull' "${JSON_ESCAPED}" && echo "fixture error: ${JSON_ESCAPED} is not escaped" >&2 && exit 1
 printf '%s\n' '{"query":"query{viewer{login}}"}' >"${JSON_BENIGN}"
+# #444: mergePullRequest from a file or --input. MERGE_ESCAPED spells the name with a JSON escape, as above.
+GQL_MERGE="${WORKDIR}/merge.graphql"
+JSON_MERGE="${WORKDIR}/merge.json"
+JSON_MERGE_ESCAPED="${WORKDIR}/merge-escaped.json"
+printf '%s\n' 'mutation {' '  mergePullRequest(input: {pullRequestId: "PR_x"}) { clientMutationId }' '}' >"${GQL_MERGE}"
+printf '%s\n' '{"query":"mutation{mergePullRequest(input:{pullRequestId:\"PR_x\"}){clientMutationId}}"}' >"${JSON_MERGE}"
+printf '%s\n' "{\"query\":\"mutation{merge${bs}u0050ullRequest(input:{pullRequestId:${bs}\"PR_x${bs}\"}){clientMutationId}}\"}" >"${JSON_MERGE_ESCAPED}"
+grep -q 'mergePullRequest(' "${GQL_MERGE}" || { echo "fixture error: ${GQL_MERGE}" >&2 && exit 1; }
+grep -q 'mergePullRequest(' "${JSON_MERGE}" || { echo "fixture error: ${JSON_MERGE}" >&2 && exit 1; }
+MERGE_MULTILINE="mutation {
+  mergePullRequest(input: {pullRequestId: \"PR_x\"}) { clientMutationId }
+}"
+grep -q 'mergePull' "${JSON_MERGE_ESCAPED}" && echo "fixture error: ${JSON_MERGE_ESCAPED} is not escaped" >&2 && exit 1
 
 # _run MODE ARGS... sets rc, err, and called (the argv the stub saw, or empty).
 _run() {
@@ -90,6 +104,18 @@ expect_refused() {
     _pass "${mode}: ${label} refused"
   else
     _fail "${mode}: ${label}: expected refusal, rc=${rc} called='${called}' err='${err}'"
+  fi
+}
+
+# A merge refusal points at gh pr merge, not the GitHub UI.
+expect_merge_refused() {
+  local mode="$1" label="$2"
+  shift 2
+  _run "${mode}" "$@"
+  if [[ "${rc}" -ne 0 && -z "${called}" && "${err}" == *"mergePullRequest"* && "${err}" == *"gh pr merge"* ]]; then
+    _pass "${mode}: ${label} refused"
+  else
+    _fail "${mode}: ${label}: expected merge refusal, rc=${rc} called='${called}' err='${err}'"
   fi
 }
 
@@ -185,6 +211,41 @@ for mode in standalone function; do
   expect_passes "${mode}" "graphql benign -F @file" "graphql" api graphql -F "query=@${GQL_BENIGN}"
   expect_passes "${mode}" "graphql benign --input file" "graphql" api graphql --input "${JSON_BENIGN}"
   expect_passes "${mode}" "REST field naming a mutation" "issues" api "repos/${OFF}/issues" -f title=createPullRequest
+
+  # (6) #444: GraphQL mergePullRequest skips pre-merge review and the merge-lock, wherever the query comes from.
+  MERGE_Q="query=mutation{mergePullRequest(input:{pullRequestId:\"PR_x\"}){clientMutationId}}"
+  expect_merge_refused "${mode}" "graphql mergePullRequest inline" api graphql -f "${MERGE_Q}"
+  expect_merge_refused "${mode}" "graphql mergePullRequest inline, spaced" api graphql -f "query=mutation { mergePullRequest (input: {pullRequestId: \$id}) { clientMutationId } }" -f id=PR_x
+  expect_merge_refused "${mode}" "graphql mergePullRequest inline, multi-line" api graphql -f "query=${MERGE_MULTILINE}"
+  expect_merge_refused "${mode}" "graphql mergePullRequest after -R" -R smartwatermelon/dotfiles api graphql -f "${MERGE_Q}"
+  expect_merge_refused "${mode}" "graphql mergePullRequest via /graphql endpoint" api -X POST /graphql -f "${MERGE_Q}"
+  expect_merge_refused "${mode}" "graphql mergePullRequest via full URL" api https://api.github.com/graphql -f "${MERGE_Q}"
+  expect_merge_refused "${mode}" "graphql mergePullRequest from -F @file" api graphql -F "query=@${GQL_MERGE}"
+  expect_merge_refused "${mode}" "graphql mergePullRequest from --field=@file" api graphql "--field=query=@${GQL_MERGE}"
+  expect_merge_refused "${mode}" "graphql mergePullRequest from -F@file" api graphql "-Fquery=@${GQL_MERGE}"
+  expect_merge_refused "${mode}" "graphql mergePullRequest from --input file" api graphql --input "${JSON_MERGE}"
+  expect_merge_refused "${mode}" "graphql mergePullRequest from --input= file" api graphql "--input=${JSON_MERGE}"
+  _run "${mode}" api graphql --input "${JSON_MERGE_ESCAPED}"
+  if [[ "${rc}" -ne 0 && -z "${called}" && "${err}" == *"escapes"* && "${err}" == *"gh pr merge"* ]]; then
+    _pass "${mode}: graphql mergePullRequest --input with \\u escape refused"
+  else
+    _fail "${mode}: graphql mergePullRequest --input with \\u escape: rc=${rc} called='${called}' err='${err}'"
+  fi
+  _run "${mode}" api graphql -F query=@-
+  if [[ "${rc}" -ne 0 && -z "${called}" && "${err}" == *"cannot be read"* && "${err}" == *"gh pr merge"* ]]; then
+    _pass "${mode}: unreadable query names the merge risk"
+  else
+    _fail "${mode}: unreadable query: rc=${rc} called='${called}' err='${err}'"
+  fi
+  _run "${mode}" -R smartwatermelon/dotfiles api -X PUT repos/smartwatermelon/dotfiles/pulls/5/merge
+  if [[ "${rc}" -ne 0 && -z "${called}" && "${err}" == *"REST API PR merge"* ]]; then
+    _pass "${mode}: REST merge after -R refused"
+  else
+    _fail "${mode}: REST merge after -R: rc=${rc} called='${called}' err='${err}'"
+  fi
+  # -f never reads @file: gh posts the literal string, so there is no query to read.
+  expect_passes "${mode}" "graphql -f query=@file is a literal" "graphql" api graphql -f "query=@${GQL_MERGE}"
+  expect_passes "${mode}" "REST field naming mergePullRequest" "issues" api "repos/${OFF}/issues" -f "title=graphql mergePullRequest("
 done
 
 # Resolver-only cases (#391 review): mode-independent, so run once against the sourced function.
