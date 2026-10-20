@@ -95,6 +95,11 @@ _git_wrapper_app_push() {
     alias_val="$(command git ${globals[@]+"${globals[@]}"} config --get "alias.${sub}" 2>/dev/null)" || break
     [[ -n "${alias_val}" && "${alias_val}" != !* ]] || break
     read -r -a alias_words <<<"${alias_val}"
+    ((${#alias_words[@]} > 0)) || break
+    if ((depth == 10)); then
+      echo "[git] ERROR: alias chain from '${sub}' is over 10 deep; refusing rather than guess if it pushes." >&2
+      return 1
+    fi
     args=("${alias_words[@]}" ${args[@]+"${args[@]:i}"})
     n=${#args[@]}
     sub="${args[0]}"
