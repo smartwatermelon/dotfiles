@@ -69,7 +69,9 @@ exit 0
 STUB_EOF
 printf '#!/usr/bin/env bash\nexit 1\n' >"${STUB_DIR}/op"
 printf '#!/usr/bin/env bash\nexit 6\n' >"${STUB_DIR}/curl"
-chmod +x "${STUB_DIR}/git" "${STUB_DIR}/op" "${STUB_DIR}/curl"
+# The minter falls back to the macOS Keychain when op fails; keep it off the real one.
+printf '#!/usr/bin/env bash\nexit 44\n' >"${STUB_DIR}/security"
+chmod +x "${STUB_DIR}/git" "${STUB_DIR}/op" "${STUB_DIR}/curl" "${STUB_DIR}/security"
 
 DRIVER="${WORKDIR}/driver.sh"
 {

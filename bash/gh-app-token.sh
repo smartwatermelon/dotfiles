@@ -3,6 +3,7 @@
 # shellcheck shell=bash
 
 # GitHub App tokens for routed repos (claude-config#659). Design: dev-env specs/2026-10-01-agent-github-app-design.md
+# The key comes from 1Password, or from the macOS login Keychain on a machine with no op vault (see --help).
 
 # Usage text, printed by --help. Kept out of comments so it can say enough.
 _gh_app_usage() {
@@ -27,8 +28,16 @@ gh-app-token.sh: mint GitHub App installation tokens for repos routed to an App.
       Never prints the token.
 
 Route file: $GH_APP_ROUTES_FILE, else gh-app-routes.conf beside this script's real
-path. One route per line: owner/repo, a TAB, op://vault/item. Unlisted repos are
-not routed.
+path. One route per line: owner/repo, a TAB, op://vault/item, then optionally
+TAB-separated app_id=N and installation_id=N. Unlisted repos are not routed. Any
+other trailing field makes the route malformed (exit 2), so a typo fails closed.
+
+Sources: app_id and installation_id come from the route line's fields when present,
+else from `op read <item>/<field>`. The private_key comes from `op read` first; if op
+is missing or cannot read it, from the login Keychain: a generic password with
+service = the item minus op://<vault>/ (op://Automation/my app -> "my app") and
+account = the current user (id -un). security -w prints a multi-line PEM as hex;
+that is decoded.
 
 Cache: ${XDG_CACHE_HOME:-~/.cache}/gh-app-tokens (dir 0700, files 0600), one file per
 item. A token is reused until 5 minutes before mint time + 1 hour.
@@ -89,9 +98,27 @@ _gh_app_spec_repo() {
   printf '\n'
 }
 
+# Route value -> _GH_APP_ITEM, _GH_APP_FIELDS. 2 on a bad field. No arrays: bash 3.2 + set -u.
+_gh_app_split() {
+  local rest="$1" f
+  while [[ "${rest}" == $'\t'* ]]; do rest="${rest#?}"; done
+  _GH_APP_ITEM="${rest%%$'\t'*}"
+  _GH_APP_FIELDS=""
+  [[ "${rest}" == *$'\t'* ]] || return 0
+  rest="${rest#*$'\t'}"
+  while [[ -n "${rest}" ]]; do
+    f="${rest%%$'\t'*}"
+    if [[ "${rest}" == *$'\t'* ]]; then rest="${rest#*$'\t'}"; else rest=""; fi
+    [[ -z "${f}" ]] && continue
+    [[ "${f}" =~ ^(app_id|installation_id)=[0-9]+$ ]] || return 2
+    _GH_APP_FIELDS+="${f}"$'\n'
+  done
+  return 0
+}
+
 # _gh_app_route <owner/repo | owner:NAME>: print the routed item. 0 routed, 1 not, 2 malformed (fail closed).
 _gh_app_route() {
-  local want="$1" file line key item
+  local want="$1" file line key
   file="$(_gh_app_routes_file)"
   [[ -r "${file}" ]] || return 1
   while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -106,18 +133,86 @@ _gh_app_route() {
       continue
     fi
     key="$(_gh_app_lower "${line%%$'\t'*}")"
-    item="${line#*$'\t'}"
-    while [[ "${item}" == $'\t'* ]]; do item="${item#?}"; done
     if [[ "${key}" == "${want}" || "owner:${key%%/*}" == "${want}" ]]; then
-      if [[ "${item}" != op://* ]]; then
+      if ! _gh_app_split "${line#*$'\t'}"; then
+        _gh_app_err "route for ${key} in ${file} has a field that is not app_id=N or installation_id=N"
+        return 2
+      fi
+      if [[ "${_GH_APP_ITEM}" != op://* ]]; then
         _gh_app_err "route for ${key} in ${file} does not name an op:// item"
         return 2
       fi
-      printf '%s\n' "${item}"
+      printf '%s\n' "${_GH_APP_ITEM}"
       return 0
     fi
   done <"${file}"
   return 1
+}
+
+# <op-item> <name>: print the field from its route lines. 0 found, 1 none, 2 malformed or conflicting.
+_gh_app_item_field() {
+  local want="$1" name="$2" file line f val=""
+  file="$(_gh_app_routes_file)"
+  [[ -r "${file}" ]] || return 1
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line//[[:space:]]/}" || "${line}" =~ ^[[:space:]]*# || "${line}" != *$'\t'* ]] && continue
+    if ! _gh_app_split "${line#*$'\t'}"; then
+      if [[ "${_GH_APP_ITEM}" == "${want}" ]]; then
+        _gh_app_err "a route for ${want} in ${file} has a field that is not app_id=N or installation_id=N"
+        return 2
+      fi
+      continue
+    fi
+    [[ "${_GH_APP_ITEM}" == "${want}" ]] || continue
+    while IFS= read -r f; do
+      [[ -n "${f}" && "${f%%=*}" == "${name}" ]] || continue
+      if [[ -n "${val}" && "${val}" != "${f#*=}" ]]; then
+        _gh_app_err "routes for ${want} in ${file} disagree on ${name}"
+        return 2
+      fi
+      val="${f#*=}"
+    done <<<"${_GH_APP_FIELDS}"
+  done <"${file}"
+  [[ -n "${val}" ]] || return 1
+  printf '%s\n' "${val}"
+}
+
+# An ID for an item: the route line's field when present, else op read. Fails closed on a malformed field.
+_gh_app_id() {
+  local item="$1" name="$2" v rc=0
+  v="$(_gh_app_item_field "${item}" "${name}")" || rc=$?
+  ((rc == 2)) && return 2
+  if ((rc != 0)); then
+    v="$(_gh_app_op_read "${item}/${name}")" || return 1
+  fi
+  [[ "${v}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "${v}"
+}
+
+_gh_app_op_read() {
+  command -v op >/dev/null 2>&1 || return 1
+  op read "$1" 2>/dev/null
+}
+
+# Keychain service for an item: the item with op://<vault>/ removed.
+_gh_app_keychain_service() {
+  local s="${1#op://}"
+  printf '%s\n' "${s#*/}"
+}
+
+# Print the key from the login Keychain. security -w prints data with newlines as hex: decode it.
+_gh_app_keychain_key() {
+  local svc acct out
+  command -v security >/dev/null 2>&1 || return 1
+  svc="$(_gh_app_keychain_service "$1")"
+  acct="$(id -un)" || return 1
+  out="$(security find-generic-password -s "${svc}" -a "${acct}" -w 2>/dev/null)" || return 1
+  if [[ "${out}" != -----BEGIN* && "${out}" =~ ^[0-9a-fA-F]+$ ]]; then
+    out="$(xxd -r -p <<<"${out}")" || return 1
+  fi
+  printf '%s\n' "${out}"
+  out=""
 }
 
 # Keyed on a hash of the whole item, so two items can never share a cache file.
@@ -174,18 +269,27 @@ _gh_app_write_pem() {
 
 # Mint a token for an item and cache it. Prints the token.
 _gh_app_mint() {
-  local item="$1" app_id inst_id raw keyfile now header payload sig jwt resp tok status msg
-  if ! app_id="$(op read "${item}/app_id" 2>/dev/null)" || [[ ! "${app_id}" =~ ^[0-9]+$ ]]; then
-    _gh_app_err "cannot read app_id from ${item}"
-    return 1
+  local item="$1" app_id inst_id raw keyfile now header payload sig jwt resp tok status msg rc=0 svc acct
+  app_id="$(_gh_app_id "${item}" app_id)" || rc=$?
+  if ((rc != 0)); then
+    _gh_app_err "cannot read app_id from ${item} (route line or 1Password)"
+    return "${rc}"
   fi
-  if ! inst_id="$(op read "${item}/installation_id" 2>/dev/null)" || [[ ! "${inst_id}" =~ ^[0-9]+$ ]]; then
-    _gh_app_err "cannot read installation_id from ${item}"
-    return 1
+  inst_id="$(_gh_app_id "${item}" installation_id)" || rc=$?
+  if ((rc != 0)); then
+    _gh_app_err "cannot read installation_id from ${item} (route line or 1Password)"
+    return "${rc}"
   fi
-  if ! raw="$(op read "${item}/private_key" 2>/dev/null)" || [[ "${raw}" != -----BEGIN* ]]; then
-    _gh_app_err "cannot read a PEM private_key from ${item}"
-    return 1
+  # 1Password first; where op is missing or cannot read the item, the login Keychain.
+  if ! raw="$(_gh_app_op_read "${item}/private_key")" || [[ "${raw}" != -----BEGIN* ]]; then
+    if ! raw="$(_gh_app_keychain_key "${item}")" || [[ "${raw}" != -----BEGIN* ]]; then
+      raw=""
+      svc="$(_gh_app_keychain_service "${item}")" || svc="?"
+      acct="$(id -un)" || acct="?"
+      _gh_app_err "cannot read a PEM private_key from ${item} (1Password) or from the macOS Keychain" \
+        "(service '${svc}', account '${acct}')"
+      return 1
+    fi
   fi
   keyfile="$(umask 077 && mktemp "${TMPDIR:-/tmp}/gh-app-key.XXXXXX")" || return 1
   trap 'rm -f "${keyfile}"; exit 130' INT TERM HUP

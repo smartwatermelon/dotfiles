@@ -40,6 +40,7 @@ STUB_TOK="ghs_stub"".tok-123"
 cat >"${STUB_DIR}/op" <<STUB_EOF
 #!/usr/bin/env bash
 [[ -n "\${OP_FAIL:-}" ]] && exit 1
+[[ -n "\${OP_NO_IDS:-}" && "\$2" == *_id ]] && { echo "op stub: \$2 must come from the route line" >&2; exit 1; }
 case "\$2" in
   *"/app_id") echo 5401431 ;;
   *"/installation_id") echo 173522549 ;;
@@ -67,7 +68,19 @@ else
   printf '{"message":"bad jwt"}\n401'
 fi
 STUB_EOF
-chmod +x "${STUB_DIR}/op" "${STUB_DIR}/curl"
+# Stub security: never the real Keychain. SEC_MODE unset = no item (44), plain, hex (as -w prints), trap.
+SEC_LOG="${WORKDIR}/security.log"
+cat >"${STUB_DIR}/security" <<STUB_EOF
+#!/usr/bin/env bash
+printf 'argv=%s\n' "\$*" >>"${SEC_LOG}"
+case "\${SEC_MODE:-}" in
+  plain) cat "${WORKDIR}/key.flat" ;;
+  hex) xxd -p "${WORKDIR}/key.pem" | tr -d '\n'; echo ;;
+  trap) echo 'trap=called' >>"${SEC_LOG}"; exit 1 ;;
+  *) echo 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.' >&2; exit 44 ;;
+esac
+STUB_EOF
+chmod +x "${STUB_DIR}/op" "${STUB_DIR}/curl" "${STUB_DIR}/security"
 export PATH="${STUB_DIR}:${PATH}"
 
 _run() {
@@ -206,6 +219,88 @@ if [[ "${rc}" -eq 0 && "${out}" == *"routed to ${ITEM}"* && "${out}${err}" != *g
   _pass "check reports the route without the token"
 else
   _fail "check: rc=${rc} out=${out}"
+fi
+
+echo "--- route fields and the Keychain fallback"
+ME="$(id -un)"
+FIELDS_ROUTES="${WORKDIR}/routes-fields.conf"
+printf '%s\t%s\t%s\t%s\n' smartwatermelon/claude-wrapper "${ITEM}" app_id=5401431 installation_id=173522549 \
+  >"${FIELDS_ROUTES}"
+printf 'smartwatermelon/bad-name\top://Automation/x\tapp-id=5\nsmartwatermelon/bad-value\top://Automation/y\tapp_id=abc\n' \
+  >>"${FIELDS_ROUTES}"
+printf 'smartwatermelon/unknown\top://Automation/z\tcolor=5\nsmartwatermelon/bare\top://Automation/z\tapp_id\n' \
+  >>"${FIELDS_ROUTES}"
+
+_clear_cache
+: >"${SEC_LOG}"
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_FAIL=1 _run --item "${ITEM}" smartwatermelon
+if [[ "${rc}" -eq 1 && -z "${out}" && "${err}" == *"${ITEM}"* && "${err}" == *"Keychain"* &&
+  "${err}" == *"service 'test app'"* && "${err}" == *"account '${ME}'"* ]]; then
+  _pass "op and Keychain both failing exits 1 and names both sources"
+else
+  _fail "both sources fail: rc=${rc} out=${out} err=${err}"
+fi
+
+for mode in plain hex; do
+  _clear_cache
+  : >"${SEC_LOG}"
+  GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_FAIL=1 SEC_MODE="${mode}" _run --item "${ITEM}" smartwatermelon
+  if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${mints}" == 1 ]] && grep -q '^jwt=ok' "${CURL_LOG}" \
+    && grep -qxF "argv=find-generic-password -s test app -a ${ME} -w" "${SEC_LOG}"; then
+    _pass "op fails, Keychain ${mode} PEM mints a token"
+  else
+    _fail "Keychain ${mode}: rc=${rc} mints=${mints} err=${err} sec=$(<"${SEC_LOG}")"
+  fi
+done
+left="$(ls "${TMPDIR}")" || left="?"
+if [[ -z "${left}" ]]; then _pass "no key file left in TMPDIR after Keychain mints"; else _fail "TMPDIR not empty: ${left}"; fi
+
+# A Keychain item with no IDs on the route line still needs op for them; op down means app_id fails first.
+_clear_cache
+OP_FAIL=1 SEC_MODE=plain _run --item "${ITEM}" smartwatermelon
+if [[ "${rc}" -eq 1 && -z "${out}" && "${err}" == *"cannot read app_id"* ]]; then
+  _pass "without route IDs, op failure still fails on app_id"
+else
+  _fail "no route IDs: rc=${rc} err=${err}"
+fi
+
+_clear_cache
+: >"${SEC_LOG}"
+SEC_MODE='trap' _run --item "${ITEM}" smartwatermelon
+if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" ]] && ! grep -q '^trap=called' "${SEC_LOG}"; then
+  _pass "op succeeds: the Keychain is never asked"
+else
+  _fail "op ok but security called: rc=${rc} sec=$(<"${SEC_LOG}")"
+fi
+
+_clear_cache
+: >"${SEC_LOG}"
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_NO_IDS=1 SEC_MODE='trap' _run --item "${ITEM}" smartwatermelon
+if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${mints}" == 1 ]] && ! grep -q '^trap=called' "${SEC_LOG}"; then
+  _pass "IDs come from the route fields (op refuses ID reads)"
+else
+  _fail "IDs from fields: rc=${rc} err=${err}"
+fi
+
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" _run route smartwatermelon/claude-wrapper
+if [[ "${rc}" -eq 0 && "${out}" == "${ITEM}" ]]; then _pass "route with fields prints only the item"; else _fail "route fields: rc=${rc} out=${out}"; fi
+_run route smartwatermelon/claude-wrapper
+if [[ "${rc}" -eq 0 && "${out}" == "${ITEM}" ]]; then _pass "one-field route line still works"; else _fail "one-field route: rc=${rc} out=${out}"; fi
+for spec in smartwatermelon/bad-name smartwatermelon/bad-value smartwatermelon/unknown smartwatermelon/bare; do
+  GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" _run route "${spec}"
+  if [[ "${rc}" -eq 2 && -z "${out}" ]]; then _pass "malformed field fails closed: ${spec}"; else _fail "field ${spec}: rc=${rc} out=${out}"; fi
+done
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" _run check smartwatermelon/unknown
+if [[ "${rc}" -eq 2 ]]; then _pass "check fails closed on a malformed field"; else _fail "check malformed field: rc=${rc}"; fi
+_clear_cache
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" _run ensure 'op://Automation/z'
+if [[ "${rc}" -eq 2 && "${mints}" == 0 ]]; then _pass "minting refuses an item whose route field is malformed"; else _fail "ensure malformed: rc=${rc}"; fi
+out="$(printf 'protocol=https\nhost=github.com\npath=smartwatermelon/claude-wrapper.git\n\n' \
+  | GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_NO_IDS=1 bash "${SCRIPT}" git-credential "${ITEM}" get 2>/dev/null)"
+if [[ "${out}" == "username=x-access-token"$'\n'"password=${STUB_TOK}" ]]; then
+  _pass "credential get matches a route line with fields"
+else
+  _fail "credential with fields: ${out}"
 fi
 
 exit "${fail}"
