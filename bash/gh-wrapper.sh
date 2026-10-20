@@ -659,11 +659,11 @@ _gh_wrapper_block_bypass() {
     return 1
   fi
 
-  if [[ "${1:-}" == "api" ]] && printf '%s\n' "$*" | grep -qE 'graphql.*mergePullRequest[[:space:]]*\('; then
-    echo "[gh] BLOCKED: GraphQL mergePullRequest mutation bypasses pre-merge review and merge authorization." >&2
-    echo "[gh] Use 'gh pr merge <number>' instead." >&2
-    echo "[gh] If gh pr merge fails, report the failure and ask the human to merge manually." >&2
-    return 1
+  # #444: GraphQL mergePullRequest goes through the same query reader as #391, so a query in a file is checked too.
+  local sub="" subsub=""
+  _gh_wrapper_find_subcommand "$@"
+  if [[ "${sub}" == "api" ]]; then
+    _gh_wrapper_block_graphql_pr_mutation "$@" || return 1
   fi
 
   _gh_wrapper_block_off_org_promotion "$@" || return 1
@@ -789,7 +789,6 @@ _gh_wrapper_block_off_org_promotion() {
   fi
 
   if [[ "${sub}" == "api" ]]; then
-    _gh_wrapper_block_graphql_pr_publish "$@" || return 1
     local endpoint="" method="" implicit_post=0 draft="" skip_next="" field seen_api=0
     local pulls_re='^/?repos/[^/]+/[^/]+/pulls/?(\?.*)?$'
     for arg in "$@"; do
@@ -869,11 +868,11 @@ _gh_wrapper_block_off_org_promotion() {
   return 0
 }
 
-# #391: these GraphQL mutations open or promote a PR and name it by node ID, so the owner cannot be proven in-org: refused.
-_gh_wrapper_block_graphql_pr_publish() {
-  local arg skip_next="" field val pos=0 ep="" seen_api=0 f name=""
+# #391/#444: refuses GraphQL PR create, revert, mark-ready and merge, read from args, -F @file or --input; unreadable = refused.
+_gh_wrapper_block_graphql_pr_mutation() {
+  local arg skip_next="" field val pos=0 ep="" seen_api=0 f name="" why=""
   local -a files=() inputs=()
-  local mut_re='(^|[^[:alnum:]_])(createPullRequest|revertPullRequest|markPullRequestReadyForReview)([^[:alnum:]_]|$)'
+  local mut_re='(^|[^[:alnum:]_])(createPullRequest|revertPullRequest|markPullRequestReadyForReview|mergePullRequest)([^[:alnum:]_]|$)'
   for arg in "$@"; do
     [[ "${arg}" == "--" ]] && break
     if [[ "${seen_api}" == "0" ]]; then
@@ -919,21 +918,30 @@ _gh_wrapper_block_graphql_pr_publish() {
   for f in "${files[@]}" "${inputs[@]}"; do
     [[ -n "${name}" ]] && break
     if [[ "${f}" == "-" || ! -f "${f}" || ! -r "${f}" ]]; then
-      echo "[gh] BLOCKED: gh api GraphQL query in '${f}' cannot be read (stdin or no such file)." >&2
-      echo "[gh] It could open or promote an off-org PR. Only the human promotes off-org PRs, via the GitHub UI." >&2
-      return 1
+      why="query in '${f}' cannot be read (stdin or no such file)."
+      break
     fi
     name="$(grep -oE "${mut_re}" -- "${f}" | head -n 1 | tr -cd '[:alnum:]')" || true
   done
   for f in "${inputs[@]}"; do
-    [[ -n "${name}" ]] && break
+    [[ -n "${name}" || -n "${why}" ]] && break
     if grep -qF '\u' -- "${f}"; then
-      echo "[gh] BLOCKED: gh api GraphQL --input '${f}' uses \\u escapes, which can hide a mutation name." >&2
-      echo "[gh] It could open or promote an off-org PR. Only the human promotes off-org PRs, via the GitHub UI." >&2
-      return 1
+      why="--input '${f}' uses \\u escapes, which can hide a mutation name."
     fi
   done
+  if [[ -n "${why}" ]]; then
+    echo "[gh] BLOCKED: gh api GraphQL ${why}" >&2
+    echo "[gh] It could merge a PR, which must go through 'gh pr merge <number>' and its pre-merge review." >&2
+    echo "[gh] It could open or promote an off-org PR. Only the human promotes off-org PRs, via the GitHub UI." >&2
+    return 1
+  fi
   [[ -z "${name}" ]] && return 0
+  if [[ "${name}" == "mergePullRequest" ]]; then
+    echo "[gh] BLOCKED: GraphQL mergePullRequest mutation bypasses pre-merge review and merge authorization." >&2
+    echo "[gh] Use 'gh pr merge <number>' instead." >&2
+    echo "[gh] If gh pr merge fails, report the failure and ask the human to merge manually." >&2
+    return 1
+  fi
   echo "[gh] BLOCKED: GraphQL ${name} names its target by node ID; the wrapper cannot prove the owner is in-org." >&2
   echo "[gh] Use 'gh pr create' or 'gh pr ready', which resolve the owner (off-org create is forced to draft)." >&2
   echo "[gh] Only the human promotes off-org PRs out of draft, via the GitHub UI." >&2
@@ -1877,6 +1885,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_publish _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
 fi
