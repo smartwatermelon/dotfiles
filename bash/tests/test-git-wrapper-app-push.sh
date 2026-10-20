@@ -148,6 +148,14 @@ for sh in "${BASHES[@]}"; do
   _expect_app "${ver}: alias expanding to push is routed"
   _run "${sh}" "${WORKDIR}/routed" pq origin feat
   _expect_app "${ver}: alias of an alias of push is routed"
+  _run "${sh}" "${WORKDIR}/routed" push --recurse-submodules on-demand origin feat
+  _expect_app "${ver}: separated --recurse-submodules value is not read as the remote"
+  _run "${sh}" "${WORKDIR}/routed" push --unknown-opt value origin feat
+  if [[ "${rc}" -ne 0 && -z "${log}" && "${err}" == *"not a remote, URL or path"* ]]; then
+    _pass "${ver}: a bare word that is no remote refuses the push"
+  else
+    _fail "${ver}: bare word: rc=${rc} log=${log} err=${err}"
+  fi
   _run "${sh}" "${WORKDIR}/plain" push git@github.com:smartwatermelon/claude-wrapper.git feat
   if [[ "${rc}" -eq 0 && "${log}" == *"cred=match"* && "${log}" == *".insteadOf=git@github.com:smartwatermelon/claude-wrapper.git"* ]]; then
     _pass "${ver}: push to a literal routed URL is routed"

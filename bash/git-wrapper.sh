@@ -115,7 +115,7 @@ _git_wrapper_app_push() {
         ;;
       --repo) repo_opt="${args[i + 1]:-}" && i=$((i + 2)) ;;
       --repo=*) repo_opt="${args[i]#--repo=}" && i=$((i + 1)) ;;
-      -o | --push-option | --receive-pack | --exec) i=$((i + 2)) ;;
+      -o | --push-option | --receive-pack | --exec | --recurse-submodules) i=$((i + 2)) ;;
       -*) i=$((i + 1)) ;;
       *)
         remote="${args[i]}"
@@ -138,6 +138,12 @@ _git_wrapper_app_push() {
       return 1
     fi
   else
+    # Neither a remote nor a URL or path: likely an option value misread as the remote. Refuse, never guess.
+    if [[ "${remote}" != */* && "${remote}" != *:* ]]; then
+      echo "[git] ERROR: '${remote}' is not a remote, URL or path; cannot check App routing. Refusing." >&2
+      echo "[git] Fix: write option values as --opt=value, or a local path as ./${remote}." >&2
+      return 1
+    fi
     urls="${remote}"
   fi
   [[ -n "${urls}" ]] || return 0
