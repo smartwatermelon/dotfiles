@@ -81,17 +81,25 @@ _git_wrapper_app_push() {
         ;;
     esac
   done
-  # An alias that expands to push (alias.pp = push -u) is a push too. A !shell alias runs outside this wrapper.
-  if [[ -n "${sub}" && "${sub}" != "push" ]]; then
-    alias_val="$(command git ${globals[@]+"${globals[@]}"} config --get "alias.${sub}" 2>/dev/null)" || alias_val=""
-    if [[ "${alias_val}" == "push" || "${alias_val}" == "push "* ]]; then
-      read -r -a alias_words <<<"${alias_val}"
-      args=(${alias_words[@]+"${alias_words[@]:1}"} ${args[@]+"${args[@]:i}"})
-      n=${#args[@]}
-      i=0
-      sub="push"
-    fi
-  fi
+  # An alias that expands to push (alias.pp = push -u, or via another alias) is a push too. !shell aliases are not.
+  local depth=0
+  while [[ -n "${sub}" && "${sub}" != "push" ]] && ((depth < 10)); do
+    depth=$((depth + 1))
+    # git ignores aliases named like a builtin, so common builtins skip the config lookup.
+    case "${sub}" in
+      add | branch | cat-file | checkout | clone | commit | config | diff | fetch | for-each-ref | init | log | \
+        ls-files | merge | pull | rebase | remote | reset | rev-list | rev-parse | show | stash | status | \
+        switch | symbolic-ref | tag | worktree) break ;;
+      *) ;;
+    esac
+    alias_val="$(command git ${globals[@]+"${globals[@]}"} config --get "alias.${sub}" 2>/dev/null)" || break
+    [[ -n "${alias_val}" && "${alias_val}" != !* ]] || break
+    read -r -a alias_words <<<"${alias_val}"
+    args=("${alias_words[@]}" ${args[@]+"${args[@]:i}"})
+    n=${#args[@]}
+    sub="${args[0]}"
+    i=1
+  done
   [[ "${sub}" == "push" ]] || return 0
   # The first non-option is the repository; --repo only counts when none is given (git push --help).
   while ((i < n)); do

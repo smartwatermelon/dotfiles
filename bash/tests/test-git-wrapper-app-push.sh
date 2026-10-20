@@ -54,7 +54,7 @@ mkdir -p "${STUB_DIR}"
 cat >"${STUB_DIR}/git" <<STUB_EOF
 #!/usr/bin/env bash
 is_push=0
-for a in "\$@"; do [[ "\${a}" == push || "\${a}" == pp ]] && is_push=1; done
+for a in "\$@"; do [[ "\${a}" == push || "\${a}" == pp || "\${a}" == pq ]] && is_push=1; done
 ((is_push == 1)) || exec ${REAL_GIT} "\$@"
 printf 'argv=%s\n' "\$*" >>"${LOG}"
 printf 'env=prompt:%s askpass:[%s]\n' "\${GIT_TERMINAL_PROMPT-unset}" "\${GIT_ASKPASS-unset}" >>"${LOG}"
@@ -93,6 +93,7 @@ _mkrepo mixed git@github.com:smartwatermelon/claude-wrapper.git
 "${REAL_GIT}" -C "${WORKDIR}/mixed" config --add remote.origin.pushurl git@github.com:smartwatermelon/example.git
 _mkrepo broken git@github.com:smartwatermelon/broken.git
 "${REAL_GIT}" -C "${WORKDIR}/routed" config alias.pp "push -u"
+"${REAL_GIT}" -C "${WORKDIR}/routed" config alias.pq "pp --no-verify"
 _mkrepo pushinsteadof git@github.com:smartwatermelon/example.git
 "${REAL_GIT}" -C "${WORKDIR}/pushinsteadof" config url.ssh://elsewhere/.pushInsteadOf https://github.com/
 
@@ -145,6 +146,8 @@ for sh in "${BASHES[@]}"; do
 
   _run "${sh}" "${WORKDIR}/routed" pp origin feat
   _expect_app "${ver}: alias expanding to push is routed"
+  _run "${sh}" "${WORKDIR}/routed" pq origin feat
+  _expect_app "${ver}: alias of an alias of push is routed"
   _run "${sh}" "${WORKDIR}/plain" push git@github.com:smartwatermelon/claude-wrapper.git feat
   if [[ "${rc}" -eq 0 && "${log}" == *"cred=match"* && "${log}" == *".insteadOf=git@github.com:smartwatermelon/claude-wrapper.git"* ]]; then
     _pass "${ver}: push to a literal routed URL is routed"
