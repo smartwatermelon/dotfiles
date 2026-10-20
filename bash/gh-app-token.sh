@@ -18,7 +18,7 @@ gh-app-token.sh: mint GitHub App installation tokens for repos routed to an App.
   gh-app-token.sh repo <spec>
       Print <spec> as lowercase owner/repo; exit 1 if it names no github.com repo.
   gh-app-token.sh ensure <op-item>
-      Mint or reuse the item's token without printing it. Exit 0 when one is cached.
+      Mint or reuse the item's token without printing it. Exit 0 when a token is available.
   gh-app-token.sh git-credential <op-item> get
       git credential helper. Answers only https://github.com/<path> where <path> routes
       to <op-item>, so git must send path= (credential.useHttpPath=true).
@@ -286,9 +286,13 @@ _gh_app_main() {
       fi
       _gh_app_token "${item}" >/dev/null || return 1
       file="$(_gh_app_cache_file "${item}")" || return 1
-      exp="$(head -1 "${file}" 2>/dev/null)"
+      exp="$(head -1 "${file}" 2>/dev/null)" || exp=""
       now="$(date +%s)"
-      printf '%s: routed to %s; token cached, %s min left\n' "${repo}" "${item}" "$(((${exp:-${now}} - now) / 60))"
+      if [[ "${exp}" =~ ^[0-9]+$ ]]; then
+        printf '%s: routed to %s; token cached, %s min left\n' "${repo}" "${item}" "$(((exp - now) / 60))"
+      else
+        printf '%s: routed to %s; token minted but not cached (each call mints)\n' "${repo}" "${item}"
+      fi
       return 0
       ;;
     --item)

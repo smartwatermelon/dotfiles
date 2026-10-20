@@ -55,6 +55,10 @@ if ((BASH_VERSINFO[0] < 4)); then
   return 0
 fi
 
+# The App token minter beside this file's real path: ~/.local/bin/gh is a symlink (claude-config#659).
+_gh_wrapper_app_minter="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null)" || _gh_wrapper_app_minter="${BASH_SOURCE[0]}"
+_gh_wrapper_app_minter="${_gh_wrapper_app_minter%/*}/gh-app-token.sh"
+
 # Deliberately NOT defaulted from ${HOME} here. This file is sourced once, but
 # ${HOME} at source time is not necessarily ${HOME} at call time: anything that
 # reassigns HOME afterwards -- test harnesses above all -- would still get the
@@ -97,6 +101,30 @@ _gh_wrapper_review_script_path() {
 #
 # #391: URL argument > -R > GH_REPO > remote, as gh does. create/new/list/status take no URL: one there is a flag value.
 _gh_wrapper_resolve_owner() {
+  local target
+  target="$(_gh_wrapper_resolve_target "$@")" || target=""
+  [[ -z "${target}" ]] && return 0
+  target="$(_gh_wrapper_spec_owner "${target}")" || target=""
+  [[ -n "${target}" ]] && printf '%s\n' "${target}"
+  return 0
+}
+
+# Prints the 1Password item if this call's repo is in gh-app-routes.conf (claude-config#659).
+
+# 0 routed, 1 not, 2 malformed route or no minter. Owner-only targets name no repo: never routed.
+_gh_wrapper_app_route() {
+  local target
+  target="$(_gh_wrapper_resolve_target "$@")" || target=""
+  [[ -z "${target}" ]] && return 1
+  if [[ ! -f "${_gh_wrapper_app_minter}" ]]; then
+    echo "[gh] ERROR: App token minter missing: ${_gh_wrapper_app_minter}" >&2
+    return 2
+  fi
+  "${BASH}" "${_gh_wrapper_app_minter}" route "${target}"
+}
+
+# The target behind _gh_wrapper_resolve_owner: owner/repo[/...], a remote URL, or a bare owner.
+_gh_wrapper_resolve_target() {
   local repo_flag_value owner_flag_value skip_next="" arg remote_url owner
   local sub="" subsub=""
   local url_re='^(https?://)?(www\.)?github\.com/([^/?#]+)/[^/?#]+/(pull|issues)/[0-9]+'
@@ -110,7 +138,7 @@ _gh_wrapper_resolve_owner() {
       if [[ "${arg,,}" =~ ${url_re} ]] && [[ "${subsub}" == "ready" || "${prev}" != -* || "${prev}" == *=* ||
         "${prev}" == -R?* || "${bool_flags}" == *" ${prev} "* ]]; then
         arg="${arg#*[Gg][Ii][Tt][Hh][Uu][Bb].[Cc][Oo][Mm]/}"
-        printf '%s\n' "${arg%%/*}"
+        printf '%s\n' "${arg}"
         return 0
       fi
       prev="${arg}"
@@ -202,9 +230,13 @@ _gh_wrapper_resolve_owner() {
   # `{owner}` means cwd. claude-wrapper#126, dotfiles#396.
   if [[ -z "${repo_flag_value}" && "${1:-}" == "api" ]]; then
     # The ^ anchor keeps flag values like `-f k=v` from matching.
-    local api_owner_re='^/?(repos|orgs|users)/([^/{}]+)(/|$)'
+    local api_owner_re='^/?(repos|orgs|users)/([^/{}]+)(/|$)' api_repo_re='^/?repos/([^/{}]+/[^/{}?#]+)'
     for arg in "${@:2}"; do
       [[ "${arg}" == "--" ]] && break
+      if [[ "${arg}" =~ ${api_repo_re} ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+        return 0
+      fi
       if [[ "${arg}" =~ ${api_owner_re} ]]; then
         printf '%s\n' "${BASH_REMATCH[2]}"
         return 0
@@ -213,16 +245,15 @@ _gh_wrapper_resolve_owner() {
   fi
 
   if [[ -n "${repo_flag_value}" ]]; then
-    owner="$(_gh_wrapper_spec_owner "${repo_flag_value}")"
+    owner="${repo_flag_value}"
   elif [[ -n "${GH_REPO:-}" ]]; then
     # After the api endpoint: GH_REPO only fills {owner}/{repo} there (gh api --help).
-    owner="$(_gh_wrapper_spec_owner "${GH_REPO}")"
+    owner="${GH_REPO}"
   else
     remote_url=$(command git config --get remote.origin.url 2>/dev/null)
     [[ -z "${remote_url}" ]] && return 0
-    owner="$(_gh_wrapper_spec_owner "${remote_url}")"
+    owner="${remote_url}"
   fi
-  [[ -z "${owner}" ]] && return 0
   printf '%s\n' "${owner}"
 }
 
@@ -476,12 +507,33 @@ _gh_wrapper_sync_identity() {
 
   _gh_wrapper_token_var=""
   _gh_wrapper_keyring_token=""
+  _gh_wrapper_app_token=""
   owner="$(_gh_wrapper_resolve_owner "$@")"
   if [[ -z "${owner}" ]]; then
     local fb_rc=0
     _gh_wrapper_scoped_fallback "no owner resolved" || fb_rc=$?
     [[ "${fb_rc}" -eq 1 ]] && return 1
     return 0
+  fi
+
+  # Routed repo: act as the GitHub App, ahead of every PAT, and never fall back to one.
+
+  # Returning here skips `gh api user` below; an installation token has no user to answer it.
+  local app_item="" route_rc=0
+  app_item="$(_gh_wrapper_app_route "$@")" || route_rc=$?
+  if [[ "${route_rc}" -eq 0 ]]; then
+    if ! _gh_wrapper_app_token="$("${BASH}" "${_gh_wrapper_app_minter}" --item "${app_item}" "${owner}")" \
+      || [[ -z "${_gh_wrapper_app_token}" ]]; then
+      _gh_wrapper_app_token=""
+      echo "[gh] ERROR: this repo is routed to a GitHub App (gh-app-routes.conf), but no App token could be minted." >&2
+      echo "[gh] Failing closed: a routed repo never falls back to a personal token. Check: gh-app-token.sh check <repo>" >&2
+      return 1
+    fi
+    _gh_wrapper_token_var="_gh_wrapper_app_token"
+    return 0
+  elif [[ "${route_rc}" -ne 1 ]]; then
+    echo "[gh] ERROR: cannot tell whether this repo is routed to a GitHub App; failing closed." >&2
+    return 1
   fi
 
   desired="$(_gh_wrapper_identity_for_owner "${owner}")"
@@ -609,7 +661,9 @@ _gh_wrapper_sync_identity() {
 
   # An env token decides the identity; no hosts.yml means no keyring to read.
   [[ -n "${env_token_var}" ]] && return 0
-  [[ -z "$(_gh_wrapper_keyring_login)" ]] && return 0
+  local kr_login
+  kr_login="$(_gh_wrapper_keyring_login)" || kr_login=""
+  [[ -z "${kr_login}" ]] && return 0
 
   # Keyring token for this call only, never `gh auth switch`: shared hosts.yml races (#404).
   local target token=""
@@ -1688,7 +1742,9 @@ _gh_wrapper_run_with_scope_hint() {
     # stop it instead. Same resolver as selection, so the two cannot disagree
     # on "no owner". The exit code is not changed.
     # smartwatermelon/claude-wrapper#126 decision 3.
-    if [[ -n "${GH_TOKEN:-}" && -z "$(_gh_wrapper_resolve_owner "$@")" ]]; then
+    local hint_owner=""
+    hint_owner="$(_gh_wrapper_resolve_owner "$@")" || hint_owner=""
+    if [[ -n "${GH_TOKEN:-}" && -z "${hint_owner}" ]]; then
       echo "[gh] No repo owner could be resolved, so this ran with the launch-directory GH_TOKEN and failed. Stop and ask Andrew for help; do not guess a different token." >&2
     fi
   fi
@@ -1720,6 +1776,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   # Set by _gh_wrapper_sync_identity; applied just before gh runs, below.
   _gh_wrapper_token_var=""
   _gh_wrapper_keyring_token=""
+  _gh_wrapper_app_token=""
   if [[ -z "${_GH_REVIEW_DONE:-}" ]]; then
     # No identity routing for `gh auth` (account management) or --help.
     if [[ "${1:-}" != "auth" && "${_gh_wrapper_help}" != "1" ]]; then
@@ -1815,7 +1872,7 @@ else
     local help=0 arg
     # Local, so _gh_wrapper_sync_identity's selection (dynamic scope) lives
     # only as long as this call.
-    local _gh_wrapper_token_var="" _gh_wrapper_keyring_token=""
+    local _gh_wrapper_token_var="" _gh_wrapper_keyring_token="" _gh_wrapper_app_token=""
     for arg in "$@"; do
       if [[ "${arg}" == "--help" || "${arg}" == "-h" ]]; then
         help=1
@@ -1886,6 +1943,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback
-  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_resolve_target _gh_wrapper_app_route _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback
+  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _gh_wrapper_app_minter
 fi

@@ -151,8 +151,13 @@ if [[ "${rc}" -ne 0 && -z "${out}" && ! -f "${CACHE_FILE}" && "${err}" == *"HTTP
 else
   _fail "HTTP 401: rc=${rc} out=${out} err=${err}"
 fi
-OTHER_KEY="$(printf '%s' 'op://Automation/test/app' | openssl dgst -sha256 -r)"
-if [[ "${OTHER_KEY%% *}" != "${CACHE_KEY%% *}" ]]; then _pass "items differing by / vs space get distinct cache files"; else _fail "cache key collision"; fi
+# Two items that differ only by "/" vs " " must not share a cache file.
+_clear_cache
+_run ensure "${ITEM}"
+_run ensure 'op://Automation/test/app'
+cached="$(find "${CACHE_FILE%/*}" -type f ! -name '.tmp.*' | wc -l | tr -d ' ')"
+if [[ "${cached}" == 2 ]]; then _pass "near-identical items get distinct cache files"; else _fail "cache files: ${cached}"; fi
+find "${CACHE_FILE%/*}" -type f -delete
 
 echo "--- git-credential"
 _clear_cache
