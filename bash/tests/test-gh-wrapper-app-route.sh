@@ -66,7 +66,9 @@ STUB_EOF
 # Every mint fails: only the seeded cache can supply a token.
 printf '#!/usr/bin/env bash\nexit 1\n' >"${STUB_DIR}/op"
 printf '#!/usr/bin/env bash\nexit 22\n' >"${STUB_DIR}/curl"
-chmod +x "${STUB_DIR}/gh" "${STUB_DIR}/op" "${STUB_DIR}/curl"
+# The minter falls back to the macOS Keychain when op fails; keep it off the real one.
+printf '#!/usr/bin/env bash\nexit 44\n' >"${STUB_DIR}/security"
+chmod +x "${STUB_DIR}/gh" "${STUB_DIR}/op" "${STUB_DIR}/curl" "${STUB_DIR}/security"
 
 WRAP_DIR="${WORKDIR}/wrap-bin"
 mkdir -p "${WRAP_DIR}"
