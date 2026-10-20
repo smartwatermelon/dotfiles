@@ -47,6 +47,134 @@ _git_wrapper_slug() {
   printf '%s' "${s}"
 }
 
+# The App token minter beside this file's real path; ~/.config/bash links may lag (claude-config#659).
+_git_wrapper_app_minter="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null)" || _git_wrapper_app_minter="${BASH_SOURCE[0]}"
+_git_wrapper_app_minter="${_git_wrapper_app_minter%/*}/gh-app-token.sh"
+
+# A push to a repo in gh-app-routes.conf goes over HTTPS as the GitHub App (claude-config#659).
+
+# Sets the caller's _git_wrapper_push_cfg to the -c options for that; leaves it empty if unrouted.
+
+# The remote's stored URL never changes: a one-call insteadOf maps it, and a credential helper supplies the token.
+
+# Returns 1 to block: a routed push that cannot be made as the App never falls back to SSH as Andrew.
+_git_wrapper_app_push() {
+  local -a args=("$@") globals=() items=()
+  local n=$# i=0 sub="" remote="" repo_opt="" branch="" urls="" url item repo rc is_name=0 routed=0 unrouted=0
+  local minter="${_git_wrapper_app_minter:-}" rewrites="" got=""
+  _git_wrapper_push_cfg=()
+  while ((i < n)); do
+    case "${args[i]}" in
+      -C | -c | --git-dir | --work-tree | --namespace | --config-env)
+        globals+=("${args[i]}" "${args[i + 1]:-}")
+        i=$((i + 2))
+        ;;
+      -*)
+        globals+=("${args[i]}")
+        i=$((i + 1))
+        ;;
+      *)
+        sub="${args[i]}"
+        i=$((i + 1))
+        break
+        ;;
+    esac
+  done
+  [[ "${sub}" == "push" ]] || return 0
+  # The first non-option is the repository; --repo only counts when none is given (git push --help).
+  while ((i < n)); do
+    case "${args[i]}" in
+      --)
+        remote="${args[i + 1]:-}"
+        break
+        ;;
+      --repo) repo_opt="${args[i + 1]:-}" && i=$((i + 2)) ;;
+      --repo=*) repo_opt="${args[i]#--repo=}" && i=$((i + 1)) ;;
+      -o | --push-option | --receive-pack | --exec) i=$((i + 2)) ;;
+      -*) i=$((i + 1)) ;;
+      *)
+        remote="${args[i]}"
+        break
+        ;;
+    esac
+  done
+  [[ -z "${remote}" ]] && remote="${repo_opt}"
+  if [[ -z "${remote}" ]]; then
+    branch="$(command git ${globals[@]+"${globals[@]}"} symbolic-ref --quiet --short HEAD 2>/dev/null)" || branch=""
+    remote="$(command git ${globals[@]+"${globals[@]}"} config --get "branch.${branch}.pushRemote" 2>/dev/null)" \
+      || remote="$(command git ${globals[@]+"${globals[@]}"} config --get remote.pushDefault 2>/dev/null)" \
+      || remote="$(command git ${globals[@]+"${globals[@]}"} config --get "branch.${branch}.remote" 2>/dev/null)" \
+      || remote="origin"
+  fi
+  if command git ${globals[@]+"${globals[@]}"} config --get "remote.${remote}.url" >/dev/null 2>&1; then
+    is_name=1
+    urls="$(command git ${globals[@]+"${globals[@]}"} remote get-url --push --all "${remote}" 2>/dev/null)" || urls=""
+  else
+    urls="${remote}"
+  fi
+  [[ -n "${urls}" ]] || return 0
+  if [[ ! -f "${minter}" ]]; then
+    echo "[git] ERROR: App token minter missing (${minter}); cannot tell if this push is routed. Refusing." >&2
+    return 1
+  fi
+  while IFS= read -r url; do
+    [[ -z "${url}" ]] && continue
+    rc=0
+    item="$("${BASH}" "${minter}" route "${url}")" || rc=$?
+    if ((rc == 1)); then
+      unrouted=1
+      continue
+    elif ((rc != 0)); then
+      echo "[git] ERROR: gh-app-routes.conf is malformed for ${url}; refusing to push." >&2
+      return 1
+    fi
+    routed=1
+    repo="$("${BASH}" "${minter}" repo "${url}")" || return 1
+    # A second, different item on one remote counts as mixed below.
+    if ((${#items[@]} == 0)); then
+      items=("${item}")
+    elif [[ "${items[0]}" != "${item}" ]]; then
+      items+=("${item}")
+    fi
+    case "${url}" in
+      https://github.com/*) ;;
+      *) rewrites="${rewrites}url.https://github.com/${repo}.git.insteadOf=${url}"$'\n' ;;
+    esac
+  done <<<"${urls}"
+  ((routed == 1)) || return 0
+  if ((unrouted == 1 || ${#items[@]} != 1)); then
+    echo "[git] ERROR: remote '${remote}' mixes GitHub App routes with other URLs; refusing to push." >&2
+    return 1
+  fi
+  item="${items[0]}"
+  if ! "${BASH}" "${minter}" ensure "${item}"; then
+    echo "[git] ERROR: this push is routed to a GitHub App (gh-app-routes.conf), but no App token could be minted." >&2
+    echo "[git] Failing closed: a routed push never falls back to SSH as Andrew." >&2
+    return 1
+  fi
+  # Reset every inherited helper first: osxkeychain would answer with a stored personal credential.
+  _git_wrapper_push_cfg=(-c credential.helper=
+    -c "credential.helper=!$(printf '%q' "${BASH}") $(printf '%q' "${minter}") git-credential $(printf '%q' "${item}")"
+    -c credential.useHttpPath=true -c core.askPass=)
+  while IFS= read -r url; do
+    [[ -n "${url}" ]] && _git_wrapper_push_cfg+=(-c "${url}")
+  done <<<"${rewrites}"
+  # Prove the rewrite took: every push URL must now be https://github.com, or the push would go as Andrew.
+  if ((is_name == 1)); then
+    got="$(command git ${globals[@]+"${globals[@]}"} "${_git_wrapper_push_cfg[@]}" remote get-url --push --all "${remote}")" || got=""
+  else
+    got="$(command git ${globals[@]+"${globals[@]}"} "${_git_wrapper_push_cfg[@]}" ls-remote --get-url "${remote}")" || got=""
+  fi
+  while IFS= read -r url; do
+    if [[ "${url}" != https://github.com/* ]]; then
+      echo "[git] ERROR: routed push URL did not rewrite to https://github.com (got '${url}'); refusing." >&2
+      _git_wrapper_push_cfg=()
+      return 1
+    fi
+  done <<<"${got:-none}"
+  echo "[git] Pushing as the GitHub App over HTTPS (gh-app-routes.conf: ${item})." >&2
+}
+
 git() {
   # Guard against recursive calls
   if [[ -n "${_GIT_WRAPPER_ACTIVE:-}" ]]; then
@@ -75,6 +203,14 @@ git() {
           "${branch_type}/${branch_scope:+${branch_scope}-}${branch_subject}"
       fi
     fi
+  fi
+
+  # A routed push runs as the GitHub App and returns here; see _git_wrapper_app_push.
+  local -a _git_wrapper_push_cfg=()
+  _git_wrapper_app_push "$@" || return 1
+  if ((${#_git_wrapper_push_cfg[@]} > 0)); then
+    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS='' SSH_ASKPASS='' command git "${_git_wrapper_push_cfg[@]}" "$@"
+    return $?
   fi
 
   # Run the real git command first
@@ -233,4 +369,5 @@ git() {
 # HOME-relative path, so any child with a rewritten HOME (the test suite's
 # fixtures, for one) resolves it to nothing and the helper vanishes while the
 # inherited git remains. Same reasoning, and the same fix, as gh-wrapper.sh.
-export -f git _git_wrapper_restore_dir _git_wrapper_slug # Exported - overrides system git command globally
+export -f git _git_wrapper_restore_dir _git_wrapper_slug _git_wrapper_app_push # Exported - overrides system git command globally
+export _git_wrapper_app_minter
