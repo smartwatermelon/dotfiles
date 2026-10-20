@@ -138,10 +138,16 @@ _git_wrapper_app_push() {
       return 1
     fi
   else
-    # Neither a remote nor a URL or path: likely an option value misread as the remote. Refuse, never guess.
-    if [[ "${remote}" != */* && "${remote}" != *:* ]]; then
-      echo "[git] ERROR: '${remote}' is not a remote, URL or path; cannot check App routing. Refusing." >&2
-      echo "[git] Fix: write option values as --opt=value, or a local path as ./${remote}." >&2
+    # Neither a remote, a URL nor a directory (. counts): likely an option value misread as the remote. Refuse.
+    local base="." g
+    for g in ${globals[@]+"${globals[@]}"}; do
+      [[ "${base}" == "-C" ]] && base="${g}" && continue
+      [[ "${g}" == "-C" ]] && base="-C"
+    done
+    [[ "${base}" == "-C" ]] && base="."
+    if [[ "${remote}" != */* && "${remote}" != *:* && ! -d "${base}/${remote}" ]]; then
+      echo "[git] ERROR: '${remote}' is not a configured remote, URL or directory; cannot check App routing. Refusing." >&2
+      echo "[git] Fix: add the remote or name one, and write option values as --opt=value." >&2
       return 1
     fi
     urls="${remote}"
