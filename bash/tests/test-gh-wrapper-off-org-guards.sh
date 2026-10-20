@@ -5,7 +5,7 @@
 
 # Known-bad on origin/main: the pr new, pr ready and api POST refusal cases fail there.
 # #391 added GH_REPO, PR URL, GraphQL and resolver cases; 54 of them fail on the wrapper before that fix.
-# #444 added GraphQL mergePullRequest cases (section 6); 20 of them fail on the wrapper before that fix.
+# #444 added GraphQL mergePullRequest cases and a REST merge after -R (section 6); 22 of them fail on the wrapper before that fix.
 set -uo pipefail
 unset CDPATH
 
@@ -236,6 +236,12 @@ for mode in standalone function; do
     _pass "${mode}: unreadable query names the merge risk"
   else
     _fail "${mode}: unreadable query: rc=${rc} called='${called}' err='${err}'"
+  fi
+  _run "${mode}" -R smartwatermelon/dotfiles api -X PUT repos/smartwatermelon/dotfiles/pulls/5/merge
+  if [[ "${rc}" -ne 0 && -z "${called}" && "${err}" == *"REST API PR merge"* ]]; then
+    _pass "${mode}: REST merge after -R refused"
+  else
+    _fail "${mode}: REST merge after -R: rc=${rc} called='${called}' err='${err}'"
   fi
   # -f never reads @file: gh posts the literal string, so there is no query to read.
   expect_passes "${mode}" "graphql -f query=@file is a literal" "graphql" api graphql -f "query=@${GQL_MERGE}"

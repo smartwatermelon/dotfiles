@@ -651,7 +651,10 @@ _gh_wrapper_find_real_gh() {
 # Blocks REST/GraphQL PR-merge bypass vectors that skip pre-merge-review.sh
 # and the merge-lock check entirely. Returns 1 if the call should be blocked.
 _gh_wrapper_block_bypass() {
-  if [[ "${1:-}" == "api" ]] && printf '%s\n' "$*" | grep -qE 'pulls/[0-9]+/merge([[:space:]]|$|[^[:alnum:]_])'; then
+  local sub="" subsub=""
+  # The subcommand, not $1: a global flag can come first, as in `gh -R o/r api ...`.
+  _gh_wrapper_find_subcommand "$@"
+  if [[ "${sub}" == "api" ]] && printf '%s\n' "$*" | grep -qE 'pulls/[0-9]+/merge([[:space:]]|$|[^[:alnum:]_])'; then
     echo "[gh] BLOCKED: Direct REST API PR merge bypasses pre-merge review and merge authorization." >&2
     echo "[gh] This endpoint skips pre-merge-review.sh and the merge-lock check." >&2
     echo "[gh] Use 'gh pr merge <number>' instead." >&2
@@ -660,8 +663,6 @@ _gh_wrapper_block_bypass() {
   fi
 
   # #444: GraphQL mergePullRequest goes through the same query reader as #391, so a query in a file is checked too.
-  local sub="" subsub=""
-  _gh_wrapper_find_subcommand "$@"
   if [[ "${sub}" == "api" ]]; then
     _gh_wrapper_block_graphql_pr_mutation "$@" || return 1
   fi
