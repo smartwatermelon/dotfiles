@@ -127,8 +127,12 @@ for repo in "${REPO_ROOT}" "${HOME}/Developer/claude-config"; do
   name="$(basename "${repo}")"
   # Behavioral, not source-text: --sync must be accepted, and --dry-run
   # keeps it side-effect free so the check is safe to run here.
-  if "${script}" --sync --dry-run >/dev/null 2>&1; then
+  # install.sh exits non-zero off macOS (dotfiles#400). Skip on that
+  # message only; any other non-zero exit is a FAIL.
+  if sync_out="$("${script}" --sync --dry-run 2>&1)"; then
     echo "  PASS: ${name}/install.sh accepts --sync"
+  elif [[ "${sync_out}" == *"designed for macOS (Darwin)"* ]]; then
+    echo "  SKIP: ${name}/install.sh --sync not checked; install.sh runs only on macOS"
   else
     echo "  FAIL: ${name}/install.sh rejected --sync"
     fail=1
