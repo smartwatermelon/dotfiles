@@ -94,8 +94,28 @@ _gh_wrapper_review_script_path() {
 # `gh search issues --owner=nightowlstudiollc` resolves the same from a Beacon
 # checkout as from anywhere else. A comma-separated owner list could span both
 # identities, so it is ignored and cwd decides, as before.
+#
+# #391: URL argument > -R > GH_REPO > remote, as gh does. create/new/list/status take no URL: one there is a flag value.
 _gh_wrapper_resolve_owner() {
   local repo_flag_value owner_flag_value skip_next="" arg remote_url owner
+  local sub="" subsub=""
+  local url_re='^(https?://)?(www\.)?github\.com/([^/?#]+)/[^/?#]+/(pull|issues)/[0-9]+'
+
+  _gh_wrapper_find_subcommand "$@"
+  if [[ ("${sub}" == "pr" || "${sub}" == "issue") && ! "${subsub}" =~ ^(create|new|list|ls|status)$ ]]; then
+    # A URL after a value flag (--body URL) is that flag's text. pr ready has no value flag, so there any URL counts.
+    local prev="" bool_flags=" --undo --squash --merge --rebase --auto --admin --disable-auto --delete-branch --web --comments -w -d -s "
+    for arg in "$@"; do
+      [[ "${arg}" == "--" ]] && break
+      if [[ "${arg,,}" =~ ${url_re} ]] && [[ "${subsub}" == "ready" || "${prev}" != -* || "${prev}" == *=* ||
+        "${prev}" == -R?* || "${bool_flags}" == *" ${prev} "* ]]; then
+        arg="${arg#*[Gg][Ii][Tt][Hh][Uu][Bb].[Cc][Oo][Mm]/}"
+        printf '%s\n' "${arg%%/*}"
+        return 0
+      fi
+      prev="${arg}"
+    done
+  fi
 
   repo_flag_value=""
   owner_flag_value=""
@@ -193,16 +213,29 @@ _gh_wrapper_resolve_owner() {
   fi
 
   if [[ -n "${repo_flag_value}" ]]; then
-    # -R/--repo takes OWNER/REPO or a full URL; owner is always the first
-    # path segment after stripping any host/scheme prefix.
-    owner=$(printf '%s\n' "${repo_flag_value}" | sed -E 's#^(git@[^:]+:|[a-zA-Z]+://[^/]+/)##; s#/.*##')
+    owner="$(_gh_wrapper_spec_owner "${repo_flag_value}")"
+  elif [[ -n "${GH_REPO:-}" ]]; then
+    # After the api endpoint: GH_REPO only fills {owner}/{repo} there (gh api --help).
+    owner="$(_gh_wrapper_spec_owner "${GH_REPO}")"
   else
     remote_url=$(command git config --get remote.origin.url 2>/dev/null)
     [[ -z "${remote_url}" ]] && return 0
-    owner=$(printf '%s\n' "${remote_url}" | sed -E 's#^(git@[^:]+:|[a-zA-Z]+://[^/]+/)##; s#/.*##')
+    owner="$(_gh_wrapper_spec_owner "${remote_url}")"
   fi
   [[ -z "${owner}" ]] && return 0
   printf '%s\n' "${owner}"
+}
+
+# Owner of a repo spec: OWNER/REPO, HOST/OWNER/REPO (gh reads exactly three segments so), a URL, git@ remote, or bare OWNER.
+_gh_wrapper_spec_owner() {
+  local v="$1" rest
+  if [[ "${v}" =~ ^(git@[^:]+:|[a-zA-Z]+://[^/]+/)(.*)$ ]]; then
+    v="${BASH_REMATCH[2]}"
+  else
+    rest="${v#*/}"
+    [[ "${v}" == */*/* && "${rest#*/}" != */* ]] && v="${rest}"
+  fi
+  printf '%s\n' "${v%%/*}"
 }
 
 # Directory whose subtree marks a checkout as Beacon work. Built from ${HOME}
@@ -756,6 +789,7 @@ _gh_wrapper_block_off_org_promotion() {
   fi
 
   if [[ "${sub}" == "api" ]]; then
+    _gh_wrapper_block_graphql_pr_publish "$@" || return 1
     local endpoint="" method="" implicit_post=0 draft="" skip_next="" field seen_api=0
     local pulls_re='^/?repos/[^/]+/[^/]+/pulls/?(\?.*)?$'
     for arg in "$@"; do
@@ -833,6 +867,77 @@ _gh_wrapper_block_off_org_promotion() {
   fi
 
   return 0
+}
+
+# #391: these GraphQL mutations open or promote a PR and name it by node ID, so the owner cannot be proven in-org: refused.
+_gh_wrapper_block_graphql_pr_publish() {
+  local arg skip_next="" field val pos=0 ep="" seen_api=0 f name=""
+  local -a files=() inputs=()
+  local mut_re='(^|[^[:alnum:]_])(createPullRequest|revertPullRequest|markPullRequestReadyForReview)([^[:alnum:]_]|$)'
+  for arg in "$@"; do
+    [[ "${arg}" == "--" ]] && break
+    if [[ "${seen_api}" == "0" ]]; then
+      [[ "${arg}" == "api" ]] && seen_api=1
+      continue
+    fi
+    field=""
+    case "${skip_next}" in
+      field) field="${arg}" ;;
+      input) inputs+=("${arg}") ;;
+      skip) ;;
+      *)
+        case "${arg}" in
+          -F | --field) skip_next="field" ;;
+          -f | --raw-field) skip_next="skip" ;;
+          --input) skip_next="input" ;;
+          --input=*) inputs+=("${arg#--input=}") ;;
+          --field=*) field="${arg#*=}" ;;
+          -F?*) field="${arg:2}" ;;
+          -*) _gh_wrapper_api_value_flag "${arg}" && skip_next="skip" ;;
+          *)
+            pos=$((pos + 1))
+            ep="${arg,,}"
+            ;;
+        esac
+        [[ -n "${skip_next}" ]] && continue
+        ;;
+    esac
+    skip_next=""
+    val="${field#*=}"
+    [[ "${field}" == *=* && "${val}" == @* ]] && files+=("${val#@}")
+  done
+
+  # One positional is the endpoint; zero or several (an unknown flag's value) cannot be told apart, so check anyway.
+  [[ "${ep}" =~ ^https?://[^/]+(/.*)?$ ]] && ep="${BASH_REMATCH[1]}"
+  ep="${ep%%\?*}"
+  while [[ "${ep}" == */ ]]; do ep="${ep%/}"; done
+  [[ "${pos}" == "1" && "${ep}" != "graphql" && "${ep}" != */graphql ]] && return 0
+
+  if [[ "$*" =~ ${mut_re} ]]; then
+    name="${BASH_REMATCH[2]}"
+  fi
+  for f in "${files[@]}" "${inputs[@]}"; do
+    [[ -n "${name}" ]] && break
+    if [[ "${f}" == "-" || ! -f "${f}" || ! -r "${f}" ]]; then
+      echo "[gh] BLOCKED: gh api GraphQL query in '${f}' cannot be read (stdin or no such file)." >&2
+      echo "[gh] It could open or promote an off-org PR. Only the human promotes off-org PRs, via the GitHub UI." >&2
+      return 1
+    fi
+    name="$(grep -oE "${mut_re}" -- "${f}" | head -n 1 | tr -cd '[:alnum:]')" || true
+  done
+  for f in "${inputs[@]}"; do
+    [[ -n "${name}" ]] && break
+    if grep -qF '\u' -- "${f}"; then
+      echo "[gh] BLOCKED: gh api GraphQL --input '${f}' uses \\u escapes, which can hide a mutation name." >&2
+      echo "[gh] It could open or promote an off-org PR. Only the human promotes off-org PRs, via the GitHub UI." >&2
+      return 1
+    fi
+  done
+  [[ -z "${name}" ]] && return 0
+  echo "[gh] BLOCKED: GraphQL ${name} names its target by node ID; the wrapper cannot prove the owner is in-org." >&2
+  echo "[gh] Use 'gh pr create' or 'gh pr ready', which resolve the owner (off-org create is forced to draft)." >&2
+  echo "[gh] Only the human promotes off-org PRs out of draft, via the GitHub UI." >&2
+  return 1
 }
 
 # Hard, mechanical guard: a PR created against a repo outside the two orgs
@@ -1772,6 +1877,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_publish _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT
 fi

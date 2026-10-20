@@ -4,6 +4,7 @@
 # Each case runs in standalone and function mode against a stub gh. No network.
 
 # Known-bad on origin/main: the pr new, pr ready and api POST refusal cases fail there.
+# #391 added GH_REPO, PR URL, GraphQL and resolver cases; 54 of them fail on the wrapper before that fix.
 set -uo pipefail
 unset CDPATH
 
@@ -51,15 +52,30 @@ FN_DRIVER="${WORKDIR}/fn-driver.sh"
   printf '%s\n' 'gh "$@"'
 } >"${FN_DRIVER}"
 
+# GraphQL fixtures (#391): queries the wrapper must read from a file.
+GQL_READY="${WORKDIR}/ready.graphql"
+GQL_BENIGN="${WORKDIR}/viewer.graphql"
+JSON_READY="${WORKDIR}/ready.json"
+JSON_ESCAPED="${WORKDIR}/escaped.json"
+JSON_BENIGN="${WORKDIR}/viewer.json"
+printf '%s\n' 'mutation { markPullRequestReadyForReview(input: {pullRequestId: "PR_x"}) { clientMutationId } }' >"${GQL_READY}"
+printf '%s\n' 'query { viewer { login } }' >"${GQL_BENIGN}"
+printf '%s\n' '{"query":"mutation{markPullRequestReadyForReview(input:{pullRequestId:\"PR_x\"}){clientMutationId}}"}' >"${JSON_READY}"
+# The P is a JSON escape (backslash, u, 0050): it decodes to the mutation name, which a byte scan cannot see.
+bs="\\"
+printf '%s\n' "{\"query\":\"mutation{mark${bs}u0050ullRequestReadyForReview(input:{pullRequestId:${bs}\"PR_x${bs}\"}){clientMutationId}}\"}" >"${JSON_ESCAPED}"
+grep -q 'markPull' "${JSON_ESCAPED}" && echo "fixture error: ${JSON_ESCAPED} is not escaped" >&2 && exit 1
+printf '%s\n' '{"query":"query{viewer{login}}"}' >"${JSON_BENIGN}"
+
 # _run MODE ARGS... sets rc, err, and called (the argv the stub saw, or empty).
 _run() {
   local mode="$1"
   shift
   : >"${LOG}"
   if [[ "${mode}" == "standalone" ]]; then
-    (cd "${NEUTRAL}" && PATH="${STUB_DIR}:${PATH}" bash "${WRAPPER}" "$@") >/dev/null 2>"${WORKDIR}/err"
+    (cd "${NEUTRAL}" && PATH="${STUB_DIR}:${PATH}" bash "${WRAPPER}" "$@") </dev/null >/dev/null 2>"${WORKDIR}/err"
   else
-    (cd "${NEUTRAL}" && PATH="${WRAP_DIR}:${STUB_DIR}:${PATH}" bash "${FN_DRIVER}" "$@") >/dev/null 2>"${WORKDIR}/err"
+    (cd "${NEUTRAL}" && PATH="${WRAP_DIR}:${STUB_DIR}:${PATH}" bash "${FN_DRIVER}" "$@") </dev/null >/dev/null 2>"${WORKDIR}/err"
   fi
   rc=$?
   err="$(cat "${WORKDIR}/err")"
@@ -123,6 +139,75 @@ for mode in standalone function; do
   expect_passes "${mode}" "api -X GET with fields" "repos/${OFF}/pulls" api -X GET "repos/${OFF}/pulls" -f state=open
   expect_passes "${mode}" "api POST to pulls/<n>/comments" "pulls/5/comments" api -X POST "repos/${OFF}/pulls/5/comments" -f state=x
   expect_passes "${mode}" "api POST in-org pulls" "repos/smartwatermelon/dotfiles/pulls" api -X POST repos/smartwatermelon/dotfiles/pulls -f title=x
+
+  # (4) #391 item 1: GH_REPO and a PR URL name the repo. gh's order: URL > -R > GH_REPO > checkout remote.
+  GH_REPO="${OFF}" expect_refused "${mode}" "GH_REPO off-org pr ready" pr ready 5
+  GH_REPO="github.com/${OFF}" expect_refused "${mode}" "GH_REPO HOST/OWNER/REPO pr ready" pr ready 5
+  expect_refused "${mode}" "pr ready https URL" pr ready "https://github.com/${OFF}/pull/5"
+  expect_refused "${mode}" "pr ready http www URL with path and query" pr ready "http://www.github.com/${OFF}/pull/5/files?w=1"
+  expect_refused "${mode}" "pr ready mixed-case URL" pr ready "HTTPS://GitHub.com/${OFF}/pull/5"
+  expect_refused "${mode}" "URL beats -R (off-org URL)" pr ready "https://github.com/${OFF}/pull/5" -R smartwatermelon/dotfiles
+  expect_passes "${mode}" "URL beats -R (in-org URL)" "pr ready" pr ready https://github.com/smartwatermelon/dotfiles/pull/5 -R "${OFF}"
+  GH_REPO="${OFF}" expect_passes "${mode}" "-R beats GH_REPO (in-org -R)" "pr ready 5" pr ready 5 -R smartwatermelon/dotfiles
+  GH_REPO=smartwatermelon/dotfiles expect_refused "${mode}" "-R beats GH_REPO (off-org -R)" pr ready 5 -R "${OFF}"
+  expect_passes "${mode}" "-R HOST/OWNER/REPO in-org" "pr ready 5" pr ready 5 -R github.com/smartwatermelon/dotfiles
+  expect_passes "${mode}" "in-org URL pr ready" "pr ready" pr ready https://github.com/smartwatermelon/dotfiles/pull/5
+  GH_REPO="${OFF}" expect_passes "${mode}" "GH_REPO off-org pr create gets --draft" "--draft" pr create --title x
+  GH_REPO="${OFF}" expect_passes "${mode}" "GH_REPO off-org pr new gets --draft" "--draft" pr new --title x
+  GH_REPO="${OFF}" expect_refused "${mode}" "GH_REPO fills api {owner}/{repo}" api -X POST "repos/{owner}/{repo}/pulls" -f title=x
+  # pr create takes no selector: an in-org URL as a flag value must not beat -R.
+  expect_passes "${mode}" "pr create URL value does not beat -R" "--draft" pr create -R "${OFF}" --title https://github.com/smartwatermelon/y/pull/1
+  expect_refused "${mode}" "pr ready URL after -R<in-org> combined" pr ready -Rsmartwatermelon/dotfiles "https://github.com/${OFF}/pull/5"
+  GH_REPO=smartwatermelon/dotfiles _run "${mode}" pr create --title x
+  if [[ "${called}" != *--draft* && "${rc}" -eq 0 ]]; then
+    _pass "${mode}: GH_REPO in-org pr create not forced"
+  else
+    _fail "${mode}: GH_REPO in-org pr create: rc=${rc} called='${called}'"
+  fi
+
+  # (5) #391 item 2: GraphQL mutations that publish a PR name it by node ID, so they are refused outright.
+  expect_refused "${mode}" "graphql markPullRequestReadyForReview" api graphql -f "query=mutation{markPullRequestReadyForReview(input:{pullRequestId:\"PR_x\"}){clientMutationId}}"
+  expect_refused "${mode}" "graphql createPullRequest" api graphql -f "query=mutation{createPullRequest(input:{repositoryId:\"R_x\",baseRefName:\"main\",headRefName:\"b\",title:\"t\"}){clientMutationId}}"
+  expect_refused "${mode}" "graphql revertPullRequest" api graphql -f "query=mutation{revertPullRequest(input:{pullRequestId:\"PR_x\"}){clientMutationId}}"
+  expect_refused "${mode}" "graphql aliased, spaced" api graphql --raw-field "query=mutation { a: markPullRequestReadyForReview (input: {pullRequestId: \$id}) { clientMutationId } }" -f id=PR_x
+  expect_refused "${mode}" "graphql via /graphql endpoint" api -X POST /graphql -f "query=mutation{markPullRequestReadyForReview(input:{pullRequestId:\"PR_x\"}){clientMutationId}}"
+  expect_refused "${mode}" "graphql via full URL endpoint" api https://api.github.com/graphql -f "query=mutation{markPullRequestReadyForReview(input:{pullRequestId:\"PR_x\"}){clientMutationId}}"
+  expect_refused "${mode}" "graphql query from -F @file" api graphql -F "query=@${GQL_READY}"
+  expect_refused "${mode}" "graphql query from --input file" api graphql --input "${JSON_READY}"
+  expect_refused "${mode}" "graphql --input= file" api graphql "--input=${JSON_READY}"
+  expect_refused "${mode}" "graphql --input with \\u escape" api graphql --input "${JSON_ESCAPED}"
+  [[ "${err}" == *"escapes"* ]] || _fail "${mode}: \\u escape refused for the wrong reason: ${err}"
+  expect_refused "${mode}" "graphql --input stdin" api graphql --input -
+  expect_refused "${mode}" "graphql -F query=@- stdin" api graphql -F query=@-
+  expect_refused "${mode}" "graphql --input missing file" api graphql --input "${WORKDIR}/no-such.json"
+  expect_passes "${mode}" "graphql convertPullRequestToDraft" "graphql" api graphql -f "query=mutation{convertPullRequestToDraft(input:{pullRequestId:\"PR_x\"}){clientMutationId}}"
+  expect_passes "${mode}" "graphql viewer query" "graphql" api graphql -f "query=query{viewer{login}}"
+  expect_passes "${mode}" "graphql benign -F @file" "graphql" api graphql -F "query=@${GQL_BENIGN}"
+  expect_passes "${mode}" "graphql benign --input file" "graphql" api graphql --input "${JSON_BENIGN}"
+  expect_passes "${mode}" "REST field naming a mutation" "issues" api "repos/${OFF}/issues" -f title=createPullRequest
 done
+
+# Resolver-only cases (#391 review): mode-independent, so run once against the sourced function.
+echo "--- resolver"
+OWNER_DRIVER="${WORKDIR}/owner-driver.sh"
+{
+  printf 'source %q\n' "${WRAPPER}"
+  printf '%s\n' '_gh_wrapper_resolve_owner "$@"'
+} >"${OWNER_DRIVER}"
+expect_owner() {
+  local label="$1" want="$2" got
+  shift 2
+  got="$(cd "${NEUTRAL}" && bash "${OWNER_DRIVER}" "$@")"
+  if [[ "${got}" == "${want}" ]]; then
+    _pass "${label}"
+  else
+    _fail "${label}: want '${want}', got '${got}'"
+  fi
+}
+expect_owner "URL owner keeps its case" SmartWatermelon pr view https://GitHub.com/SmartWatermelon/x/pull/1
+expect_owner "URL as --body value does not beat -R" smartwatermelon pr comment 5 -R smartwatermelon/dotfiles --body "https://github.com/${OFF}/pull/1"
+expect_owner "URL after a boolean flag counts" someoutsideorg pr merge --squash "https://github.com/${OFF}/pull/1"
+expect_owner "issue URL" someoutsideorg issue view "https://github.com/${OFF}/issues/3"
+expect_owner "-R HOST/OWNER/REPO" o2 pr view 1 -R ghe.example.com/o2/r
 
 exit "${fail}"
