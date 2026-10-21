@@ -50,8 +50,8 @@ else
   alias claude='/usr/bin/caffeinate -i ${HOME}/.local/bin/claude'
 fi
 
-# clauded (#435): y = YOLO; else, or after CLAUDED_TIMEOUT (10s), plain
-# claude (auto). No TTY: YOLO, no prompt.
+# clauded (#435): a = plain claude; else, or after CLAUDED_TIMEOUT (10s),
+# YOLO. No TTY: YOLO, no prompt.
 unalias clauded 2>/dev/null
 # Must follow the if block, so the claude alias expands in the body.
 _clauded_stdin_is_tty() { [[ -t 0 ]]; }
@@ -62,19 +62,20 @@ clauded() {
     claude --dangerously-skip-permissions "$@"
     return
   fi
-  printf "Try plain 'claude' (auto mode) instead.\n" >&2
-  printf '[a]uto / [y]olo (clauded), auto in %ss: ' "${timeout}" >&2
+  printf "Try plain 'claude' instead.\n" >&2
+  printf '[a]uto / [y]olo (clauded), yolo in %ss: ' "${timeout}" >&2
   read -r -s -n 1 -t "${timeout}" key || rc=$?
   if ((rc > 128)); then
     printf '\n(timed out)\n' >&2
   else
     printf '%s\n' "${key}" >&2
   fi
-  if [[ "${key}" == [yY] ]]; then
-    claude --dangerously-skip-permissions "$@"
-  else
-    printf 'Starting auto mode.\n' >&2
+  if [[ "${key}" == [aA] ]]; then
+    # Plain claude: auto mode only where machine settings set it.
+    printf 'Starting plain claude.\n' >&2
     claude "$@"
+  else
+    claude --dangerously-skip-permissions "$@"
   fi
 }
 alias suclaude='${HOME}/.local/bin/claude'

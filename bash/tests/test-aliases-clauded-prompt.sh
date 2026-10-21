@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #shellcheck shell=bash
 
-# aliases.sh clauded (#435): y = YOLO, else or timeout = auto; no TTY =
-# YOLO with no prompt.
+# aliases.sh clauded (#435): a = plain claude, else or timeout = YOLO;
+# no TTY = YOLO with no prompt.
 set -euo pipefail
 
 REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -98,28 +98,36 @@ assert_stderr "y shows the prompt" has "[a]uto / [y]olo"
 printf Y | run_clauded "${full}" 1 5 "${args[@]}"
 assert_record "Y runs YOLO" claude-wrapper "${yolo}" "${args[@]}"
 
-# --- a runs plain claude (auto mode), args unchanged.
+# --- a runs plain claude, args unchanged.
 printf a | run_clauded "${full}" 1 5 "${args[@]}"
-assert_record "a runs auto via wrapper" claude-wrapper "${args[@]}"
+assert_record "a runs plain via wrapper" claude-wrapper "${args[@]}"
+assert_stderr "a says plain claude" has "Starting plain claude."
 
-# --- Enter (empty key) runs auto.
+printf A | run_clauded "${full}" 1 5 "${args[@]}"
+assert_record "A runs plain" claude-wrapper "${args[@]}"
+
+# --- Enter (empty key) runs YOLO.
 printf '\n' | run_clauded "${full}" 1 5 "${args[@]}"
-assert_record "Enter runs auto" claude-wrapper "${args[@]}"
+assert_record "Enter runs YOLO" claude-wrapper "${yolo}" "${args[@]}"
+
+# --- Any other key runs YOLO.
+printf x | run_clauded "${full}" 1 5 "${args[@]}"
+assert_record "other key runs YOLO" claude-wrapper "${yolo}" "${args[@]}"
 
 # --- Timeout: stdin stays open with no key, so read times out.
 sleep 3 | run_clauded "${full}" 1 1 "${args[@]}"
-assert_record "timeout runs auto" claude-wrapper "${args[@]}"
+assert_record "timeout runs YOLO" claude-wrapper "${yolo}" "${args[@]}"
 assert_stderr "timeout is reported" has "(timed out)"
 
-# --- EOF (Ctrl-D) runs auto but is not reported as a timeout.
+# --- EOF (Ctrl-D) runs YOLO but is not reported as a timeout.
 run_clauded "${full}" 1 5 "${args[@]}" </dev/null
-assert_record "EOF runs auto" claude-wrapper "${args[@]}"
+assert_record "EOF runs YOLO" claude-wrapper "${yolo}" "${args[@]}"
 assert_stderr "EOF is not a timeout" lacks "(timed out)"
 
 # --- A bad CLAUDED_TIMEOUT falls back to 10s, not a read error.
 printf a | run_clauded "${full}" 1 bogus "${args[@]}"
 assert_record "bad timeout still prompts" claude-wrapper "${args[@]}"
-assert_stderr "bad timeout uses 10s" has "auto in 10s"
+assert_stderr "bad timeout uses 10s" has "yolo in 10s"
 
 # --- No TTY (real check): no prompt, old YOLO behaviour.
 run_clauded "${full}" 0 5 "${args[@]}" </dev/null
@@ -131,12 +139,12 @@ lite="$(make_home lite claude claude-wrapper-lite)"
 printf y | run_clauded "${lite}" 1 5 "${args[@]}"
 assert_record "lite y runs YOLO via lite" claude-wrapper-lite "${yolo}" "${args[@]}"
 printf a | run_clauded "${lite}" 1 5 "${args[@]}"
-assert_record "lite a runs auto via lite" claude-wrapper-lite "${args[@]}"
+assert_record "lite a runs plain via lite" claude-wrapper-lite "${args[@]}"
 
 bare="$(make_home bare claude)"
 printf y | run_clauded "${bare}" 1 5 "${args[@]}"
 assert_record "bare y runs YOLO via claude" claude "${yolo}" "${args[@]}"
 printf a | run_clauded "${bare}" 1 5 "${args[@]}"
-assert_record "bare a runs auto via claude" claude "${args[@]}"
+assert_record "bare a runs plain via claude" claude "${args[@]}"
 
 exit "${fail}"
