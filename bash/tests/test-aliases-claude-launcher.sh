@@ -67,7 +67,7 @@ for label in full both; do
     home="$(make_home "${label}" claude claude-wrapper claude-wrapper-lite)"
   fi
   assert_alias "${home}" claude "${lit_bin}/claude-wrapper" "${label}"
-  assert_alias "${home}" clauded "claude --dangerously-skip-permissions" "${label}"
+  assert_alias "${home}" clauded "<unset>" "${label}"
   assert_alias "${home}" megaclaude "${mega_env} claude" "${label}"
   assert_alias "${home}" megaclauded "${mega_env} clauded" "${label}"
 done
@@ -76,7 +76,7 @@ done
 # so the alias must not wrap it in caffeinate again.
 home="$(make_home lite claude claude-wrapper-lite)"
 assert_alias "${home}" claude "${lit_bin}/claude-wrapper-lite" "lite"
-assert_alias "${home}" clauded "claude --dangerously-skip-permissions" "lite"
+assert_alias "${home}" clauded "<unset>" "lite"
 assert_alias "${home}" megaclaude "${mega_env} claude" "lite"
 assert_alias "${home}" megaclauded "${mega_env} clauded" "lite"
 
@@ -84,7 +84,7 @@ assert_alias "${home}" megaclauded "${mega_env} clauded" "lite"
 # mega aliases.
 home="$(make_home bare claude)"
 assert_alias "${home}" claude "/usr/bin/caffeinate -i ${lit_bin}/claude" "bare"
-assert_alias "${home}" clauded "claude --dangerously-skip-permissions" "bare"
+assert_alias "${home}" clauded "<unset>" "bare"
 assert_alias "${home}" megaclaude "<unset>" "bare"
 assert_alias "${home}" megaclauded "<unset>" "bare"
 
