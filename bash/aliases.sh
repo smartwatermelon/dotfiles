@@ -38,20 +38,45 @@ alias my-issues='my_issues' # open issues across my orgs (functions.sh)
 # Exciting ways of launching Claude Code
 if [[ -f "${HOME}/.local/bin/claude-wrapper" ]]; then
   alias claude='${HOME}/.local/bin/claude-wrapper'
-  alias clauded="claude --dangerously-skip-permissions"
   alias megaclaude="BUDGET_SESSION_TOKENS=50000000 BUDGET_SUBAGENT_TOKENS=12000000 claude"
   alias megaclauded="BUDGET_SESSION_TOKENS=50000000 BUDGET_SUBAGENT_TOKENS=12000000 clauded"
 elif [[ -f "${HOME}/.local/bin/claude-wrapper-lite" ]]; then
   # Only adds machine-settings.json, for hosts without the full wrapper.
   # It runs caffeinate itself.
   alias claude='${HOME}/.local/bin/claude-wrapper-lite'
-  alias clauded="claude --dangerously-skip-permissions"
   alias megaclaude="BUDGET_SESSION_TOKENS=50000000 BUDGET_SUBAGENT_TOKENS=12000000 claude"
   alias megaclauded="BUDGET_SESSION_TOKENS=50000000 BUDGET_SUBAGENT_TOKENS=12000000 clauded"
 else
   alias claude='/usr/bin/caffeinate -i ${HOME}/.local/bin/claude'
-  alias clauded="claude --dangerously-skip-permissions"
 fi
+
+# clauded (#435): y = YOLO; else, or after CLAUDED_TIMEOUT (10s), plain
+# claude (auto). No TTY: YOLO, no prompt.
+unalias clauded 2>/dev/null
+# Must follow the if block, so the claude alias expands in the body.
+_clauded_stdin_is_tty() { [[ -t 0 ]]; }
+clauded() {
+  local timeout="${CLAUDED_TIMEOUT:-10}" key="" rc=0
+  [[ "${timeout}" =~ ^[0-9]+$ ]] || timeout=10
+  if ! _clauded_stdin_is_tty; then
+    claude --dangerously-skip-permissions "$@"
+    return
+  fi
+  printf "Try plain 'claude' (auto mode) instead.\n" >&2
+  printf '[a]uto / [y]olo (clauded), auto in %ss: ' "${timeout}" >&2
+  read -r -s -n 1 -t "${timeout}" key || rc=$?
+  if ((rc > 128)); then
+    printf '\n(timed out)\n' >&2
+  else
+    printf '%s\n' "${key}" >&2
+  fi
+  if [[ "${key}" == [yY] ]]; then
+    claude --dangerously-skip-permissions "$@"
+  else
+    printf 'Starting auto mode.\n' >&2
+    claude "$@"
+  fi
+}
 alias suclaude='${HOME}/.local/bin/claude'
 alias suclauded="suclaude --dangerously-skip-permissions"
 
