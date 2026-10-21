@@ -62,7 +62,7 @@ clauded() {
     claude --dangerously-skip-permissions "$@"
     return
   fi
-  printf "Try plain 'claude' (auto mode) instead.\n" >&2
+  printf "Try plain 'claude' instead.\n" >&2
   printf '[a]uto / [y]olo (clauded), yolo in %ss: ' "${timeout}" >&2
   read -r -s -n 1 -t "${timeout}" key || rc=$?
   if ((rc > 128)); then
