@@ -3,7 +3,7 @@
 # shellcheck shell=bash
 
 # GitHub App tokens for routed repos (claude-config#659). Design: dev-env specs/2026-10-01-agent-github-app-design.md
-# The key comes from 1Password, or from the macOS login Keychain on a machine with no op vault (see --help).
+# The key comes from the macOS login Keychain, or from 1Password where the Keychain has none (see --help).
 
 # Usage text, printed by --help. Kept out of comments so it can say enough.
 _gh_app_usage() {
@@ -33,11 +33,11 @@ TAB-separated app_id=N and installation_id=N. Unlisted repos are not routed. Any
 other trailing field makes the route malformed (exit 2), so a typo fails closed.
 
 Sources: app_id and installation_id come from the route line's fields when present,
-else from `op read <item>/<field>`. The private_key comes from `op read` first; if op
-is missing or cannot read it, from the login Keychain: a generic password with
-service = the item minus op://<vault>/ (op://Automation/my app -> "my app") and
-account = the current user (id -un). security -w prints a multi-line PEM as hex;
-that is decoded.
+else from `op read <item>/<field>`. The private_key comes from the login Keychain
+first: a generic password with service = the item minus op://<vault>/
+(op://Automation/my app -> "my app") and account = the current user (id -un).
+security -w prints a multi-line PEM as hex; that is decoded. If the Keychain has no
+such item, the key comes from `op read <item>/private_key`.
 
 Cache: ${XDG_CACHE_HOME:-~/.cache}/gh-app-tokens (dir 0700, files 0600), one file per
 item. A token is reused until 5 minutes before mint time + 1 hour.
@@ -280,14 +280,14 @@ _gh_app_mint() {
     _gh_app_err "cannot read installation_id from ${item} (route line or 1Password)"
     return "${rc}"
   fi
-  # 1Password first; where op is missing or cannot read the item, the login Keychain.
-  if ! raw="$(_gh_app_op_read "${item}/private_key")" || [[ "${raw}" != -----BEGIN* ]]; then
-    if ! raw="$(_gh_app_keychain_key "${item}")" || [[ "${raw}" != -----BEGIN* ]]; then
+  # The login Keychain first (dotfiles#450); where it has no item, 1Password. A missing item fails at once, no dialog.
+  if ! raw="$(_gh_app_keychain_key "${item}")" || [[ "${raw}" != -----BEGIN* ]]; then
+    if ! raw="$(_gh_app_op_read "${item}/private_key")" || [[ "${raw}" != -----BEGIN* ]]; then
       raw=""
       svc="$(_gh_app_keychain_service "${item}")" || svc="?"
       acct="$(id -un)" || acct="?"
-      _gh_app_err "cannot read a PEM private_key from ${item} (1Password) or from the macOS Keychain" \
-        "(service '${svc}', account '${acct}')"
+      _gh_app_err "cannot read a PEM private_key from the macOS Keychain (service '${svc}', account '${acct}')" \
+        "or from ${item} (1Password)"
       return 1
     fi
   fi
