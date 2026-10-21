@@ -1047,6 +1047,264 @@ _gh_wrapper_force_draft_for_off_org() {
   return 0
 }
 
+# --- label check (#323): attached labels must exist; list --label is a filter --
+
+# owner/repo from a resolve_target value (URL, git@, HOST/o/r, o/r/pull/N). Nothing for a bare owner.
+_gh_wrapper_label_repo() {
+  local v="$1" rest
+  if [[ "${v}" =~ ^(git@[^:]+:|[a-zA-Z]+://[^/]+/)(.*)$ ]]; then
+    v="${BASH_REMATCH[2]}"
+  else
+    rest="${v#*/}"
+    [[ "${v}" == */*/* && "${rest#*/}" != */* ]] && v="${rest}"
+  fi
+  [[ "${v}" == */* ]] || return 0
+  rest="${v#*/}"
+  rest="${rest%%/*}"
+  rest="${rest%.git}"
+  [[ -n "${v%%/*}" && -n "${rest}" ]] && printf '%s/%s\n' "${v%%/*}" "${rest}"
+  return 0
+}
+
+# True when $1 and $2 (already lowercased) are at most one edit apart: one
+# insert, delete, substitution, or swap of two adjacent characters.
+_gh_wrapper_within_one_edit() {
+  local a="$1" b="$2" t i=0
+  if ((${#a} > ${#b})); then
+    t="${a}"
+    a="${b}"
+    b="${t}"
+  fi
+  ((${#b} - ${#a} > 1)) && return 1
+  while ((i < ${#a})) && [[ "${a:i:1}" == "${b:i:1}" ]]; do i=$((i + 1)); done
+  if ((${#a} == ${#b})); then
+    [[ "${a:i+1}" == "${b:i+1}" ]] && return 0
+    [[ "${a:i:1}" == "${b:i+1:1}" && "${a:i+1:1}" == "${b:i:1}" && "${a:i+2}" == "${b:i+2}" ]] && return 0
+    return 1
+  fi
+  [[ "${a:i}" == "${b:i+1}" ]]
+}
+
+# Up to five of the caller's `known` labels near $1: one edit apart, or one contains the other.
+_gh_wrapper_label_near() {
+  local want="${1,,}" k kl n=0
+  for k in "${known[@]}"; do
+    kl="${k,,}"
+    if _gh_wrapper_within_one_edit "${want}" "${kl}" \
+      || { ((${#want} >= 3 && ${#kl} >= 3)) && [[ "${kl}" == *"${want}"* || "${want}" == *"${kl}"* ]]; }; then
+      printf '%s\n' "${k}"
+      n=$((n + 1))
+      ((n >= 5)) && break
+    fi
+  done
+  return 0
+}
+
+# Whether to prompt: both stdin and stderr are terminals. Its own function so
+# tests can stand in for a terminal.
+_gh_wrapper_label_interactive() {
+  [[ -t 0 && -t 2 ]]
+}
+
+# Run the real gh with the token _gh_wrapper_sync_identity selected, as the
+# final dispatch does. $1 is the real gh path.
+_gh_wrapper_real_gh_selected() {
+  local real_gh="$1"
+  shift
+  if [[ -n "${_gh_wrapper_token_var:-}" ]]; then
+    GH_TOKEN="${!_gh_wrapper_token_var}" "${real_gh}" "$@"
+  else
+    "${real_gh}" "$@"
+  fi
+}
+
+# Prompt for missing label $1 in repo $2. Sets caller's `choice`: create, use:<label>, or abort (also on EOF).
+_gh_wrapper_label_choose() {
+  local label="$1" repo="$2" reply="" s i=0
+  local -a near=()
+  mapfile -t near < <(_gh_wrapper_label_near "${label}" || true)
+  {
+    echo "[gh] Label '${label}' does not exist in ${repo}."
+    for s in "${near[@]}"; do
+      i=$((i + 1))
+      echo "[gh]   ${i}) use '${s}'"
+    done
+    echo "[gh]   c) create '${label}' in ${repo}"
+    echo "[gh]   a) abort (default)"
+    printf '[gh] Choice: '
+  } >&2
+  choice="abort"
+  read -r reply || reply=""
+  case "${reply}" in
+    c | C) choice="create" ;;
+    *)
+      if [[ "${reply}" =~ ^[1-9]$ ]] && ((reply <= ${#near[@]})); then
+        choice="use:${near[reply - 1]}"
+      fi
+      ;;
+  esac
+  return 0
+}
+
+# Missing label: prompt at a terminal, else abort listing valid ones. Never creates one unasked.
+
+# Sets caller's _gh_wrapper_label_args (_rewritten=1 on a swap). 1 = abort.
+_gh_wrapper_check_labels() {
+  local sub="" subsub="" attach arg name want="" i k lc value item
+  local -a argv=("$@") idx=() pre=() items=() labels=() missing=() known=() out_items=()
+  local -A have=() seen=() repl=()
+  _gh_wrapper_label_rewritten=0
+  _gh_wrapper_label_args=("$@")
+
+  _gh_wrapper_find_subcommand "$@"
+  case "${sub}/${subsub}" in
+    issue/create | issue/new | pr/create | pr/new) attach="-l --label" ;;
+    issue/edit | pr/edit) attach="--add-label" ;;
+    *) return 0 ;;
+  esac
+  # Flags of those four that take a value (gh 2.x --help), so a value is never
+  # read as a flag.
+  local value_flags="-R --repo -a --assignee --attach --blocked-by --blocking -b --body
+    -F --body-file -m --milestone --parent -p --project --recover -T --template -t --title
+    --type -B --base -H --head -r --reviewer --add-assignee --add-blocked-by --add-blocking
+    --add-project --add-sub-issue --add-reviewer --remove-assignee --remove-blocked-by
+    --remove-blocking --remove-label --remove-project --remove-sub-issue --remove-reviewer"
+  value_flags=" ${value_flags//[[:space:]]/ } "
+
+  # idx/pre: where each label value sits in argv, and the flag text before it
+  # in that same token ("" when the value is a token of its own).
+  for ((i = 0; i < ${#argv[@]}; i++)); do
+    arg="${argv[i]}"
+    [[ "${arg}" == "--" ]] && break
+    if [[ "${want}" == "label" ]]; then
+      idx+=("${i}")
+      pre+=("")
+      want=""
+      continue
+    fi
+    if [[ "${want}" == "skip" ]]; then
+      want=""
+      continue
+    fi
+    name="${arg%%=*}"
+    if [[ " ${attach} " == *" ${name} "* ]]; then
+      if [[ "${arg}" == *=* ]]; then
+        idx+=("${i}")
+        pre+=("${name}=")
+      else
+        want="label"
+      fi
+    elif [[ "${attach}" == "-l "* && "${arg}" == -l?* ]]; then
+      # pflag reads -lX and -l=X as the value X.
+      idx+=("${i}")
+      if [[ "${arg}" == -l=* ]]; then pre+=("-l="); else pre+=("-l"); fi
+    elif [[ "${value_flags}" == *" ${arg} "* ]]; then
+      want="skip"
+    fi
+  done
+  [[ "${#idx[@]}" -eq 0 ]] && return 0
+
+  # Repeated flags and comma lists both reach gh; split on commas, untrimmed,
+  # as gh sends them. Deduplicated case-insensitively.
+  for ((k = 0; k < ${#idx[@]}; k++)); do
+    value="${argv[idx[k]]#"${pre[k]}"}"
+    IFS=',' read -r -a items <<<"${value}"
+    for item in "${items[@]}"; do
+      [[ -z "${item}" || -n "${seen[${item,,}]:-}" ]] && continue
+      seen["${item,,}"]=1
+      labels+=("${item}")
+    done
+  done
+  [[ "${#labels[@]}" -eq 0 ]] && return 0
+
+  # Repo as token routing resolves it. Any lookup failure warns and dispatches: never less usable than plain gh.
+  local target repo real_gh list rc=0
+  target="$(_gh_wrapper_resolve_target "$@")" || target=""
+  repo="$(_gh_wrapper_label_repo "${target}")"
+  if [[ -z "${repo}" ]]; then
+    echo "[gh] WARNING: cannot tell which repository to check labels in; passing the call to gh unchecked." >&2
+    return 0
+  fi
+  if ! real_gh="$(_gh_wrapper_find_real_gh 2>/dev/null)"; then
+    echo "[gh] WARNING: no real gh found to look up labels; passing the call to gh unchecked." >&2
+    return 0
+  fi
+  list="$(_gh_wrapper_real_gh_selected "${real_gh}" label list -R "${repo}" --limit 500 \
+    --json name --jq '.[].name' 2>/dev/null)" || rc=$?
+  if [[ "${rc}" -ne 0 ]]; then
+    echo "[gh] WARNING: label lookup in ${repo} failed (exit ${rc}); passing the call to gh unchecked." >&2
+    return 0
+  fi
+  [[ -n "${list}" ]] && mapfile -t known <<<"${list}"
+  if [[ "${#known[@]}" -ge 500 ]]; then
+    echo "[gh] WARNING: ${repo} has 500+ labels, more than one lookup returns; passing the call to gh unchecked." >&2
+    return 0
+  fi
+  for item in "${known[@]}"; do have["${item,,}"]=1; done
+  for item in "${labels[@]}"; do
+    [[ -n "${have[${item,,}]:-}" ]] || missing+=("${item}")
+  done
+  [[ "${#missing[@]}" -eq 0 ]] && return 0
+
+  if ! _gh_wrapper_label_interactive; then
+    local valid="(none)" near
+    [[ "${#known[@]}" -gt 0 ]] && valid="$(printf '%s, ' "${known[@]}")" && valid="${valid%, }"
+    {
+      echo "[gh] BLOCKED: ${sub} ${subsub}: label(s) not found in ${repo}: $(printf "'%s' " "${missing[@]}")"
+      for item in "${missing[@]}"; do
+        near="$(_gh_wrapper_label_near "${item}" | paste -sd ',' - | sed 's/,/, /g')"
+        [[ -n "${near}" ]] && echo "[gh]   '${item}': did you mean ${near}?"
+      done
+      echo "[gh] Valid labels in ${repo}: ${valid}"
+      echo "[gh] Fix the label name and re-run. Only a human creates a new label (gh label create, or run this at a terminal)."
+    } >&2
+    return 1
+  fi
+
+  local choice
+  for item in "${missing[@]}"; do
+    _gh_wrapper_label_choose "${item}" "${repo}"
+    case "${choice}" in
+      create)
+        if ! _gh_wrapper_real_gh_selected "${real_gh}" label create "${item}" -R "${repo}" >&2; then
+          echo "[gh] ERROR: could not create label '${item}' in ${repo}; aborting." >&2
+          return 1
+        fi
+        ;;
+      use:*) repl["${item,,}"]="${choice#use:}" ;;
+      *)
+        echo "[gh] Aborted: label '${item}' does not exist in ${repo}." >&2
+        return 1
+        ;;
+    esac
+  done
+  [[ "${#repl[@]}" -eq 0 ]] && return 0
+
+  # Put each chosen near match in place of the missing label, in its token.
+  for ((k = 0; k < ${#idx[@]}; k++)); do
+    value="${argv[idx[k]]#"${pre[k]}"}"
+    IFS=',' read -r -a items <<<"${value}"
+    out_items=()
+    for item in "${items[@]}"; do
+      lc="${item,,}"
+      # An empty item (a,,b) cannot be an associative-array key.
+      if [[ -n "${lc}" && -n "${repl[${lc}]:-}" ]]; then
+        out_items+=("${repl[${lc}]}")
+      else
+        out_items+=("${item}")
+      fi
+    done
+    value="$(
+      IFS=','
+      printf '%s' "${out_items[*]}"
+    )"
+    argv[idx[k]]="${pre[k]}${value}"
+  done
+  _gh_wrapper_label_args=("${argv[@]}")
+  _gh_wrapper_label_rewritten=1
+  return 0
+}
+
 # --- approval gate: gh api fields ----------------------------------------------
 # Classify the fields of a `gh api` call for _gh_wrapper_approval_gate. Sets
 # that function's locals `inline` and `files` (bash scoping is dynamic, so a
@@ -1787,6 +2045,13 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     _gh_wrapper_approval_gate "$@" || exit 1
     if [[ "${_gh_wrapper_help}" != "1" ]]; then
       _gh_wrapper_maybe_review strict "$@" || exit 1
+      # Attached labels must exist (#323); a near match chosen at the prompt rewrites argv.
+      _gh_wrapper_label_args=()
+      _gh_wrapper_label_rewritten=0
+      _gh_wrapper_check_labels "$@" || exit 1
+      if [[ "${_gh_wrapper_label_rewritten}" == "1" ]]; then
+        set -- "${_gh_wrapper_label_args[@]}"
+      fi
       # Off-org `gh pr create` must land as a draft — hard, mechanical,
       # no opt-out. Rebuild the positional params from the (possibly
       # --draft-appended) output; a function can't reassign "$@" directly.
@@ -1897,6 +2162,14 @@ else
 
     _gh_wrapper_maybe_review warn "$@" || return 1
 
+    # Attached labels must exist (#323); a near match chosen at the prompt rewrites argv.
+    local -a _gh_wrapper_label_args=()
+    local _gh_wrapper_label_rewritten=0
+    _gh_wrapper_check_labels "$@" || return 1
+    if [[ "${_gh_wrapper_label_rewritten}" == "1" ]]; then
+      set -- "${_gh_wrapper_label_args[@]}"
+    fi
+
     # Off-org `gh pr create` must land as a draft — hard, mechanical, no
     # opt-out. Rebuild the positional params from the (possibly
     # --draft-appended) output; a function can't reassign "$@" directly.
@@ -1943,6 +2216,6 @@ else
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
-  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_resolve_target _gh_wrapper_app_route _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback
+  export -f gh sugh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_resolve_target _gh_wrapper_app_route _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback _gh_wrapper_check_labels _gh_wrapper_label_repo _gh_wrapper_within_one_edit _gh_wrapper_label_near _gh_wrapper_label_interactive _gh_wrapper_real_gh_selected _gh_wrapper_label_choose
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _gh_wrapper_app_minter
 fi
