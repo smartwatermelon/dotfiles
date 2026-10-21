@@ -72,7 +72,9 @@ repo's own call: declare `black`, `ruff format`, or nothing in that repo's
   measures only added lines
 - **Skipped**: during a merge, cherry-pick or revert in progress
 - **Fails closed**: if personify cannot be found the commit is blocked, in every
-  repo (`core.hooksPath` is global). Install personify to clear it.
+  repo (`core.hooksPath` is global). Install personify to clear it. It also
+  blocks, naming the fix, until `install.sh --sync` has linked
+  `~/.config/git/hooks/lint-length.sh`.
 - **Bypass**:
   - One commit: `SKIP=length-caps git commit ...`
   - One file (license header, vendored code): set `length-caps=off` on it in a
@@ -81,7 +83,8 @@ repo's own call: declare `black`, `ruff format`, or nothing in that repo's
     index, so it applies once `.gitattributes` is staged and a diff shows it.
     `core.attributesFile` and the system attributes file are ignored. The hook
     fails if `.git/info/attributes` sets `length-caps` at all, and refuses a
-    tracked line that sets `length-caps=off` on `*`, `**` or `**/*`. Each
+    tracked line that sets `length-caps=off` on a pattern git matches to every
+    file (`*`, `**`, `/**`, `***` and the like). Each
     exempted path is printed to stderr on every run. `-diff` also silences the
     check, but hides the file from `git diff` and `git log -p`; use this
     attribute instead.
