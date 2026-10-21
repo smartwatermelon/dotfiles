@@ -31,7 +31,7 @@
 #                  ignores core.attributesFile and the system attributes file.
 #                  It fails if .git/info/attributes sets length-caps at all
 #                  (never in a diff), and it refuses a tracked .gitattributes
-#                  line that sets length-caps=off on `*`, `**` or `**/*` (that
+#                  line that sets length-caps=off on any all-files pattern (that
 #                  would exempt a whole repo). Every exempted path is printed
 #                  to stderr on every run.
 #
@@ -47,8 +47,30 @@ set -euo pipefail
 
 GATE_REVIEW="${HOME}/.claude/scripts/gate-review.sh"
 
+# 0 if git matches the pattern to every probe path, 1 if not, 2 on error.
+# The probes share no characters, so `*9*` is not read as every file.
+_every_file() {
+  local probe out
+  probe="$(mktemp)" || return 2
+  printf '%s length-caps-probe\n' "$1" >"${probe}"
+  if ! out="$(GIT_ATTR_NOSYSTEM=1 git -c core.attributesFile="${probe}" \
+    check-attr length-caps-probe -- zq9 .AB x/y/k_7)"; then
+    rm -f "${probe}"
+    return 2
+  fi
+  rm -f "${probe}"
+  local l n=0
+  while IFS= read -r l; do
+    [[ "${l}" == *': set' ]] && n=$((n + 1))
+  done <<<"${out}"
+  [[ "${n}" == "3" ]]
+}
+
 main() {
-  local git_dir personify checker rc=0 f
+  local git_dir personify checker rc=0 f top
+  # From the top, so a root .gitattributes counts and paths stay top-relative.
+  top="$(git rev-parse --show-toplevel)"
+  cd "${top}"
   git_dir="$(git rev-parse --absolute-git-dir)"
   for f in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
     [[ -e "${git_dir}/${f}" ]] && exit 0
@@ -85,17 +107,22 @@ main() {
 
   # A tracked .gitattributes line that exempts every path is refused. The index
   # copies are read, not the working tree.
-  local ga line pat rest tok
+  local ga line pat rest tok every
   local -a toks
   while IFS= read -r -d '' ga; do
     [[ "${ga##*/}" == ".gitattributes" ]] || continue
     while IFS= read -r line || [[ -n "${line}" ]]; do
       read -r pat rest <<<"${line}"
-      [[ "${pat}" == "*" || "${pat}" == "**" || "${pat}" == "**/*" ]] || continue
       read -r -a toks <<<"${rest}"
       for tok in "${toks[@]}"; do
-        if [[ "${tok}" == "length-caps=off" ]]; then
+        [[ "${tok}" == "length-caps=off" ]] || continue
+        every=0
+        _every_file "${pat}" || every=$?
+        if [[ "${every}" == "0" ]]; then
           echo "length-caps: ${ga} sets length-caps=off on '${pat}', which exempts every file. Name the paths to exempt instead." >&2
+          exit 1
+        elif [[ "${every}" != "1" ]]; then
+          echo "length-caps: cannot tell whether '${pat}' in ${ga} exempts every file; bypass once with: SKIP=length-caps git commit ..." >&2
           exit 1
         fi
       done
