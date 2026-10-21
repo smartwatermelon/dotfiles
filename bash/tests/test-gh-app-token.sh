@@ -37,8 +37,10 @@ mkdir -p "${STUB_DIR}"
 CURL_LOG="${WORKDIR}/curl.log"
 # Shaped like a 2026 installation token (dots and dashes); built in two parts so scanners skip it.
 STUB_TOK="ghs_stub"".tok-123"
+OP_LOG="${WORKDIR}/op.log"
 cat >"${STUB_DIR}/op" <<STUB_EOF
 #!/usr/bin/env bash
+printf 'argv=%s\n' "\$*" >>"${OP_LOG}"
 [[ -n "\${OP_FAIL:-}" ]] && exit 1
 [[ -n "\${OP_NO_IDS:-}" && "\$2" == *_id ]] && { echo "op stub: \$2 must come from the route line" >&2; exit 1; }
 case "\$2" in
@@ -68,7 +70,7 @@ else
   printf '{"message":"bad jwt"}\n401'
 fi
 STUB_EOF
-# Stub security: never the real Keychain. SEC_MODE unset = no item (44), plain, hex (as -w prints), trap.
+# Stub security: never the real Keychain. SEC_MODE unset = no item (44), plain, hex (as -w prints).
 SEC_LOG="${WORKDIR}/security.log"
 cat >"${STUB_DIR}/security" <<STUB_EOF
 #!/usr/bin/env bash
@@ -76,7 +78,6 @@ printf 'argv=%s\n' "\$*" >>"${SEC_LOG}"
 case "\${SEC_MODE:-}" in
   plain) cat "${WORKDIR}/key.flat" ;;
   hex) xxd -p "${WORKDIR}/key.pem" | tr -d '\n'; echo ;;
-  trap) echo 'trap=called' >>"${SEC_LOG}"; exit 1 ;;
   *) echo 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.' >&2; exit 44 ;;
 esac
 STUB_EOF
@@ -221,7 +222,7 @@ else
   _fail "check: rc=${rc} out=${out}"
 fi
 
-echo "--- route fields and the Keychain fallback"
+echo "--- route fields, the Keychain, then op"
 ME="$(id -un)"
 FIELDS_ROUTES="${WORKDIR}/routes-fields.conf"
 printf '%s\t%s\t%s\t%s\n' smartwatermelon/claude-wrapper "${ITEM}" app_id=5401431 installation_id=173522549 \
@@ -236,20 +237,22 @@ _clear_cache
 GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_FAIL=1 _run --item "${ITEM}" smartwatermelon
 if [[ "${rc}" -eq 1 && -z "${out}" && "${err}" == *"${ITEM}"* && "${err}" == *"Keychain"* &&
   "${err}" == *"service 'test app'"* && "${err}" == *"account '${ME}'"* ]]; then
-  _pass "op and Keychain both failing exits 1 and names both sources"
+  _pass "Keychain and op both failing exits 1 and names both sources"
 else
   _fail "both sources fail: rc=${rc} out=${out} err=${err}"
 fi
 
+# Keychain first: with a Keychain item, op must not be called at all (the IDs come from the route line).
 for mode in plain hex; do
   _clear_cache
   : >"${SEC_LOG}"
-  GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_FAIL=1 SEC_MODE="${mode}" _run --item "${ITEM}" smartwatermelon
-  if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${mints}" == 1 ]] && grep -q '^jwt=ok' "${CURL_LOG}" \
-    && grep -qxF "argv=find-generic-password -s test app -a ${ME} -w" "${SEC_LOG}"; then
-    _pass "op fails, Keychain ${mode} PEM mints a token"
+  : >"${OP_LOG}"
+  GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" SEC_MODE="${mode}" _run --item "${ITEM}" smartwatermelon
+  if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${mints}" == 1 && ! -s "${OP_LOG}" ]] \
+    && grep -q '^jwt=ok' "${CURL_LOG}" && grep -qxF "argv=find-generic-password -s test app -a ${ME} -w" "${SEC_LOG}"; then
+    _pass "Keychain ${mode} PEM mints a token and op is never called"
   else
-    _fail "Keychain ${mode}: rc=${rc} mints=${mints} err=${err} sec=$(<"${SEC_LOG}")"
+    _fail "Keychain ${mode}: rc=${rc} mints=${mints} err=${err} sec=$(<"${SEC_LOG}") op=$(<"${OP_LOG}")"
   fi
 done
 left="$(ls "${TMPDIR}")" || left="?"
@@ -264,22 +267,17 @@ else
   _fail "no route IDs: rc=${rc} err=${err}"
 fi
 
+# No Keychain item (SEC_MODE unset: exit 44): asked once, then op supplies the key. op refuses ID reads here.
 _clear_cache
 : >"${SEC_LOG}"
-SEC_MODE='trap' _run --item "${ITEM}" smartwatermelon
-if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" ]] && ! grep -q '^trap=called' "${SEC_LOG}"; then
-  _pass "op succeeds: the Keychain is never asked"
+: >"${OP_LOG}"
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_NO_IDS=1 _run --item "${ITEM}" smartwatermelon
+asks="$(grep -c '^argv=find-generic-password' "${SEC_LOG}")" || asks=0
+if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${mints}" == 1 && "${asks}" == 1 ]] \
+  && grep -qxF "argv=read ${ITEM}/private_key" "${OP_LOG}"; then
+  _pass "Keychain has no item: op supplies the key, IDs come from the route fields"
 else
-  _fail "op ok but security called: rc=${rc} sec=$(<"${SEC_LOG}")"
-fi
-
-_clear_cache
-: >"${SEC_LOG}"
-GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_NO_IDS=1 SEC_MODE='trap' _run --item "${ITEM}" smartwatermelon
-if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${mints}" == 1 ]] && ! grep -q '^trap=called' "${SEC_LOG}"; then
-  _pass "IDs come from the route fields (op refuses ID reads)"
-else
-  _fail "IDs from fields: rc=${rc} err=${err}"
+  _fail "Keychain missing: rc=${rc} err=${err} sec=$(<"${SEC_LOG}") op=$(<"${OP_LOG}")"
 fi
 
 GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" _run route smartwatermelon/claude-wrapper
