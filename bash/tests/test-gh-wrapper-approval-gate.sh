@@ -61,9 +61,9 @@ export GATE_REVIEW_DIR="${SANDBOX}/.claude/gate-review"
 # and looks for check records. All three stay inside the sandbox. The rules
 # are the shipped ones (claude-config gate-rules.conf); cases outside the
 # routing block run from a twistedmelonman checkout or no repo at all, both
-# rule 3, visual.
+# rule 3, review.
 export GATE_RULES_FILE="${SANDBOX}/gate-rules.conf"
-printf '%s\n' 'repo=andrewmrich/beacon-workspace visual' 'author=andrewmrich pangram' '* visual' >"${GATE_RULES_FILE}"
+printf '%s\n' 'repo=andrewmrich/beacon-workspace review' 'author=andrewmrich review' '* review' >"${GATE_RULES_FILE}"
 export GH_WRAPPER_LIB="${BASH_CONFIG_DIR}/gh-wrapper.sh"
 export XDG_CONFIG_HOME="${SANDBOX}/.config"
 unset GH_REPO
@@ -77,7 +77,6 @@ export CLAUDE_CONFIG_DIR="${SANDBOX}/.claude"
 PERSONIFY_FIX="${SANDBOX}/personify-fixture"
 KIND_LOG="${SANDBOX}/length-check-args.log"
 mkdir -p "${PERSONIFY_FIX}/scripts" "${CLAUDE_CONFIG_DIR}/plugins"
-: >"${PERSONIFY_FIX}/scripts/pangram_check.py"
 cat >"${PERSONIFY_FIX}/scripts/length_check.py" <<'STUB'
 import os
 import sys
@@ -433,11 +432,8 @@ else
 fi
 
 # --- routing by destination (claude-config#628) -------------------------------
-# check routes each body by the repository it goes to. beacon-biosignals/x
-# resolves to the andrewmrich identity (rule 2, pangram: an approval AND a
-# check record); twistedmelonman/y to twistedmelonman (rule 3, visual: the
-# approval alone). Each form the wrapper reads the destination from must reach
-# check, and must reach it the same way the Bash-tool hook would.
+# Employer (beacon-biosignals/x) is review, personal (twistedmelonman/y) is
+# exempt; unapproved bytes tell them apart in each destination form.
 if [[ "${HAVE_GATE}" == "1" && -x "${SANDBOX}/.claude/scripts/gate-route.sh" ]]; then
   # assert_gate with GH_REPO set for that one call.
   assert_gate_gh_repo() {
@@ -454,63 +450,53 @@ if [[ "${HAVE_GATE}" == "1" && -x "${SANDBOX}/.claude/scripts/gate-route.sh" ]];
   git -C "${EMP}" remote add origin git@github.com:beacon-biosignals/x.git
   git -C "${PERS}" remote add origin git@github.com:twistedmelonman/y.git
 
-  RECORD="${XDG_CONFIG_HOME}/personify/checks/$(sha256sum "${BODY}" | cut -d' ' -f1).json"
-  mkdir -p "$(dirname "${RECORD}")"
-  # The same approved bytes in every case; only the destination changes.
+  ROUTE_SHARED_RULES="$(cat "${GATE_RULES_FILE}")"
+  printf '%s\n' 'author=andrewmrich review' 'owner=twistedmelonman exempt' '* review' >"${GATE_RULES_FILE}"
   EMP_URL="https://github.com/beacon-biosignals/x/pull/5"
   PERS_URL="https://github.com/twistedmelonman/y/pull/5"
 
   pushd "${PERS}" >/dev/null
-  assert_gate "route: -R employer, no record" 1 pr create --title t --body-file "${BODY}" -R beacon-biosignals/x
-  msg="$(_gh_wrapper_approval_gate pr create --title t --body-file "${BODY}" -R beacon-biosignals/x 2>&1 || true)"
-  if [[ "${msg}" == *"no Pangram check ran"* && "${msg}" == *"Pangram-gated repository"* ]]; then
-    echo "PASS: route: unchecked block names the missing check"
-  else
-    echo "FAIL: route: unchecked block names the missing check — got: ${msg}"
-    fail=1
-  fi
-  assert_gate "route: --repo= employer, no record" 1 pr create --title t --body-file "${BODY}" --repo=beacon-biosignals/x
-  assert_gate "route: attached -R employer, no record" 1 pr create --title t --body-file "${BODY}" -Rbeacon-biosignals/x
-  assert_gate "route: -R https URL spelling, no record" 1 pr create --title t --body-file "${BODY}" -R https://github.com/beacon-biosignals/x
-  assert_gate "route: -R github.com/ mixed case, no record" 1 pr create --title t --body-file "${BODY}" -R github.com/Beacon-Biosignals/X
-  assert_gate_gh_repo "route: GH_REPO employer, no record" 1 beacon-biosignals/x pr create --title t --body-file "${BODY}"
-  assert_gate "route: URL argument employer, no record" 1 pr comment "${EMP_URL}" --body-file "${BODY}"
-  assert_gate "route: api repos/ employer, no record" 1 api repos/beacon-biosignals/x/issues/1/comments -F "body=@${BODY}"
-  assert_gate "route: api /repos/ employer, no record" 1 api /repos/beacon-biosignals/x/issues/1/comments -F "body=@${BODY}"
-  assert_gate "route: api full URL employer, no record" 1 api https://api.github.com/repos/beacon-biosignals/x/issues/1/comments -F "body=@${BODY}"
-  assert_gate "route: -R personal, no record" 0 pr create --title t --body-file "${BODY}" -R twistedmelonman/y
-  assert_gate "route: personal checkout, no -R, no record" 0 pr create --title t --body-file "${BODY}"
-  assert_gate "route: URL argument personal, no record" 0 pr comment "${PERS_URL}" --body-file "${BODY}"
-  assert_gate "route: api repos/ personal, no record" 0 api repos/twistedmelonman/y/issues/1/comments -F "body=@${BODY}"
-  assert_gate "route: api {owner}/{repo} in personal checkout" 0 api 'repos/{owner}/{repo}/issues/1/comments' -F "body=@${BODY}"
-  # Disagreeing or unreadable destinations block even when every candidate
-  # would route visual: the gate does not pick one.
+  assert_gate "route: -R employer, unapproved" 1 pr create --title t --body-file "${UNAPPROVED}" -R beacon-biosignals/x
+  assert_gate "route: --repo= employer, unapproved" 1 pr create --title t --body-file "${UNAPPROVED}" --repo=beacon-biosignals/x
+  assert_gate "route: attached -R employer, unapproved" 1 pr create --title t --body-file "${UNAPPROVED}" -Rbeacon-biosignals/x
+  assert_gate "route: -R https URL spelling, unapproved" 1 pr create --title t --body-file "${UNAPPROVED}" -R https://github.com/beacon-biosignals/x
+  assert_gate "route: -R github.com/ mixed case, unapproved" 1 pr create --title t --body-file "${UNAPPROVED}" -R github.com/Beacon-Biosignals/X
+  assert_gate_gh_repo "route: GH_REPO employer, unapproved" 1 beacon-biosignals/x pr create --title t --body-file "${UNAPPROVED}"
+  assert_gate "route: URL argument employer, unapproved" 1 pr comment "${EMP_URL}" --body-file "${UNAPPROVED}"
+  assert_gate "route: api repos/ employer, unapproved" 1 api repos/beacon-biosignals/x/issues/1/comments -F "body=@${UNAPPROVED}"
+  assert_gate "route: api /repos/ employer, unapproved" 1 api /repos/beacon-biosignals/x/issues/1/comments -F "body=@${UNAPPROVED}"
+  assert_gate "route: api full URL employer, unapproved" 1 api https://api.github.com/repos/beacon-biosignals/x/issues/1/comments -F "body=@${UNAPPROVED}"
+  # The endpoint after a value-taking flag still names the destination (#434).
+  assert_gate "route: api -X POST repos/ employer, unapproved" 1 \
+    api -X POST repos/beacon-biosignals/x/issues/1/comments -F "body=@${UNAPPROVED}"
+  assert_gate "route: -R employer, approved" 0 pr create --title t --body-file "${BODY}" -R beacon-biosignals/x
+  assert_gate "route: api repos/ employer, approved" 0 api repos/beacon-biosignals/x/issues/1/comments -F "body=@${BODY}"
+  assert_gate "route: -R personal, unapproved" 0 pr create --title t --body-file "${UNAPPROVED}" -R twistedmelonman/y
+  assert_gate "route: personal checkout, no -R, unapproved" 0 pr create --title t --body-file "${UNAPPROVED}"
+  assert_gate "route: URL argument personal, unapproved" 0 pr comment "${PERS_URL}" --body-file "${UNAPPROVED}"
+  assert_gate "route: api repos/ personal, unapproved" 0 api repos/twistedmelonman/y/issues/1/comments -F "body=@${UNAPPROVED}"
+  assert_gate "route: api {owner}/{repo} in personal checkout" 0 api 'repos/{owner}/{repo}/issues/1/comments' -F "body=@${UNAPPROVED}"
+  popd >/dev/null
+
+  pushd "${EMP}" >/dev/null
+  assert_gate "route: employer checkout, no -R, unapproved" 1 pr create --title t --body-file "${UNAPPROVED}"
+  assert_gate "route: api {owner}/{repo} in employer checkout" 1 api 'repos/{owner}/{repo}/issues/1/comments' -F "body=@${UNAPPROVED}"
+  # A URL with no -R may be a flag value, so the checkout must pass as well.
+  assert_gate "route: personal URL from employer checkout" 1 pr comment "${PERS_URL}" --body-file "${UNAPPROVED}"
+  # -R is the destination outright; the checkout does not matter.
+  assert_gate "route: -R personal from employer checkout" 0 pr create --title t --body-file "${UNAPPROVED}" -R twistedmelonman/y
+  popd >/dev/null
+
+  # Disagreeing or unreadable destinations block even with approved bytes on
+  # an all-review rule set: the gate does not pick one.
+  printf '%s\n' "${ROUTE_SHARED_RULES}" >"${GATE_RULES_FILE}"
+  pushd "${PERS}" >/dev/null
   assert_gate "route: -R and URL disagree" 1 pr comment "${PERS_URL}" -R twistedmelonman/z --body-file "${BODY}"
   assert_gate_gh_repo "route: -R and GH_REPO disagree" 1 twistedmelonman/z pr create --title t --body-file "${BODY}" -R twistedmelonman/y
   assert_gate_gh_repo "route: api endpoint and GH_REPO disagree" 1 twistedmelonman/z api repos/twistedmelonman/y/issues/1/comments -F "body=@${BODY}"
   assert_gate "route: -R on another host" 1 pr create --title t --body-file "${BODY}" -R gitlab.example.com/o/n
   assert_gate "route: api repositories/<id>" 1 api repositories/123/issues/1/comments -F "body=@${BODY}"
-  # The endpoint after a value-taking flag still names the destination (#434).
-  assert_gate "route: api -X POST repos/ employer, no record" 1 \
-    api -X POST repos/beacon-biosignals/x/issues/1/comments -F "body=@${BODY}"
   popd >/dev/null
-
-  pushd "${EMP}" >/dev/null
-  assert_gate "route: employer checkout, no -R, no record" 1 pr create --title t --body-file "${BODY}"
-  assert_gate "route: api {owner}/{repo} in employer checkout" 1 api 'repos/{owner}/{repo}/issues/1/comments' -F "body=@${BODY}"
-  # A URL with no -R may be a flag value, so the checkout must pass as well.
-  assert_gate "route: personal URL from employer checkout" 1 pr comment "${PERS_URL}" --body-file "${BODY}"
-  # -R is the destination outright; the checkout does not matter.
-  assert_gate "route: -R personal from employer checkout" 0 pr create --title t --body-file "${BODY}" -R twistedmelonman/y
-  popd >/dev/null
-
-  printf '{}\n' >"${RECORD}"
-  pushd "${PERS}" >/dev/null
-  assert_gate "route: -R employer with a record" 0 pr create --title t --body-file "${BODY}" -R beacon-biosignals/x
-  assert_gate "route: api repos/ employer with a record" 0 api repos/beacon-biosignals/x/issues/1/comments -F "body=@${BODY}"
-  assert_gate "route: -R employer, record, unapproved bytes" 1 pr create --title t --body-file "${UNAPPROVED}" -R beacon-biosignals/x
-  popd >/dev/null
-  rm -f "${RECORD}"
 else
   echo "SKIP: routing cases — ${REAL_GATE} has no gate-route.sh beside it"
 fi
@@ -520,7 +506,7 @@ fi
 if [[ "${HAVE_GATE}" == "1" && -x "${SANDBOX}/.claude/scripts/gate-route.sh" ]] \
   && grep -q '_cmd_route' "${GATE}"; then
   SHARED_RULES="$(cat "${GATE_RULES_FILE}")"
-  printf '%s\n' 'owner=smartwatermelon exempt' 'owner=nightowlstudiollc pangram' '* visual' >"${GATE_RULES_FILE}"
+  printf '%s\n' 'owner=smartwatermelon exempt' 'owner=nightowlstudiollc review' '* review' >"${GATE_RULES_FILE}"
   SWM="${SANDBOX}/swm"
   NOS="${SANDBOX}/nos"
   for r in "${SWM}" "${NOS}"; do
