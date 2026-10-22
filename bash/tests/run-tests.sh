@@ -8,8 +8,8 @@
 # codes into a single verdict.
 #
 # Usage:
-#   bash bash/tests/run-tests.sh              # run everything
-#   bash bash/tests/run-tests.sh path-order   # run tests matching a substring
+#   RUN_FULL_SUITE=1 bash bash/tests/run-tests.sh   # run everything
+#   bash bash/tests/run-tests.sh path-order         # matching tests
 #
 # Exits non-zero if any test fails, so it is usable as a CI step or a hook.
 #
@@ -55,8 +55,10 @@ fi
 filter="${1:-}"
 
 # With no filter this is the full suite, which runs in CI only (Andrew, 2026-10-22).
-if [[ -z "${filter}" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+# RUN_FULL_SUITE=1 is the human override for hand runs; agents never set it.
+if [[ -z "${filter}" && "${GITHUB_ACTIONS:-}" != "true" && "${RUN_FULL_SUITE:-}" != "1" ]]; then
   echo "run-tests.sh: the full suite runs in CI only. Pass a test-name filter, or push." >&2
+  echo "run-tests.sh: a human can run it by hand with RUN_FULL_SUITE=1. Agents never set it." >&2
   exit 3
 fi
 
