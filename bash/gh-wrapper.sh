@@ -1582,13 +1582,19 @@ _gh_wrapper_dest_exempt() {
 #
 # After `api` it skips flag values and counts positionals (#434). The
 # force-draft walk acts on pr create only.
+#
+# Review routes, as in hook-block-personify.sh: pr create --draft/-d needs clean gate-lint, not approval.
+
+# gh pr ready (not --undo) on a review route is blocked: Andrew clicks Ready for review in the GitHub UI.
 _gh_wrapper_approval_gate() {
-  local sub="" subsub="" skip_next=0 arg api_pos=0
-  local body_file="" inline=0 want_path=0 want_repo=0
+  local sub="" subsub="" skip_next=0 arg api_pos=0 prev="" last=""
+  local body_file="" inline=0 want_path=0 want_repo=0 draft=0 undo=0
   local -a repo_args=() url_args=()
 
   for arg in "$@"; do
     [[ "${arg}" == "--" ]] && break
+    prev="${last}"
+    last="${arg}"
     if [[ "${skip_next}" == "1" ]]; then
       skip_next=0
       continue
@@ -1619,6 +1625,15 @@ _gh_wrapper_approval_gate() {
       fi
     fi
     case "${arg}" in
+      # A flag word only, never a flag's value: `-t -d` titles the PR "-d". Same list as the hook's _is_draft.
+      --draft | -d | --draft=true)
+        case "${prev}" in
+          -t | --title | -b | --body | -F | --body-file | -B | --base | -H | --head | -R | --repo | -a | --assignee | \
+            -l | --label | -m | --milestone | -p | --project | -r | --reviewer | -T | --template | --recover) ;;
+          *) draft=1 ;;
+        esac
+        ;;
+      --undo) undo=1 ;;
       -R | --repo) want_repo=1 ;;
       --hostname | --config-dir | --token) skip_next=1 ;;
       -b | --body) inline=1 ;;
@@ -1648,9 +1663,18 @@ _gh_wrapper_approval_gate() {
   done
 
   local -a files=()
+  local ready=0
+  [[ "${sub}/${subsub}" == pr/create ]] || draft=0
   case "${sub}/${subsub}" in
     pr/create | pr/comment | pr/edit | pr/review | issue/create | issue/comment | issue/edit)
       [[ -n "${body_file}" ]] && files=("${body_file}")
+      ;;
+    # Back to draft publishes no text.
+    pr/ready)
+      if [[ "${undo}" == "1" ]]; then
+        return 0
+      fi
+      ready=1
       ;;
     api/*)
       # -F means --field here, not --body-file: discard the generic walk's
@@ -1663,7 +1687,7 @@ _gh_wrapper_approval_gate() {
 
   # No body flag at all: no prose is being written. Titles and labels pass.
   # --fill/-f is ungated on purpose: its body is commit text that already passed the gate (#355).
-  if [[ "${inline}" == "0" && "${#files[@]}" == "0" ]]; then
+  if [[ "${ready}" == "0" && "${inline}" == "0" && "${#files[@]}" == "0" ]]; then
     return 0
   fi
 
@@ -1685,7 +1709,8 @@ _gh_wrapper_approval_gate() {
     return 0
   fi
 
-  local dest_repo="" also_cwd=0 err="" unchecked=0 lenblock="" kind
+  local dest_repo="" also_cwd=0 err="" lenblock="" lintblock=0 lrc kind
+  local lint="${HOME}/.claude/scripts/gate-lint.sh"
   local -a dest=()
   kind="$(_gh_wrapper_cap_kind)"
   # Route first (#411): exempt passes in any form; an unreadable destination blocks.
@@ -1697,6 +1722,13 @@ _gh_wrapper_approval_gate() {
     return 1
   fi
   _gh_wrapper_dest_exempt "${gate}" && return 0
+  if [[ "${ready}" == "1" ]]; then
+    {
+      echo "[gh] 🛑 BLOCKED: gh pr ready on a review route. Andrew clicks Ready for review in the GitHub UI."
+      echo "[gh]   A draft can still be pushed to and edited; gh pr ready --undo is allowed."
+    } >&2
+    return 1
+  fi
   if [[ "${inline}" == "1" ]]; then
     reason="text given inline; only a file can be verified"
   else
@@ -1712,13 +1744,28 @@ _gh_wrapper_approval_gate() {
         reason="path '${body_file}' is not absolute; gh and this gate would resolve it differently"
       elif [[ ! -f "${body_file}" ]]; then
         reason="no such file: ${body_file}"
+      elif [[ "${draft}" == "1" ]]; then
+        # A draft publishes to the PR page only; clean lint stands in for approval until Ready.
+        lintblock=1
+        lrc=0
+        if [[ ! -x "${lint}" ]]; then
+          reason="gate-lint.sh missing at ${lint}; cannot lint ${body_file}"
+        else
+          err="$("${lint}" --mode block "${kind}" "${body_file}" 2>&1)" || lrc=$?
+          [[ -n "${err}" ]] && printf '%s\n' "${err}" >&2
+          err=""
+          case "${lrc}" in
+            0) ;;
+            1) reason="lint errors in ${body_file}; a draft needs clean lint (approval not needed)" ;;
+            *) reason="gate-lint could not run (exit ${lrc}), so this is not a verdict on the text" ;;
+          esac
+        fi
       elif [[ ! -x "${gate}" ]]; then
         reason="gate-review.sh missing at ${gate}; cannot verify"
       elif ! err="$("${gate}" check "${body_file}" "${dest[@]}" 2>&1)" \
         || { [[ "${also_cwd}" == "1" ]] && ! err="$("${gate}" check "${body_file}" --kind "${kind}" --dir "${PWD}" 2>&1)"; }; then
         reason="${err##*$'\n'}"
         [[ -n "${reason}" ]] || reason="the bytes in ${body_file} do not match anything approved"
-        [[ "${reason}" == *"no Pangram check ran"* ]] && unchecked=1
         [[ "${reason}" == *"over length"* ]] && lenblock="over"
         [[ "${reason}" == *"length checker error"* ]] && lenblock="error"
       fi
@@ -1734,18 +1781,13 @@ _gh_wrapper_approval_gate() {
     [[ -n "${reason}" ]] || return 0
   fi
 
-  if [[ "${unchecked}" == "1" ]]; then
-    local hint
-    hint="$("${gate}" hint "${body_file}" 2>/dev/null)" \
-      || hint="personify's scripts/pangram_check.py < ${body_file}"
+  if [[ "${lintblock}" == "1" ]]; then
     {
-      echo "[gh] 🛑 BLOCKED: ${sub} ${subsub} body goes to a Pangram-gated repository and no Pangram check ran on it."
+      echo "[gh] 🛑 BLOCKED: draft ${sub} ${subsub} body did not pass gate-lint."
       echo "[gh]"
       echo "[gh]   reason: ${reason}"
       echo "[gh]"
-      echo "[gh] Run the personify check on this exact file, then re-run the same command:"
-      echo "[gh]"
-      echo "[gh]   ${hint}"
+      echo "[gh] Fix the findings above and re-run the same command. A draft needs no approval."
     } >&2
     return 1
   fi

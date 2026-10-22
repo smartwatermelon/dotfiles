@@ -178,6 +178,16 @@ _read_semgrep_token() {
 # global to detect stale statusCheckRollup data (see #169).
 PUSHED_LOCAL_SHA=""
 
+# Every branch ref this push updates, for run_beacon_text_gate. Deletes and tags are left out.
+PUSH_LOCAL_SHAS=()
+
+PUSH_REMOTE_SHAS=()
+
+PUSH_REMOTE_REFS=()
+
+# git passes the remote's name and URL as $1 and $2. The Beacon text gate routes by the URL.
+PUSH_REMOTE_URL="${2:-}"
+
 protected_branch_check() {
   local current_branch
   current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
@@ -194,6 +204,11 @@ protected_branch_check() {
     # later checks (Protocol 4) know exactly which commit is being pushed.
     if [[ -n "${current_branch}" && "${local_ref}" == "refs/heads/${current_branch}" ]]; then
       PUSHED_LOCAL_SHA="${local_sha}"
+    fi
+    if [[ "${remote_ref}" == refs/heads/* && ! "${local_sha}" =~ ^0+$ ]]; then
+      PUSH_LOCAL_SHAS+=("${local_sha}")
+      PUSH_REMOTE_SHAS+=("${_remote_sha}")
+      PUSH_REMOTE_REFS+=("${remote_ref}")
     fi
 
     # Block direct pushes to main/master branches
@@ -531,6 +546,185 @@ run_bounded() {
   fi
   return "${status}"
 }
+
+# =========================================================
+# BEACON TEXT GATE: text pushed to a ready PR on a review route
+# =========================================================
+# A draft PR on a review route needs only clean lint. Once it is ready, text added by a push goes out unreviewed. This closes that gap.
+
+# Scope: remote on a review route (gate-review.sh route), and the branch has an OPEN PR that is not a draft. Anything else skips.
+
+# Checked: new commit messages, added code comments (personify's comment_blocks), and added lines in .md, .rst and .txt files.
+
+# They go into one file under the git dir: gate-lint block mode, then gate-review check --kind copy. Either failing blocks.
+
+# Fails open with a note when gate-review.sh is missing (claude-config not installed) or gh cannot answer: no route, no PR.
+
+BEACON_GATE_TIMEOUT_SECS="${BEACON_GATE_TIMEOUT_SECS:-20}"
+
+# owner/name from a github.com remote URL; nothing for any other host.
+_remote_repo_slug() {
+  local re='^(git@github\.com:|(ssh|https?|git)://([^@/]+@)?github\.com(:[0-9]+)?/)([^/]+)/([^/]+)$'
+  [[ "$1" =~ ${re} ]] || return 0
+  local name="${BASH_REMATCH[6]%/}"
+  printf '%s/%s\n' "${BASH_REMATCH[5]}" "${name%.git}"
+}
+
+# Prints the text one ref's push adds: commit messages, comments, doc lines. $1 base, $2 tip, $3 personify scripts dir.
+_beacon_push_text() {
+  local base="$1" tip="$2" pdir="$3" msgs comments docs
+  local -a dopts=(-U0 --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/)
+  msgs="$(git log --format='%B' "${base}..${tip}")" || return 2
+  # Reads git show <tip>:<path> for .py docstrings, as length_check.py --diff reads the index.
+  local py='import subprocess, sys
+sys.path.insert(0, sys.argv[1])
+import length_check as lc
+tip = sys.argv[2]
+def read(p):
+    r = subprocess.run(["git", "show", tip + ":" + p], capture_output=True, check=False)
+    return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else None
+diff = sys.stdin.buffer.read().decode("utf-8", "replace")
+for b in lc.comment_blocks(diff, read):
+    print(b.text)'
+  comments="$(git diff "${dopts[@]}" "${base}" "${tip}" | python3 -I -c "${py}" "${pdir}" "${tip}")" || return 2
+  docs="$(git diff "${dopts[@]}" "${base}" "${tip}" -- '*.md' '*.rst' '*.txt' \
+    | awk '/^diff /{h=0} /^@@/{h=1; next} h && /^\+/{print substr($0, 2)}')" || return 2
+  [[ -z "${msgs}" ]] || printf 'Commit messages:\n\n%s\n\n' "${msgs}"
+  [[ -z "${comments}" ]] || printf 'Code comments added:\n\n%s\n\n' "${comments}"
+  [[ -z "${docs}" ]] || printf 'Doc lines added:\n\n%s\n\n' "${docs}"
+  return 0
+}
+
+run_beacon_text_gate() {
+  ((${#PUSH_LOCAL_SHAS[@]} > 0)) || return 0
+  local scripts="${HOME}/.claude/scripts"
+  local gate="${scripts}/gate-review.sh" lint="${scripts}/gate-lint.sh"
+  if [[ ! -x "${gate}" ]]; then
+    log_warning "Beacon text gate: no ${gate}, so no route; skipped"
+    return 0
+  fi
+
+  local top slug route
+  top="$(git rev-parse --show-toplevel)"
+  slug="$(_remote_repo_slug "${PUSH_REMOTE_URL}")"
+  local -a rargs=(--dir "${top}")
+  [[ -z "${slug}" ]] || rargs+=(--repo "${slug}")
+  # A route failure counts as review: the open-PR test below still has to pass before anything is checked.
+  route="$("${gate}" route "${rargs[@]}" 2>/dev/null)" || route="review"
+  [[ "${route%%$'\t'*}" == "exempt" ]] && return 0
+
+  local notice=""
+  if notice="$("${gate}" suspended 2>&1 >/dev/null)"; then
+    [[ -z "${notice}" ]] || log_warning "${notice}"
+    return 0
+  fi
+
+  if ! command -v gh &>/dev/null || ! command -v jq &>/dev/null; then
+    log_warning "Beacon text gate: gh or jq not found, cannot see the PR; skipped"
+    return 0
+  fi
+
+  local git_dir text_file pr_out
+  git_dir="$(git rev-parse --absolute-git-dir)"
+  text_file="${git_dir}/pre-push-beacon-text.txt"
+  pr_out="$(mktemp)"
+  : >"${text_file}"
+
+  local i branch base tip remote_sha state draft pdir="" rc checked=""
+  local -a repo_flag=()
+  [[ -z "${slug}" ]] || repo_flag=(--repo "${slug}")
+  for i in "${!PUSH_LOCAL_SHAS[@]}"; do
+    tip="${PUSH_LOCAL_SHAS[${i}]}"
+    remote_sha="${PUSH_REMOTE_SHAS[${i}]}"
+    branch="${PUSH_REMOTE_REFS[${i}]#refs/heads/}"
+    rc=0
+    run_bounded "${BEACON_GATE_TIMEOUT_SECS}" gh pr view "${branch}" ${repo_flag[@]+"${repo_flag[@]}"} --json isDraft,state \
+      >"${pr_out}" 2>/dev/null || rc=$?
+    state="" draft=""
+    if ((rc == 0)); then
+      state="$(jq -r '.state // empty' "${pr_out}" 2>/dev/null || true)"
+      draft="$(jq -r 'if .isDraft == null then empty else .isDraft end' "${pr_out}" 2>/dev/null || true)"
+    fi
+    if [[ "${state}" != "OPEN" || -z "${draft}" ]]; then
+      log "Beacon text gate: no open PR found for ${branch} (gh exit ${rc}); skipped"
+      continue
+    fi
+    if [[ "${draft}" == "true" ]]; then
+      log "Beacon text gate: PR for ${branch} is a draft; skipped"
+      continue
+    fi
+
+    # New commits only: from the remote's old tip when this clone has it and it is an ancestor, else from the merge-base.
+    if [[ ! "${remote_sha}" =~ ^0+$ ]] && git merge-base --is-ancestor "${remote_sha}" "${tip}" 2>/dev/null; then
+      base="${remote_sha}"
+    else
+      base="$(git merge-base "$(_base_ref)" "${tip}" 2>/dev/null || true)"
+    fi
+    if [[ -z "${base}" ]]; then
+      rm -f "${pr_out}"
+      echo "" >&2
+      log_warning "🛑 Beacon text gate: cannot find which commits ${branch} adds, so its text cannot be checked."
+      exit 1
+    fi
+    [[ "${base}" != "${tip}" ]] || continue
+    checked+="${checked:+ }${branch}"
+
+    if [[ -z "${pdir}" ]] && ! pdir="$("${gate}" personify-path)"; then
+      rm -f "${pr_out}"
+      log_warning "🛑 Beacon text gate: personify not found, so comments cannot be extracted."
+      exit 1
+    fi
+    if ! _beacon_push_text "${base}" "${tip}" "${pdir}/scripts" >>"${text_file}"; then
+      rm -f "${pr_out}"
+      log_warning "🛑 Beacon text gate: extracting the pushed text failed (personify ${pdir}). Not a verdict on the text."
+      exit 1
+    fi
+  done
+  rm -f "${pr_out}"
+  [[ -s "${text_file}" ]] || return 0
+
+  log "Beacon text gate: checking text this push adds to a ready PR (${text_file})"
+  if [[ ! -x "${lint}" ]]; then
+    log_warning "🛑 Beacon text gate: no ${lint}, so the text cannot be linted."
+    exit 1
+  fi
+  rc=0
+  run_bounded "${BEACON_GATE_TIMEOUT_SECS}" "${lint}" --mode block copy "${text_file}" >&2 || rc=$?
+  if ((rc == 1)); then
+    echo "" >&2
+    log_warning "🛑 Beacon text gate: gate-lint found errors in ${text_file}. Fix the text, amend, and push again."
+    exit 1
+  elif ((rc != 0)); then
+    echo "" >&2
+    log_warning "🛑 Beacon text gate: gate-lint could not run (exit ${rc}), so this is not a verdict on the text."
+    exit 1
+  fi
+
+  if "${gate}" check --kind copy "${text_file}" >/dev/null 2>&1; then
+    log_success "Beacon text gate: text approved"
+    return 0
+  fi
+  {
+    echo ""
+    echo "🛑 Beacon text gate: this push adds text to a ready-for-review PR, and nobody has approved it."
+    echo ""
+    echo "   Text: ${text_file}"
+    echo ""
+    echo "   To approve it:"
+    echo "     1. ${gate} stage --kind copy <label> ${text_file}"
+    echo "     2. ${gate} open   (or Andrew replies: approve <code>)"
+    echo "     3. Push again. Approve without edits: the check matches these exact bytes."
+    echo ""
+    echo "   Or convert the PR to a draft first:"
+    local b
+    for b in ${checked}; do
+      echo "     gh pr ready --undo ${b}"
+    done
+  } >&2
+  exit 1
+}
+
+run_beacon_text_gate
 
 # =========================================================
 # SEMGREP STATIC ANALYSIS
