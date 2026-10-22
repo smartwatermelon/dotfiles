@@ -22,6 +22,7 @@ brew "tidy-html5"
 brew "markdownlint-cli"
 brew "markdownlint-cli2"
 brew "semgrep"
+brew "vale"                 # prose linter for claude-config's gate-lint.sh
 
 # ── Core: Runtimes (path.sh and env.sh expect these) ─────
 brew "node"                 # the only node install; no version manager
