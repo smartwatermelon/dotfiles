@@ -38,6 +38,7 @@ Some tools expect config in `~/` rather than `~/.config/`. These symlinks bridge
 | `~/.digrc` | `~/.config/dig/digrc` |
 | `~/.shellcheckrc` | `~/.config/shellcheck/.shellcheckrc` |
 | `~/.markdownlint.json` | `~/.config/markdownlint-cli/.markdownlint.json` |
+| `~/.local/bin/markdownlint-cli2` | `~/.config/bash/markdownlint-cli2-wrapper.sh` (shim: a bare run gets the commit gate's config) |
 
 Git, vim, yamllint, btop, gh, and yt-dlp all read from `~/.config/` natively via XDG conventions or built-in support.
 

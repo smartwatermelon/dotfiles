@@ -290,6 +290,7 @@ if [[ "${DRY_RUN}" == true ]]; then
   _dry "Would create directory: ~/.local/bin"
   _dry "Would symlink: ~/.local/bin/gh -> ~/.config/bash/gh-wrapper.sh"
   _dry "Would symlink: ~/.local/bin/gpush -> ~/.config/bash/gpush-wrapper.sh"
+  _dry "Would symlink: ~/.local/bin/markdownlint-cli2 -> ~/.config/bash/markdownlint-cli2-wrapper.sh"
 else
   _ensure_symlink "${HOME}/.config/bash/.bash_profile" "${HOME}/.bash_profile"
   _ensure_symlink "${HOME}/.config/dig/digrc" "${HOME}/.digrc"
@@ -300,6 +301,8 @@ else
   mkdir -p "${HOME}/.local/bin"
   _ensure_symlink "${HOME}/.config/bash/gh-wrapper.sh" "${HOME}/.local/bin/gh"
   _ensure_symlink "${HOME}/.config/bash/gpush-wrapper.sh" "${HOME}/.local/bin/gpush"
+  # Shim so a bare markdownlint-cli2 run uses the commit gate's config; see the wrapper header.
+  _ensure_symlink "${HOME}/.config/bash/markdownlint-cli2-wrapper.sh" "${HOME}/.local/bin/markdownlint-cli2"
 fi
 
 # ── Sync-mode exit ───────────────────────────────────────
