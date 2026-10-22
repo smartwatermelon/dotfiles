@@ -54,6 +54,12 @@ fi
 # full path: `run-tests.sh path-order` runs test-path-order.sh.
 filter="${1:-}"
 
+# With no filter this is the full suite, which runs in CI only (Andrew, 2026-10-22).
+if [[ -z "${filter}" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+  echo "run-tests.sh: the full suite runs in CI only. Pass a test-name filter, or push." >&2
+  exit 3
+fi
+
 # Bash expands a glob in sorted order already, so the run order is
 # deterministic and reproducible without piping through `sort`. Nullglob so an
 # empty tests directory yields an empty array rather than a literal glob
