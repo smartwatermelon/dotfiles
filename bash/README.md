@@ -47,10 +47,11 @@ Regression tests live in `tests/`. Each is a standalone script that sets up its
 own sandbox (scratch `$HOME`, scratch git repos, mocked `gh`), asserts, cleans
 up after itself, and reports via its exit code.
 
-Run the whole suite:
+Run the whole suite by hand. CI runs it on every PR. Outside CI the runner
+refuses unless `RUN_FULL_SUITE=1` is set, and only a human sets it:
 
 ```bash
-"$(brew --prefix)/bin/bash" bash/tests/run-tests.sh
+RUN_FULL_SUITE=1 "$(brew --prefix)/bin/bash" bash/tests/run-tests.sh
 ```
 
 The runner discovers every `bash/tests/test-*.sh` automatically, prints each

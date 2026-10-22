@@ -143,7 +143,7 @@ Regression tests for the shell config and git hooks live in `bash/tests/`:
 ```bash
 # Invoke with an explicit modern bash: a bare `bash` resolves through PATH,
 # which on macOS can still find the 3.2 at /bin/bash.
-"$(brew --prefix)/bin/bash" bash/tests/run-tests.sh              # whole suite
+RUN_FULL_SUITE=1 "$(brew --prefix)/bin/bash" bash/tests/run-tests.sh   # whole suite (by hand; CI-only otherwise)
 "$(brew --prefix)/bin/bash" bash/tests/run-tests.sh path-order   # one test, by substring
 ```
 
