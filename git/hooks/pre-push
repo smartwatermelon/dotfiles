@@ -715,7 +715,11 @@ run_beacon_text_gate() {
     echo "     2. ${gate} open   (or Andrew replies: approve <code>)"
     echo "     3. Push again. Approve without edits: the check matches these exact bytes."
     echo ""
-    echo "   Or convert the PR to a draft first: gh pr ready --undo <branch>, for each of: ${checked}"
+    echo "   Or convert the PR to a draft first:"
+    local b
+    for b in ${checked}; do
+      echo "     gh pr ready --undo ${b}"
+    done
   } >&2
   exit 1
 }
