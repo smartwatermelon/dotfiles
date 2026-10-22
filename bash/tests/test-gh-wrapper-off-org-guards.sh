@@ -27,6 +27,15 @@ _fail() {
 export HOME="${WORKDIR}/home"
 mkdir -p "${HOME}/.config/gh" "${HOME}/neutral-cwd"
 printf 'github.com:\n    user: twistedmelonman\n    oauth_token: fake\n' >"${HOME}/.config/gh/hosts.yml"
+
+# The approval gate blocks gh pr ready on review routes, and fails closed with no gate-review.sh. A stub suspends it here.
+mkdir -p "${HOME}/.claude/scripts"
+cat >"${HOME}/.claude/scripts/gate-review.sh" <<'GATE_EOF'
+#!/usr/bin/env bash
+[[ "$1" == suspended ]] && exit 0
+exit 1
+GATE_EOF
+chmod +x "${HOME}/.claude/scripts/gate-review.sh"
 export TMPDIR="${WORKDIR}/tmp"
 mkdir -p "${TMPDIR}"
 NEUTRAL="${HOME}/neutral-cwd"

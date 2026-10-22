@@ -577,6 +577,80 @@ else
   echo "SKIP: route-first cases — ${REAL_GATE} has no 'route' subcommand"
 fi
 
+# --- drafts and gh pr ready on review routes ----------------------------------
+
+# A draft body needs clean gate-lint, not approval. gh pr ready is Andrew's, in the UI.
+
+# gate-lint is a stub: the real one finds vale's config by its own path, which a copy breaks.
+if [[ "${HAVE_GATE}" == "1" && -x "${SANDBOX}/.claude/scripts/gate-route.sh" ]] \
+  && grep -q '_cmd_route' "${GATE}"; then
+  SHARED_RULES="$(cat "${GATE_RULES_FILE}")"
+  printf '%s\n' 'owner=smartwatermelon exempt' 'owner=nightowlstudiollc review' '* review' >"${GATE_RULES_FILE}"
+  LINT="${SANDBOX}/.claude/scripts/gate-lint.sh"
+  LINT_LOG="${SANDBOX}/gate-lint-args.log"
+  cat >"${LINT}" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${LINT_LOG}"
+grep -q LINTERR "\${!#}" && { echo 'gate-lint: vale missing' >&2; exit 2; }
+grep -q LINTBAD "\${!#}" && { echo 'gate-lint: error Dashes line 1: no em dashes'; exit 1; }
+exit 0
+STUB
+  chmod +x "${LINT}"
+  LINTBAD_BODY="${SANDBOX}/lintbad.md"
+  printf 'A draft body LINTBAD.\n' >"${LINTBAD_BODY}"
+  LINTERR_BODY="${SANDBOX}/linterr.md"
+  printf 'A draft body LINTERR.\n' >"${LINTERR_BODY}"
+
+  pushd "${NOS}" >/dev/null
+  # Known-bad control first: the same unapproved body without --draft blocks.
+  assert_gate "draft: non-draft unapproved body on review route blocked" 1 \
+    pr create --title t --body-file "${UNAPPROVED}"
+  assert_gate "draft: --draft unapproved, clean lint passes" 0 \
+    pr create --title t --body-file "${UNAPPROVED}" --draft
+  assert_gate "draft: -d unapproved, clean lint passes" 0 \
+    pr create -d --title t --body-file "${UNAPPROVED}"
+  assert_gate "draft: --draft=true unapproved, clean lint passes" 0 \
+    pr create --title t --body-file "${UNAPPROVED}" --draft=true
+  if grep -q -- '--mode block pr ' "${LINT_LOG}" 2>/dev/null; then
+    echo "PASS: draft: gate-lint ran in block mode as kind pr"
+  else
+    echo "FAIL: draft: gate-lint was not called as --mode block pr — log: $(cat "${LINT_LOG}" 2>/dev/null)"
+    fail=1
+  fi
+  assert_gate "draft: lint findings block" 1 \
+    pr create --title t --body-file "${LINTBAD_BODY}" --draft
+  assert_gate "draft: gate-lint error blocks" 1 \
+    pr create --title t --body-file "${LINTERR_BODY}" --draft
+  # `-t -d` titles the PR "-d"; it is not a draft flag.
+  assert_gate "draft: -d as the --title value is not a draft" 1 \
+    pr create -t -d --body-file "${UNAPPROVED}"
+  assert_gate "draft: inline body still blocked" 1 \
+    pr create --title t --body "inline" --draft
+  assert_gate "draft: relative path still blocked" 1 \
+    pr create --title t --body-file unapproved.md --draft
+  # Only pr create has a draft form; an edit body still needs approval.
+  assert_gate "draft: --draft on pr edit is not a draft" 1 \
+    pr edit 5 --body-file "${UNAPPROVED}" --draft
+  assert_gate "ready: gh pr ready on review route blocked" 1 pr ready 5
+  assert_gate "ready: gh pr ready --undo passes" 0 pr ready 5 --undo
+  assert_gate "ready: gh pr ready -R exempt repo passes" 0 pr ready 5 -R smartwatermelon/x
+  # Exempt routes are unchanged: no lint, so findings do not block.
+  assert_gate "draft: exempt repo skips lint" 0 \
+    pr create --title t --body-file "${LINTBAD_BODY}" --draft -R smartwatermelon/x
+  mv "${LINT}" "${LINT}.hidden"
+  assert_gate "draft: gate-lint absent fails closed" 1 \
+    pr create --title t --body-file "${UNAPPROVED}" --draft
+  mv "${LINT}.hidden" "${LINT}"
+  popd >/dev/null
+
+  pushd "${SWM}" >/dev/null
+  assert_gate "ready: gh pr ready in exempt checkout passes" 0 pr ready 5
+  popd >/dev/null
+  printf '%s\n' "${SHARED_RULES}" >"${GATE_RULES_FILE}"
+else
+  echo "SKIP: draft and ready cases — ${REAL_GATE} has no 'route' subcommand"
+fi
+
 # --- gate-review.sh absent: fails CLOSED --------------------------------------
 # A redundant pair whose halves disagree about the unverifiable case is not
 # redundant. Removing the gate must not turn the check into a pass.
