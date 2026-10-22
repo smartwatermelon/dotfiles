@@ -619,8 +619,8 @@ run_beacon_text_gate() {
     return 0
   fi
 
-  if ! command -v gh &>/dev/null; then
-    log_warning "Beacon text gate: gh not found, cannot see the PR; skipped"
+  if ! command -v gh &>/dev/null || ! command -v jq &>/dev/null; then
+    log_warning "Beacon text gate: gh or jq not found, cannot see the PR; skipped"
     return 0
   fi
 
@@ -630,7 +630,7 @@ run_beacon_text_gate() {
   pr_out="$(mktemp)"
   : >"${text_file}"
 
-  local i branch base tip remote_sha state draft pdir="" rc
+  local i branch base tip remote_sha state draft pdir="" rc checked=""
   local -a repo_flag=()
   [[ -z "${slug}" ]] || repo_flag=(--repo "${slug}")
   for i in "${!PUSH_LOCAL_SHAS[@]}"; do
@@ -667,6 +667,7 @@ run_beacon_text_gate() {
       exit 1
     fi
     [[ "${base}" != "${tip}" ]] || continue
+    checked+="${checked:+ }${branch}"
 
     if [[ -z "${pdir}" ]] && ! pdir="$("${gate}" personify-path)"; then
       rm -f "${pr_out}"
@@ -714,7 +715,7 @@ run_beacon_text_gate() {
     echo "     2. ${gate} open   (or Andrew replies: approve <code>)"
     echo "     3. Push again. Approve without edits: the check matches these exact bytes."
     echo ""
-    echo "   Or convert the PR to a draft first: gh pr ready --undo ${PUSH_REMOTE_REFS[0]#refs/heads/}"
+    echo "   Or convert the PR to a draft first: gh pr ready --undo <branch>, for each of: ${checked}"
   } >&2
   exit 1
 }

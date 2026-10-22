@@ -1670,7 +1670,12 @@ _gh_wrapper_approval_gate() {
       [[ -n "${body_file}" ]] && files=("${body_file}")
       ;;
     # Back to draft publishes no text.
-    pr/ready) [[ "${undo}" == "1" ]] && return 0 || ready=1 ;;
+    pr/ready)
+      if [[ "${undo}" == "1" ]]; then
+        return 0
+      fi
+      ready=1
+      ;;
     api/*)
       # -F means --field here, not --body-file: discard the generic walk's
       # reading and classify the fields instead.

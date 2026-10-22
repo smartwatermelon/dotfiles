@@ -134,6 +134,7 @@ printf '%s\n' "${READY}" >"${PR_JSON}"
 rc=0
 run_hook "${BEACON}" || rc=1
 expect "ready PR, unapproved text: blocked" 1 "nobody has approved" "${rc}"
+expect "block names the stage command and the blocked branch" 1 "for each of: feature" "${rc}"
 if [[ -f "${TEXT_FILE}" ]] && grep -q 'feat: retry the fetch once' "${TEXT_FILE}" \
   && grep -q 'Retries the fetch once on a timeout.' "${TEXT_FILE}" \
   && grep -q 'The tool now retries once.' "${TEXT_FILE}" && ! grep -q 'echo hi' "${TEXT_FILE}"; then
