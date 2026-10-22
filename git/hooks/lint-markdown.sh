@@ -11,18 +11,15 @@ set -euo pipefail
 
 CANONICAL="${MARKDOWNLINT_CANONICAL_CONFIG:-${HOME}/.config/markdownlint-cli/.markdownlint.json}"
 
-# CI's order exactly; keep in sync with standards/run-standards.sh.
-_find_repo_config() {
-  local c
-  for c in .markdownlint-cli2.jsonc .markdownlint-cli2.yaml .markdownlint-cli2.cjs \
-    .markdownlint.jsonc .markdownlint.json .markdownlint.yaml .markdownlint.yml .markdownlintrc; do
-    if [[ -f "${c}" ]]; then
-      printf '%s' "${c}"
-      return 0
-    fi
-  done
-  return 1
-}
+# Config list shared with the shim; found beside this file's real path.
+_self="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null)" || _self="${BASH_SOURCE[0]}"
+_lib="${_self%/*}/lib-markdownlint-config.sh"
+if [[ ! -f "${_lib}" ]]; then
+  printf 'lint-markdown: %s is missing; cannot pick the config CI would\n' "${_lib}" >&2
+  exit 1
+fi
+# shellcheck source=SCRIPTDIR/lib-markdownlint-config.sh
+source "${_lib}"
 
 main() {
   # pre-commit may call this with no files; a linter given none can exit non-zero.

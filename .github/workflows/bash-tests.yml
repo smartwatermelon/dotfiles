@@ -53,7 +53,7 @@ jobs:
       - name: Install linters the lint tests exercise
         run: brew install shellcheck shfmt markdownlint-cli markdownlint-cli2 yamllint zizmor
 
-      # The yamllint test compares the vendored config with github-workflows
+      # The yamllint and markdownlint tests compare configs with github-workflows
       # main. Outside the workspace so no repo-wide test scans it.
       - name: Clone github-workflows for the upstream config comparison
         run: >-
@@ -67,4 +67,5 @@ jobs:
       - name: Run bash test suite
         env:
           YAMLLINT_UPSTREAM_CONFIG: ${{ runner.temp }}/github-workflows/standards/yamllint.yml
+          MARKDOWNLINT_UPSTREAM_DIR: ${{ runner.temp }}/github-workflows
         run: $(brew --prefix)/bin/bash bash/tests/run-tests.sh
