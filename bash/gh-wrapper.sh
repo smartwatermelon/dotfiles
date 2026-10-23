@@ -2006,7 +2006,7 @@ _gh_wrapper_run_with_scope_hint() {
   # write-side /dev/fd, failing every agent gh call.
   local gh_pid=""
   trap 'rm -f "${errfile}"' RETURN
-  trap '[[ -n "${gh_pid}" ]] && kill -TERM "${gh_pid}" 2>/dev/null; rm -f "${errfile}"; trap - TERM HUP INT; kill -s TERM $$' TERM HUP INT
+  trap '[[ -n "${gh_pid}" ]] && kill -TERM "${gh_pid}" 2>/dev/null; cat "${errfile}" >&2 2>/dev/null || true; rm -f "${errfile}"; trap - TERM HUP INT; kill -s TERM $$' TERM HUP INT
   "${real_gh}" "$@" 2>"${errfile}" <&0 &
   gh_pid=$!
   # `|| rc=$?` keeps `set -e` (standalone mode) from aborting on a failing gh
