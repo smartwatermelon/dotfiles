@@ -1961,14 +1961,8 @@ _gh_wrapper_print_scope_hint() {
   echo "[gh] Only Andrew can change a PAT. Do not unset or override ${token_var} to reach the keyring token." >&2
 }
 
-# Run the real gh. stderr goes to the terminal live AND to a temp file; stdout
-# is untouched. On non-zero exit, a scope error in the file triggers the hint.
-# The real exit code is returned.
-#
-# Not `exec`: the hint needs gh's exit status and stderr after it returns.
-# Only called when an env-var token is set (see the standalone branch): the
-# tee pipe costs gh's stderr its TTY and can reorder stderr against stdout,
-# which is acceptable in an agent session and not at a human's terminal.
+# Run real gh; replay its stderr from a file after exit, hinting on a scope
+# error. Agent sessions only: stderr loses its TTY.
 _gh_wrapper_run_with_scope_hint() {
   local real_gh="$1"
   shift
@@ -2008,28 +2002,18 @@ _gh_wrapper_run_with_scope_hint() {
   # leaves an ignored signal ignored), so INT is forwarded as TERM. `kill` is
   # guarded because `set -e` applies inside the handler.
   #
-  # stderr goes through a process substitution running tee: gh writes to a
-  # dynamically allocated fd ({errfd}, so a repeat call in one shell cannot
-  # clobber a still-open fd and orphan the previous tee), tee copies to the
-  # file and the real stderr. gh gets the fd closed so it does not inherit
-  # the write end. After gh exits the fd is closed and tee is waited for, so
-  # the file is complete before it is read. tee buffers, so a PARTIAL-line
-  # write to stderr — gh's interactive prompts, which deliberately omit the
-  # trailing newline — can surface after stdout that was written later.
-  # Whole lines are unaffected, and stdout bypasses the pipe entirely.
-  local gh_pid="" tee_pid="" errfd=""
+  # A file, not `exec {fd}> >(tee ...)`: the Claude Code sandbox refuses
+  # write-side /dev/fd, failing every agent gh call.
+  local gh_pid=""
   trap 'rm -f "${errfile}"' RETURN
   trap '[[ -n "${gh_pid}" ]] && kill -TERM "${gh_pid}" 2>/dev/null; rm -f "${errfile}"; trap - TERM HUP INT; kill -s TERM $$' TERM HUP INT
-  exec {errfd}> >(tee "${errfile}" >&2 || true)
-  tee_pid=$!
-  "${real_gh}" "$@" 2>&"${errfd}" {errfd}>&- <&0 &
+  "${real_gh}" "$@" 2>"${errfile}" <&0 &
   gh_pid=$!
   # `|| rc=$?` keeps `set -e` (standalone mode) from aborting on a failing gh
   # before rc is read.
   wait "${gh_pid}" || rc=$?
   gh_pid=""
-  exec {errfd}>&-
-  wait "${tee_pid}" 2>/dev/null || true
+  cat "${errfile}" >&2 || true
   if [[ "${rc}" -ne 0 ]]; then
     local scope
     scope="$(_gh_wrapper_scope_from_file "${errfile}")"
