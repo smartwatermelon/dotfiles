@@ -32,8 +32,9 @@ if [[ -f "${_repo_log}" ]]; then
   _portable_sed_inplace "s/^commit: .*/commit: ${_real_hash}/" "${_repo_log}"
 fi
 
-# Global pointer
-_global_log="${HOME}/.claude/last-review-result.log"
+# Global pointer. Not under ~/.claude: the Claude Code sandbox denies writes
+# there, so run-review.sh keeps it in its state dir.
+_global_log="${HOME}/.local/state/claude-review/last-review-result.log"
 if [[ -f "${_global_log}" ]]; then
   _portable_sed_inplace "s/^commit: .*/commit: ${_real_hash}/" "${_global_log}"
 fi
