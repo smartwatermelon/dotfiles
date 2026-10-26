@@ -30,7 +30,8 @@ unset CDPATH
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WRAPPER="${REPO_ROOT}/bash/gh-wrapper.sh"
 
-SANDBOX="/tmp/gh-wrapper-review-path-test-$$"
+# mktemp under ${TMPDIR}: the Claude Code sandbox refuses writes to /tmp.
+SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gh-wrapper-review-path-test.XXXXXX")"
 mkdir -p "${SANDBOX}/home/.claude/hooks"
 trap 'rm -rf "${SANDBOX}"' EXIT
 
@@ -40,8 +41,11 @@ actual=""
 # Run one scenario in a pristine process and echo the resolved path.
 #   $1 - value for _gh_wrapper_review_script ("" means unset it)
 #   $2 - "before" or "after": whether HOME is set before or after sourcing
+#   $3 - optional "claude": set CLAUDECODE=1; otherwise unset it, never inherit it
 resolve_in_clean_shell() {
-  local override="$1" when="$2" script
+  local override="$1" when="$2" claude="${3:-}" script
+  local -a claude_env=(env -u CLAUDECODE)
+  [[ "${claude}" == "claude" ]] && claude_env=(env CLAUDECODE=1)
 
   # The child expands SBX/WRAP itself, so they are passed through the
   # environment rather than interpolated here. printf keeps the deferred
@@ -55,10 +59,10 @@ resolve_in_clean_shell() {
   fi
 
   if [[ -n "${override}" ]]; then
-    SBX="${SANDBOX}" WRAP="${WRAPPER}" _gh_wrapper_review_script="${override}" \
+    "${claude_env[@]}" SBX="${SANDBOX}" WRAP="${WRAPPER}" _gh_wrapper_review_script="${override}" \
       bash --noprofile --norc -c "${script}" 2>/dev/null
   else
-    env -u _gh_wrapper_review_script \
+    "${claude_env[@]}" -u _gh_wrapper_review_script \
       SBX="${SANDBOX}" WRAP="${WRAPPER}" \
       bash --noprofile --norc -c "${script}" 2>/dev/null
   fi
@@ -93,7 +97,8 @@ check "default resolves under the active HOME" \
 # override wins over HOME-derived resolution, so a caller can point this
 # anywhere without staging a whole fake home directory. The variable is
 # exported by design; this documents that inheritance is a feature, and tells
-# any future test author why they must unset it to sandbox HOME.
+# any future test author why they must unset it to sandbox HOME. This holds
+# outside Claude Code only; Case 4b covers CLAUDECODE.
 actual="$(resolve_in_clean_shell "${SANDBOX}/explicit-override.sh" after)" || actual="<resolution failed>"
 check "exported override beats HOME-derived path" \
   "${SANDBOX}/explicit-override.sh" "${actual}"
@@ -103,6 +108,12 @@ check "exported override beats HOME-derived path" \
 actual="$(resolve_in_clean_shell "${SANDBOX}/inherited.sh" before)" || actual="<resolution failed>"
 check "override wins regardless of when HOME was set" \
   "${SANDBOX}/inherited.sh" "${actual}"
+
+# Case 4b: under Claude Code the override is ignored, so an agent cannot
+# replace the review script with /usr/bin/true by one assignment.
+actual="$(resolve_in_clean_shell "/usr/bin/true" after claude)" || actual="<resolution failed>"
+check "override ignored under CLAUDECODE" \
+  "${SANDBOX}/home/.claude/hooks/pre-merge-review.sh" "${actual}"
 
 # Case 5: the helper must survive export -f inheritance. _gh_wrapper_maybe_review
 # is exported and calls this function, but an exported function carries only its

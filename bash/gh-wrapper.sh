@@ -74,8 +74,9 @@ _gh_wrapper_app_minter="${_gh_wrapper_app_minter%/*}/gh-app-token.sh"
 # An explicit non-empty ${_gh_wrapper_review_script} wins, so callers (and
 # tests) can point this anywhere. Otherwise the location is derived from the
 # CURRENT ${HOME}, which is what makes a sandboxed HOME work.
+# Under CLAUDECODE the override is ignored, so an agent cannot swap in /usr/bin/true.
 _gh_wrapper_review_script_path() {
-  if [[ -n "${_gh_wrapper_review_script}" ]]; then
+  if [[ -z "${CLAUDECODE:-}" && -n "${_gh_wrapper_review_script}" ]]; then
     printf '%s\n' "${_gh_wrapper_review_script}"
   else
     printf '%s\n' "${HOME}/.claude/hooks/pre-merge-review.sh"
@@ -737,6 +738,7 @@ _gh_wrapper_block_bypass() {
 # (function mode) matches the original bash-function behavior of warning
 # and proceeding, since a bash session has other opportunities to catch a
 # misconfigured review script.
+# Under CLAUDECODE, function mode passes "strict" too: an agent can hide the script.
 _gh_wrapper_maybe_review() {
   local missing_script_mode="$1"
   shift
@@ -2186,7 +2188,11 @@ else
       return $?
     fi
 
-    _gh_wrapper_maybe_review warn "$@" || return 1
+    # Fail closed under Claude Code (same CLAUDECODE test as sugh below);
+    # an interactive terminal keeps warn-and-proceed.
+    local _gh_wrapper_missing_review_mode=warn
+    [[ -n "${CLAUDECODE:-}" ]] && _gh_wrapper_missing_review_mode=strict
+    _gh_wrapper_maybe_review "${_gh_wrapper_missing_review_mode}" "$@" || return 1
 
     # Attached labels must exist (#323); a near match chosen at the prompt rewrites argv.
     local -a _gh_wrapper_label_args=()
@@ -2250,5 +2256,6 @@ else
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
   export -f gh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_resolve_target _gh_wrapper_app_route _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback _gh_wrapper_check_labels _gh_wrapper_label_repo _gh_wrapper_within_one_edit _gh_wrapper_label_near _gh_wrapper_label_interactive _gh_wrapper_real_gh_selected _gh_wrapper_label_choose
+  # The exported path helper reads _gh_wrapper_review_script with no default; CLAUDECODE ignores it.
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _gh_wrapper_app_minter
 fi
