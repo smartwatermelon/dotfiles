@@ -1561,8 +1561,7 @@ _gh_wrapper_dest_exempt() {
 # Gated destinations only: the route is asked first; exempt text passes in any form (#411).
 #
 # Each body's destination repository goes to check with it (see
-# _gh_wrapper_gate_destination), and check routes it by gate-rules.conf: a
-# Pangram-gated repository also needs a check record for the exact bytes.
+# _gh_wrapper_gate_destination), and check routes it by gate-rules.conf.
 #
 # Each body is also measured against its length cap: check gets --kind from
 # _gh_wrapper_cap_kind, so an approved body over the cap still blocks, and a
@@ -1734,8 +1733,7 @@ _gh_wrapper_approval_gate() {
   if [[ "${inline}" == "1" ]]; then
     reason="text given inline; only a file can be verified"
   else
-    # check routes the text by destination (gate-rules.conf): a Pangram-gated
-    # repository also needs a check record for these exact bytes.
+    # check routes the text by destination (gate-rules.conf): review or exempt.
     dest=(--kind "${kind}" --dir "${PWD}")
     [[ -n "${dest_repo}" ]] && dest+=(--repo "${dest_repo}")
     # Every named file must verify: an approved first body must not carry an
