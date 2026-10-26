@@ -74,7 +74,7 @@ _gh_wrapper_app_minter="${_gh_wrapper_app_minter%/*}/gh-app-token.sh"
 # An explicit non-empty ${_gh_wrapper_review_script} wins, so callers (and
 # tests) can point this anywhere. Otherwise the location is derived from the
 # CURRENT ${HOME}, which is what makes a sandboxed HOME work.
-# Under CLAUDECODE the override is ignored, so an agent cannot swap in /usr/bin/true.
+# Under CLAUDECODE the override is ignored. One layer only: a caller can still unset CLAUDECODE.
 _gh_wrapper_review_script_path() {
   if [[ -z "${CLAUDECODE:-}" && -n "${_gh_wrapper_review_script}" ]]; then
     printf '%s\n' "${_gh_wrapper_review_script}"
