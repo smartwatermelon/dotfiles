@@ -274,13 +274,17 @@ _brew_wrap() {
   fi
   # Without a before snapshot every cask would look changed: run brew, skip the helper
   if ! before="$(_brew_cask_versions)"; then
+    _brew_unq_warn "cask snapshot failed; skipping cask unquarantine"
     _brew_unq_brew "$@"
     return
   fi
   _brew_unq_brew "$@"
   rc=$?
   ((rc == 0)) || return "${rc}"
-  after="$(_brew_cask_versions)" || return 0
+  if ! after="$(_brew_cask_versions)"; then
+    _brew_unq_warn "cask snapshot failed; skipping cask unquarantine"
+    return 0
+  fi
   local changed token
   local -a casks=()
   changed="$(_brew_changed_casks "${before}" "${after}")"
@@ -552,6 +556,8 @@ _homebrew_update() {
   casks_after="$(brew list --cask --versions 2>/dev/null)" || snapshot_ok=false
   if [[ "${snapshot_ok}" == "true" ]]; then
     changed="$(_brew_changed_casks "${casks_before}" "${casks_after}")"
+  else
+    _notif "Cask snapshot failed; skipped cask unquarantine"
   fi
   [[ -z "${changed}" ]] || mapfile -t changed_casks <<<"${changed}"
   if ((${#changed_casks[@]} > 0)); then

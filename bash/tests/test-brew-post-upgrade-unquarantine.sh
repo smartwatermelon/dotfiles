@@ -253,6 +253,7 @@ reset_fx
 touch "${FX}/list-fail"
 out="$(run '_brew_wrap upgrade')"
 check "brew upgrade still runs" "1" "$(count "brew upgrade" || true)"
+check "skip is warned about" "1" "$(grep -c 'cask snapshot failed' <<<"${out}" || true)"
 check "helper does not run" "0" "$(grep -c '^brew info' "${WORK}/calls" || true)"
 check "returns 0" "1" "$(grep -cx 'RC=0' <<<"${out}" || true)"
 
@@ -305,6 +306,14 @@ printf '%s\n' "${FOO}" >"${FX}/xattr-fail"
 out="$(run "source '${WORK}/hbu-direct.sh'; _homebrew_update")"
 check "returns 0" "1" "$(grep -cx 'RC=0' <<<"${out}" || true)"
 check "failure is notified" "1" "$(grep -c 'NOTIF Some upgraded cask binaries were not unquarantined' <<<"${out}" || true)"
+
+echo "Case: _homebrew_update when a cask snapshot fails"
+reset_fx
+touch "${FX}/list-fail"
+out="$(run "source '${WORK}/hbu-direct.sh'; _homebrew_update")"
+check "helper does not run" "0" "$(grep -c '^brew info' "${WORK}/calls" || true)"
+check "skip is notified" "1" "$(grep -c 'NOTIF Cask snapshot failed' <<<"${out}" || true)"
+check "returns 0" "1" "$(grep -cx 'RC=0' <<<"${out}" || true)"
 
 echo "Case: brew() is defined only in interactive shells and is not exported"
 nonint="$(HOME="${WORK}" bash --norc --noprofile -c '
