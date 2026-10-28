@@ -18,7 +18,9 @@ check() {
   fi
 }
 
+# Physical path, so it matches what realpath returns (/var is a symlink on macOS).
 WORK="$(mktemp -d)"
+WORK="$(CDPATH='' cd "${WORK}" && pwd -P)"
 trap 'rm -rf "${WORK}"' EXIT
 
 # Extract via bash's parser; HOME is the temp dir so no real wrapper is sourced.
@@ -52,6 +54,7 @@ case "$1" in
   --prefix) echo "/opt/homebrew" ;;
   info) cat "${FX}/info.json" ;;
   list)
+    [[ -e "${FX}/ran" || ! -e "${FX}/list-fail" ]] || exit 1
     if [[ -e "${FX}/ran" ]]; then cat "${FX}/list.after"; else cat "${FX}/list.before"; fi
     ;;
   install | upgrade | reinstall)
@@ -99,13 +102,14 @@ FOO="${FX}/Caskroom/foo/1.1/foo"
 BAR="${FX}/Apps/Bar.app/Contents/Helpers/bar_tool"
 BAZ="${FX}/Apps/Bar.app/Contents/Helpers/bazdiff"
 mkdir -p "$(dirname "${FOO}")" "$(dirname "${BAR}")" "${FX}/bin"
-touch "${FOO}" "${BAR}" "${BAZ}"
+touch "${FOO}" "${BAR}" "${BAZ}" "${FX}/bin/ghost"
 ln -s "${FOO}" "${FX}/bin/foo"
 ln -s "${BAR}" "${FX}/bin/bar"
 ln -s "${BAZ}" "${FX}/bin/bazdiff"
 cat >"${FX}/info.json" <<JSON
 {"formulae": [], "casks": [
   {"token": "foo", "installed": "1.1", "artifacts": [
+    {"binary": [], "target": "${FX}/bin/ghost"},
     {"binary": ["foo"], "target": "${FX}/bin/foo"},
     {"zap": [{"trash": "~/.config/foo"}]}]},
   {"token": "bar", "installed": "2.0", "artifacts": [
@@ -121,7 +125,7 @@ reset_fx() {
   : >"${FX}/quarantined"
   : >"${FX}/xattr-fail"
   : >"${FX}/sig"
-  rm -f "${FX}/ran"
+  rm -f "${FX}/ran" "${FX}/list-fail"
   printf 'bar 2.0\nfoo 1.0\n' >"${FX}/list.before"
   printf 'bar 2.0\nfoo 1.1\n' >"${FX}/list.after"
 }
@@ -146,12 +150,14 @@ count() { grep -cxF -- "$1" "${WORK}/calls" || true; }
 
 echo "Case: quarantined file with a valid Developer ID signature"
 reset_fx
-quarantine "${FOO}"
+quarantine "${FOO}" "${FX}/bin/ghost"
 sig "${FOO}" devid
+sig "${FX}/bin/ghost" devid
 out="$(run '_brew_post_upgrade_unquarantine foo')"
 check "xattr -d is called with the Caskroom path" "1" "$(count "xattr -v -d com.apple.quarantine ${FOO}" || true)"
 check "returns 0" "1" "$(grep -cx 'RC=0' <<<"${out}" || true)"
 check "brew info is asked for the token" "1" "$(count "brew info --json=v2 --cask foo" || true)"
+check "an empty binary entry does not shift its target into the source" "0" "$(grep -c "${FX}/bin/ghost" "${WORK}/calls" || true)"
 
 echo "Case: file without quarantine"
 reset_fx
@@ -241,6 +247,14 @@ reset_fx
 printf 'bar 2.0\nfoo 1.1\n' >"${FX}/list.before"
 out="$(run '_brew_wrap reinstall --cask foo')"
 check "helper runs for the named cask" "1" "$(count "brew info --json=v2 --cask foo" || true)"
+
+echo "Case: brew upgrade when the before snapshot fails"
+reset_fx
+touch "${FX}/list-fail"
+out="$(run '_brew_wrap upgrade')"
+check "brew upgrade still runs" "1" "$(count "brew upgrade" || true)"
+check "helper does not run" "0" "$(grep -c '^brew info' "${WORK}/calls" || true)"
+check "returns 0" "1" "$(grep -cx 'RC=0' <<<"${out}" || true)"
 
 echo "Case: brew upgrade with no cask change"
 reset_fx

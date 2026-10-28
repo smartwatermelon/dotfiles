@@ -230,15 +230,15 @@ _brew_post_upgrade_unquarantine() {
     _brew_unq_warn "brew info failed for: $*"
     return 1
   fi
-  # One row per binary artifact: token, installed version, source, symlink target
+  # One row per binary artifact: token, version, source, target. US-separated: IFS tab would merge empty fields
   if ! rows="$(_brew_unq_jq -r '.casks[] | select(.installed != null)
       | [.token, .installed] + (.artifacts[]
         | select(type == "object" and has("binary"))
-        | [(.binary[0] // ""), (.target // "")]) | @tsv' <<<"${json}")"; then
+        | [(.binary[0] // ""), (.target // "")]) | join("\u001f")' <<<"${json}")"; then
     _brew_unq_warn "could not parse brew info JSON for: $*"
     return 1
   fi
-  while IFS=$'\t' read -r token version src target; do
+  while IFS=$'\x1f' read -r token version src target; do
     [[ -n "${src}" ]] || continue
     if [[ "${src}" != /* ]]; then
       if [[ -z "${caskroom}" ]]; then
@@ -248,7 +248,7 @@ _brew_post_upgrade_unquarantine() {
       fi
       src="${caskroom}/${token}/${version}/${src}"
     fi
-    for real in "${src}" "$(realpath "${target:-${src}}" 2>/dev/null)"; do
+    for real in "$(realpath "${src}" 2>/dev/null)" "$(realpath "${target:-${src}}" 2>/dev/null)"; do
       [[ -n "${real}" && -e "${real}" && -z "${seen[${real}]:-}" ]] || continue
       seen["${real}"]=1
       _brew_unq_file "${real}" || failed=1
@@ -272,11 +272,15 @@ _brew_wrap() {
     _brew_unq_brew "$@"
     return
   fi
-  before="$(_brew_cask_versions)"
+  # Without a before snapshot every cask would look changed: run brew, skip the helper
+  if ! before="$(_brew_cask_versions)"; then
+    _brew_unq_brew "$@"
+    return
+  fi
   _brew_unq_brew "$@"
   rc=$?
   ((rc == 0)) || return "${rc}"
-  after="$(_brew_cask_versions)"
+  after="$(_brew_cask_versions)" || return 0
   local changed token
   local -a casks=()
   changed="$(_brew_changed_casks "${before}" "${after}")"
@@ -529,8 +533,8 @@ _homebrew_update() {
   fi
 
   # Cask snapshot before and after the upgrade; see _brew_changed_casks
-  local casks_before
-  casks_before="$(brew list --cask --versions 2>/dev/null)"
+  local casks_before snapshot_ok=true
+  casks_before="$(brew list --cask --versions 2>/dev/null)" || snapshot_ok=false
   output=$(PATH="${upgrade_path}" brew upgrade "${upgrade_args[@]}" 2>&1)
   result=$?
   echo "${output}" | _update_log
@@ -543,10 +547,12 @@ _homebrew_update() {
     eval "${prev_int_trap:-trap - INT}"
   fi
   # Runs even if the upgrade failed part-way; never changes this function's result
-  local casks_after changed
+  local casks_after changed=""
   local -a changed_casks=()
-  casks_after="$(brew list --cask --versions 2>/dev/null)"
-  changed="$(_brew_changed_casks "${casks_before}" "${casks_after}")"
+  casks_after="$(brew list --cask --versions 2>/dev/null)" || snapshot_ok=false
+  if [[ "${snapshot_ok}" == "true" ]]; then
+    changed="$(_brew_changed_casks "${casks_before}" "${casks_after}")"
+  fi
   [[ -z "${changed}" ]] || mapfile -t changed_casks <<<"${changed}"
   if ((${#changed_casks[@]} > 0)); then
     _brew_post_upgrade_unquarantine "${changed_casks[@]}" 2>&1 | _update_log
