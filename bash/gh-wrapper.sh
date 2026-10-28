@@ -11,7 +11,8 @@
 #      over PATH lookup for any bash process — interactive shells (via
 #      .bash_profile -> main.sh) and non-interactive ones too, since
 #      ~/.claude/settings.json sets BASH_ENV=~/.config/bash/functions.sh so
-#      Claude Code's own Bash tool sources it as well.
+#      Claude Code's Bash tool gets it as well, usually via export -f:
+#      functions.sh skips re-sourcing this file there when gh is inherited.
 #   2. Symlinked as ~/.local/bin/gh and executed directly: acts as a
 #      standalone wrapper. This is the fallback for anything that reaches
 #      `gh` without going through a bash process that has BASH_ENV in
@@ -2252,7 +2253,8 @@ else
   # Export gh AND the helpers it calls: an exported function only carries
   # its own body into subshells, not functions it calls. Without exporting
   # these too, gh() would break in any subshell that inherits the exported
-  # gh but didn't source this file (e.g. BASH_ENV unset/overridden there).
+  # gh but didn't source this file, as functions.sh arranges on purpose.
+  # Variables set at source time must stay exported for the same reason.
   export -f gh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_resolve_target _gh_wrapper_app_route _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback _gh_wrapper_check_labels _gh_wrapper_label_repo _gh_wrapper_within_one_edit _gh_wrapper_label_near _gh_wrapper_label_interactive _gh_wrapper_real_gh_selected _gh_wrapper_label_choose
   # The exported path helper reads _gh_wrapper_review_script with no default; CLAUDECODE ignores it.
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _gh_wrapper_app_minter

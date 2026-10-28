@@ -417,8 +417,8 @@ git() {
 # own body into subshells, not functions it calls. git()'s RETURN trap calls
 # _git_wrapper_restore_dir, so a subshell that inherits the exported git but
 # did not source this file dies with "_git_wrapper_restore_dir: command not
-# found" (exit 127) the first time that trap fires. BASH_ENV normally hides
-# this by re-sourcing config in non-interactive children — but it is set to a
+# found" (exit 127) the first time that trap fires. functions.sh skips the
+# re-source when git is inherited, and BASH_ENV is set to a
 # HOME-relative path, so any child with a rewritten HOME (the test suite's
 # fixtures, for one) resolves it to nothing and the helper vanishes while the
 # inherited git remains. Same reasoning, and the same fix, as gh-wrapper.sh.
