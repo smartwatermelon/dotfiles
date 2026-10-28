@@ -168,8 +168,138 @@ vax() {
     return 1
   fi
 
-  xattr -v -d com.apple.quarantine "$1"
+  command "${_BREW_UNQ_XATTR_BIN:-xattr}" -v -d com.apple.quarantine "$1"
 }
+# Not exported - interactive command only
+
+# brew, xattr, codesign and jq for the cask unquarantine helpers; tests set the *_BIN vars to stubs
+_brew_unq_brew() { command "${_BREW_UNQ_BREW_BIN:-brew}" "$@"; }
+_brew_unq_xattr() { command "${_BREW_UNQ_XATTR_BIN:-xattr}" "$@"; }
+_brew_unq_codesign() { command "${_BREW_UNQ_CODESIGN_BIN:-codesign}" "$@"; }
+_brew_unq_jq() { command "${_BREW_UNQ_JQ_BIN:-jq}" "$@"; }
+# Not exported - internal helpers
+
+_brew_unq_warn() {
+  echo "brew-unquarantine: warning: $*" >&2
+}
+# Not exported - internal helper
+
+# Print "token version..." per installed cask (snapshot for _brew_changed_casks)
+_brew_cask_versions() {
+  _brew_unq_brew list --cask --versions 2>/dev/null
+}
+# Not exported - internal helper
+
+# Print the token of each line in snapshot $2 that is not in snapshot $1
+_brew_changed_casks() {
+  local before="$1" after="$2" line
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    grep -qxF -- "${line}" <<<"${before}" || printf '%s\n' "${line%% *}"
+  done <<<"${after}"
+}
+# Not exported - internal helper
+
+# Clear quarantine on one cask binary if it carries a valid Developer ID signature
+_brew_unq_file() {
+  local f="$1" info team
+  _brew_unq_xattr -p com.apple.quarantine "${f}" &>/dev/null || return 0
+  if ! _brew_unq_codesign --verify --strict "${f}" &>/dev/null; then
+    _brew_unq_warn "${f}: codesign --verify --strict failed; quarantine kept"
+    return 0
+  fi
+  info="$(_brew_unq_codesign -dv --verbose=2 "${f}" 2>&1)" || info=""
+  team="$(sed -n 's/^TeamIdentifier=//p' <<<"${info}")"
+  if [[ -z "${team}" || "${team}" == "not set" || "${info}" == *"Signature=adhoc"* ||
+    "${info}" != *"Authority=Developer ID Application:"* ]]; then
+    _brew_unq_warn "${f}: no Developer ID signature; quarantine kept"
+    return 0
+  fi
+  vax "${f}"
+}
+# Not exported - internal helper
+
+# Remove quarantine from the binary artifacts of the given cask tokens
+# Policy skips only warn; returns 1 when a lookup or a vax call fails
+_brew_post_upgrade_unquarantine() {
+  (($# > 0)) || return 0
+  local caskroom json rows token version src target real failed=0
+  local -A seen=()
+  caskroom="$(_brew_unq_brew --caskroom 2>/dev/null)" || caskroom=""
+  if ! json="$(_brew_unq_brew info --json=v2 --cask "$@" 2>/dev/null)"; then
+    _brew_unq_warn "brew info failed for: $*"
+    return 1
+  fi
+  # One row per binary artifact: token, installed version, source, symlink target
+  if ! rows="$(_brew_unq_jq -r '.casks[] | select(.installed != null)
+      | [.token, .installed] + (.artifacts[]
+        | select(type == "object" and has("binary"))
+        | [(.binary[0] // ""), (.target // "")]) | @tsv' <<<"${json}")"; then
+    _brew_unq_warn "could not parse brew info JSON for: $*"
+    return 1
+  fi
+  while IFS=$'\t' read -r token version src target; do
+    [[ -n "${src}" ]] || continue
+    if [[ "${src}" != /* ]]; then
+      if [[ -z "${caskroom}" ]]; then
+        _brew_unq_warn "${token}: no caskroom path for ${src}"
+        failed=1
+        continue
+      fi
+      src="${caskroom}/${token}/${version}/${src}"
+    fi
+    for real in "${src}" "$(realpath "${target:-${src}}" 2>/dev/null)"; do
+      [[ -n "${real}" && -e "${real}" && -z "${seen[${real}]:-}" ]] || continue
+      seen["${real}"]=1
+      _brew_unq_file "${real}" || failed=1
+    done
+  done <<<"${rows}"
+  return "${failed}"
+}
+# Not exported - internal helper
+
+# Body of the interactive brew() wrapper, kept separate so tests can call it
+_brew_wrap() {
+  local sub="" arg before after rc
+  for arg in "$@"; do
+    if [[ "${arg}" != -* ]]; then
+      sub="${arg}"
+      break
+    fi
+  done
+  # _homebrew_update sets _BREW_UNQ_NESTED and runs the helper itself
+  if [[ -n "${_BREW_UNQ_NESTED:-}" || ! "${sub}" =~ ^(install|upgrade|reinstall)$ ]]; then
+    _brew_unq_brew "$@"
+    return
+  fi
+  before="$(_brew_cask_versions)"
+  _brew_unq_brew "$@"
+  rc=$?
+  ((rc == 0)) || return "${rc}"
+  after="$(_brew_cask_versions)"
+  local changed token
+  local -a casks=()
+  changed="$(_brew_changed_casks "${before}" "${after}")"
+  [[ -z "${changed}" ]] || mapfile -t casks <<<"${changed}"
+  # reinstall keeps the version, so the snapshot diff misses it: add the named casks
+  if [[ "${sub}" == "reinstall" ]]; then
+    for arg in "$@"; do
+      token="${arg##*/}"
+      [[ "${arg}" != -* && "${arg}" != "${sub}" ]] || continue
+      [[ " ${casks[*]} " != *" ${token} "* ]] || continue
+      if awk -v t="${token}" '$1 == t { f = 1 } END { exit !f }' <<<"${after}"; then
+        casks+=("${token}")
+      fi
+    done
+  fi
+  ((${#casks[@]} == 0)) || _brew_post_upgrade_unquarantine "${casks[@]}" || true
+  return 0
+}
+# Not exported - internal helper
+
+if [[ $- == *i* ]]; then
+  brew() { _brew_wrap "$@"; }
+fi
 # Not exported - interactive command only
 
 # History search function
@@ -329,6 +459,8 @@ _updates_shim_cleanup() {
 _homebrew_update() {
   # Set when an unattended formula upgrade fails; updates() reads it.
   _UPDATES_FORMULA_FAILED=false
+  # Seen by the interactive brew() wrapper: pass through, this function unquarantines itself
+  local _BREW_UNQ_NESTED=1
   local brew_prefix brew_owner my_id current_user
   brew_prefix="$(brew --prefix 2>/dev/null)" || { return 0; }
   brew_owner="$(stat -f '%u' "${brew_prefix}" 2>/dev/null)"
@@ -396,6 +528,9 @@ _homebrew_update() {
     _notif "Non-interactive: upgrading formulae only; casks deferred to next interactive run"
   fi
 
+  # Cask snapshot before and after the upgrade; see _brew_changed_casks
+  local casks_before
+  casks_before="$(brew list --cask --versions 2>/dev/null)"
   output=$(PATH="${upgrade_path}" brew upgrade "${upgrade_args[@]}" 2>&1)
   result=$?
   echo "${output}" | _update_log
@@ -406,6 +541,18 @@ _homebrew_update() {
     # `trap -- '...' SIG` command, or nothing if no handler was set).
     eval "${prev_term_trap:-trap - TERM}"
     eval "${prev_int_trap:-trap - INT}"
+  fi
+  # Runs even if the upgrade failed part-way; never changes this function's result
+  local casks_after changed
+  local -a changed_casks=()
+  casks_after="$(brew list --cask --versions 2>/dev/null)"
+  changed="$(_brew_changed_casks "${casks_before}" "${casks_after}")"
+  [[ -z "${changed}" ]] || mapfile -t changed_casks <<<"${changed}"
+  if ((${#changed_casks[@]} > 0)); then
+    _brew_post_upgrade_unquarantine "${changed_casks[@]}" 2>&1 | _update_log
+    if [[ "${PIPESTATUS[0]}" -ne 0 ]]; then
+      _notif "Some upgraded cask binaries were not unquarantined (check log)"
+    fi
   fi
   if [[ "${result}" -ne 0 ]]; then
     if [[ "${tolerate_upgrade_failure}" == "true" ]]; then

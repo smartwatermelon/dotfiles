@@ -71,6 +71,9 @@ run_update() {
       _update_log() { cat >/dev/null; }
       _updates_noninteractive() { return "${NONINT_RC}"; }
       _updates_sudo_shim() { return 1; }
+      # Cask unquarantine has its own test (test-brew-post-upgrade-unquarantine.sh)
+      _brew_changed_casks() { :; }
+      _brew_post_upgrade_unquarantine() { :; }
       eval "$1"
       _homebrew_update
       echo "RC=$?" >>"${NOTIFS}"
