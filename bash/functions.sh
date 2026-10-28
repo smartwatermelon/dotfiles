@@ -412,7 +412,9 @@ _homebrew_update() {
       # Keep going so npm/pipx/gem still run, but record the failure so the
       # run is not reported as a success.
       _UPDATES_FORMULA_FAILED=true
-      _notif "brew upgrade (formulae) FAILED (exit ${result}): $(grep -m1 '^Error:' <<<"${output}" || echo 'see log')"
+      local first_error
+      first_error="$(grep -m1 '^Error:' <<<"${output}")" || first_error='see log'
+      _notif "brew upgrade (formulae) FAILED (exit ${result}): ${first_error}"
     else
       _notif "brew upgrade failed (exit ${result})"
       return "${result}"
@@ -1270,6 +1272,38 @@ lp_mode() {
 }
 # Not exported - interactive command only
 
+# A non-interactive child (BASH_ENV) skips a wrapper it inherited intact and
+# unchanged. Interactive shells stamp first; the commit says why.
+if [[ $- == *i* ]]; then
+  # One per PID: a shared stamp would be refreshed by each new terminal.
+  _bash_wrapper_stamp_dir="${XDG_STATE_HOME:-${HOME}/.local/state}/dotfiles/wrapper-stamps"
+  _BASH_WRAPPER_STAMP="${_bash_wrapper_stamp_dir}/${BASHPID:-$$}"
+  _BASH_WRAPPER_STAMP_ID="${BASHPID:-$$}.${EPOCHREALTIME:-${RANDOM}}.${RANDOM}"
+  if { [[ -d "${_bash_wrapper_stamp_dir}" ]] || mkdir -p "${_bash_wrapper_stamp_dir}"; } 2>/dev/null \
+    && { printf '%s\n' "${_BASH_WRAPPER_STAMP_ID}" >"${_BASH_WRAPPER_STAMP}"; } 2>/dev/null; then
+    export _BASH_WRAPPER_STAMP _BASH_WRAPPER_STAMP_ID
+  else
+    # Cannot write it: children always source.
+    unset _BASH_WRAPPER_STAMP _BASH_WRAPPER_STAMP_ID
+  fi
+  unset _bash_wrapper_stamp_dir
+fi
+
+# _bash_wrapper_inherited <file> <minter-var> <function>...: builtins only.
+_bash_wrapper_inherited() {
+  local file="$1" minter="${!2:-}" stamp_id=""
+  shift 2
+  [[ $- != *i* ]] || return 1
+  # bash 3.2 gets a non-exported delegating gh(); keep that path as it was.
+  ((BASH_VERSINFO[0] >= 4)) || return 1
+  declare -F "$@" >/dev/null || return 1
+  [[ -f "${file}" && -n "${minter}" && "${file}" -ef "${minter%/*}/${file##*/}" ]] || return 1
+  [[ -n "${_BASH_WRAPPER_STAMP:-}" && -n "${_BASH_WRAPPER_STAMP_ID:-}" ]] || return 1
+  [[ ! "${file}" -nt "${_BASH_WRAPPER_STAMP}" ]] || return 1
+  { read -r stamp_id <"${_BASH_WRAPPER_STAMP}"; } 2>/dev/null || return 1
+  [[ "${stamp_id}" == "${_BASH_WRAPPER_STAMP_ID}" ]]
+}
+
 # ============================================================================
 # Git Wrapper (post-init hook trigger)
 # ============================================================================
@@ -1277,7 +1311,11 @@ lp_mode() {
 # file for why git, unlike gh, doesn't also get a standalone ~/.local/bin
 # executable mode.
 
-if [[ -f "${HOME}/.config/bash/git-wrapper.sh" ]]; then
+if _bash_wrapper_inherited "${HOME}/.config/bash/git-wrapper.sh" _git_wrapper_app_minter \
+  git _git_wrapper_restore_dir _git_wrapper_slug _git_wrapper_app_push; then
+  # Inherited via export -f and unchanged; it keeps no other state.
+  :
+elif [[ -f "${HOME}/.config/bash/git-wrapper.sh" ]]; then
   # shellcheck source=/dev/null
   source "${HOME}/.config/bash/git-wrapper.sh"
 else
@@ -1293,8 +1331,19 @@ fi
 # gh-wrapper.sh (sourced below), which also doubles as the standalone
 # ~/.local/bin/gh wrapper when symlinked and executed directly. See that
 # file for how the two modes interoperate.
+#
+# The skip also needs sugh and the Beacon default to match this shell.
 
-if [[ -f "${HOME}/.config/bash/gh-wrapper.sh" ]]; then
+if _bash_wrapper_inherited "${HOME}/.config/bash/gh-wrapper.sh" _gh_wrapper_app_minter \
+  gh _gh_wrapper_find_real_gh _gh_wrapper_maybe_review _gh_wrapper_block_bypass \
+  _gh_wrapper_force_draft_for_off_org _gh_wrapper_sync_identity \
+  && { [[ -n "${CLAUDECODE:-}" ]] || declare -F sugh >/dev/null; } \
+  && [[ "${_GH_WRAPPER_BEACON_DIR_DEFAULT:-}" == "${BEACON_WORKDIR:-${HOME}/Developer/beacon-biosignals}" ]]; then
+  # As gh-wrapper.sh does: no sugh where CLAUDECODE is set.
+  if [[ -n "${CLAUDECODE:-}" ]]; then
+    unset -f sugh
+  fi
+elif [[ -f "${HOME}/.config/bash/gh-wrapper.sh" ]]; then
   # shellcheck source=/dev/null
   source "${HOME}/.config/bash/gh-wrapper.sh"
 else
