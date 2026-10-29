@@ -41,10 +41,7 @@
 #
 # Canonical policy: github-workflows' zizmor.yml is the only copy (dotfiles#345).
 #
-# Flags: CI passes --min-severity low --no-online-audits. The bare hook passed
-# neither, which is the "local gates disagree with CI by construction" problem
-# in miniature. Both are matched here. --no-online-audits also stops zizmor
-# reaching GitHub on every commit, which is what makes the hook fast offline.
+# Flags: --offline runs CI's --no-online-audits audits; the online client crashes in the macOS sandbox.
 
 set -euo pipefail
 
@@ -60,7 +57,7 @@ main() {
   # find this file too; passing it explicitly keeps this wrapper's resolution
   # legible and identical to run-standards.sh rather than implicit.
   if [[ -f zizmor.yml ]]; then
-    exec zizmor --config zizmor.yml --min-severity low --no-online-audits "$@"
+    exec zizmor --config zizmor.yml --min-severity low --offline "$@"
   fi
 
   # No repo config and no canonical file: a machine without the
@@ -74,10 +71,10 @@ main() {
       "${CANONICAL}" >&2
     printf 'lint-zizmor: clone smartwatermelon/github-workflows into ~/Developer to get the fleet policy\n' >&2
     printf 'lint-zizmor: first-party reusable-workflow refs may report unpinned-uses\n' >&2
-    exec zizmor --min-severity low --no-online-audits "$@"
+    exec zizmor --min-severity low --offline "$@"
   fi
 
-  exec zizmor --config "${CANONICAL}" --min-severity low --no-online-audits "$@"
+  exec zizmor --config "${CANONICAL}" --min-severity low --offline "$@"
 }
 
 main "$@"

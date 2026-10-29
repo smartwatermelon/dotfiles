@@ -74,7 +74,7 @@ EOF
 # ---------------------------------------------------------------------
 kb="${TMPROOT}/known-bad"
 _write_case "${kb}"
-kb_out="$(cd "${kb}" && zizmor --min-severity low --no-online-audits .github/workflows/claude.yml 2>&1)"
+kb_out="$(cd "${kb}" && zizmor --min-severity low --offline .github/workflows/claude.yml 2>&1)"
 if grep -q 'unpinned-uses' <<<"${kb_out}"; then
   _pass "known-bad reproduces: bare zizmor rejects the first-party @v3 ref"
 else
