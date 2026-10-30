@@ -25,7 +25,9 @@ _tests_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_tests_dir}/lib/git-env-isolation.sh"
 isolate_git_env
 
-export HOME="/tmp/gh-wrapper-identity-test-home-$$"
+# mktemp under ${TMPDIR}: the Claude Code sandbox refuses writes to /tmp.
+HOME="$(mktemp -d "${TMPDIR:-/tmp}/gh-wrapper-identity-test-home.XXXXXX")"
+export HOME
 mkdir -p "${HOME}/.config/gh"
 
 # GH_TOKEN outranks the keyring identity, so _gh_wrapper_sync_identity fails
@@ -72,8 +74,10 @@ _test_command_stub() {
 eval 'command() { _test_command_stub "$@"; }'
 # Prove the stub is wired up before relying on it for every assertion below:
 # a clean result from a stub that never fired would be meaningless.
-if [[ "$(_test_command_stub gh auth token --hostname github.com --user __selftest__)" != "tok-__selftest__" ]] \
-  || [[ "$(command gh auth token --hostname github.com --user __selftest__)" != "tok-__selftest__" ]]; then
+stub_direct="$(_test_command_stub gh auth token --hostname github.com --user __selftest__)" || true
+stub_via_command="$(command gh auth token --hostname github.com --user __selftest__)" || true
+if [[ "${stub_direct}" != "tok-__selftest__" ]] \
+  || [[ "${stub_via_command}" != "tok-__selftest__" ]]; then
   echo "FAIL: command stub is not intercepting 'gh auth token' — aborting"
   exit 1
 fi

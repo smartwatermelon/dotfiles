@@ -103,9 +103,9 @@ else
 fi
 
 # cwd-remote fallback: no explicit -R/--repo, owner resolved from `origin`.
-off_org_clone="/tmp/gh-wrapper-draft-test-off-org-$$"
-in_org_clone="/tmp/gh-wrapper-draft-test-in-org-$$"
-mkdir -p "${off_org_clone}" "${in_org_clone}"
+# mktemp under ${TMPDIR}: the Claude Code sandbox refuses writes to /tmp.
+off_org_clone="$(mktemp -d "${TMPDIR:-/tmp}/gh-wrapper-draft-test-off-org.XXXXXX")"
+in_org_clone="$(mktemp -d "${TMPDIR:-/tmp}/gh-wrapper-draft-test-in-org.XXXXXX")"
 # cwd_status_dir is created further down but named here, so an abort between
 # its mktemp and its explicit cleanup cannot leak it. The `:-` guard covers the
 # window before it is assigned. Leaked fixture dirs are the defect class this

@@ -11,8 +11,8 @@ unset CDPATH
 TESTS_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER="${TESTS_DIR}/../gh-wrapper.sh"
 
-WORKDIR="/tmp/gh-token-precedence-test-$$"
-mkdir -p "${WORKDIR}"
+# mktemp under ${TMPDIR}: the Claude Code sandbox refuses writes to /tmp.
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/gh-token-precedence-test.XXXXXX")" || exit 1
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 GIT=/usr/bin/git
@@ -216,8 +216,9 @@ fi
 
 # Symmetry check on Case 4: a genuinely expired token must still get the rotate
 # advice, so the new branch cannot swallow the path it was split away from.
-if [[ "$(_sync_under_env PATH="${STUB_DIR}:${PATH}" \
-  GH_TOKEN="expired-token-fixture" 2>&1)" == *"expired or revoked"* ]]; then
+expired_output="$(_sync_under_env PATH="${STUB_DIR}:${PATH}" \
+  GH_TOKEN="expired-token-fixture" 2>&1)" || true
+if [[ "${expired_output}" == *"expired or revoked"* ]]; then
   _pass "expired GH_TOKEN: still gets rotate-the-token advice"
 else
   _fail "expired GH_TOKEN: lost its rotate-the-token advice"
