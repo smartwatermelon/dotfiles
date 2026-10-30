@@ -1,7 +1,7 @@
 #!/bin/bash
 # Firewall entries for Homebrew node (dev-env#235). Root-owned copy, never a symlink: bash/README.md
 
-# bash 3.2: the shell root gets.
+# Written for /bin/bash 3.2, which runs it under sudo.
 set -euo pipefail
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
