@@ -8,7 +8,7 @@ REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail=0
 
-WORKDIR="$(mktemp -d "/tmp/completion-pipx-test.XXXXXX")"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/completion-pipx-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 stub_bin="${WORKDIR}/bin"

@@ -22,7 +22,7 @@ REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail=0
 
-WORKDIR="$(mktemp -d "/tmp/allup-continue-test.XXXXXX")"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/allup-continue-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 # Pull the function under test out of functions.sh by name. Extraction goes

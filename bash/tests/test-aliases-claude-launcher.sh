@@ -9,7 +9,7 @@ REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail=0
 
-WORKDIR="$(mktemp -d "/tmp/aliases-claude-launcher-test.XXXXXX")"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/aliases-claude-launcher-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 # Sources aliases.sh under a synthetic HOME with env -i, so the real

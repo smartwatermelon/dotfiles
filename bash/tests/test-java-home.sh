@@ -10,7 +10,7 @@ REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail=0
 
-WORKDIR="$(mktemp -d "/tmp/java-home-test.XXXXXX")"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/java-home-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 # Print the JAVA_HOME env.sh sets in a scrubbed env. The stub only needs to
