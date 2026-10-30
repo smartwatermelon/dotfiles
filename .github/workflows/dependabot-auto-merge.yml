@@ -9,25 +9,10 @@ permissions:
   pull-requests: write
 
 jobs:
-  # This caller stub is intentionally a thin delegate, not a full
-  # implementation. The version-comparison logic, the dependabot/actions
-  # always-trusted namespace defaults, and the actor-spoofing guard all
-  # live in the canonical workflow (smartwatermelon/github-workflows,
-  # this file) rather than here — a local diff that only shows this
-  # stub shrinking will not show that logic; it moved, not disappeared.
-  # See smartwatermelon/dev-env#20 for why: copy-pasting this workflow
-  # into every consuming repo meant fixing a bug meant editing N repos,
-  # not one.
-  # See https://github.com/smartwatermelon/github-workflows/blob/670ac584da782f061a3804852b276cf3a3cfe6c2/.github/workflows/dependabot-auto-merge.yml#L150-L219
-  # (commit 670ac584da782f061a3804852b276cf3a3cfe6c2, job step 'Decide
-  # if PR is auto-mergeable') for the version-comparison and
-  # empty-dependency-names fail-closed logic this replaces. The
-  # trusted_namespaces input is additive, not a replacement: that step
-  # seeds `namespace_pattern="^(dependabot|actions"` before appending
-  # each entry passed here, so `trusted_namespaces: 'smartwatermelon'`
-  # yields an effective allowlist of dependabot|actions|smartwatermelon
-  # — identical coverage to the inline logic this replaces.
   dependabot-auto-merge:
-    uses: smartwatermelon/github-workflows/.github/workflows/dependabot-auto-merge.yml@dependabot-auto-merge-v2
+    uses: smartwatermelon/github-workflows/.github/workflows/dependabot-auto-merge.yml@dependabot-auto-merge-v3.1.0
     with:
-      trusted_namespaces: 'smartwatermelon'
+      sanity_checks: 'bash-tests' # bash-tests.yml: runs bash/tests/run-tests.sh
+    secrets: # these two by name; never `secrets: inherit`
+      MERGE_APP_CLIENT_ID: ${{ secrets.MERGE_APP_CLIENT_ID }}
+      MERGE_APP_PRIVATE_KEY: ${{ secrets.MERGE_APP_PRIVATE_KEY }}
