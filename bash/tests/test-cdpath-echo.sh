@@ -15,6 +15,8 @@ fail=0
 # never via direct $PWD-relative lookup.
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/cdpath-echo-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
+# macOS TMPDIR ends in "/", so the path has "//"; cd echoes it normalized.
+WORKDIR="$(CDPATH='' cd "${WORKDIR}" && pwd)"
 
 cdpath_base="${WORKDIR}/base"
 target_name="cdpath-target-$$"
