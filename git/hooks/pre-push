@@ -818,6 +818,107 @@ run_static_analysis() {
 run_static_analysis
 
 # =========================================================
+# SEMGREP CI-RULESET PARITY
+# =========================================================
+# A repo whose CI calls github-workflows' semgrep-scan.yml scans with fixed
+# rulesets when its SEMGREP_APP_TOKEN secret is absent. The scan above runs
+# the platform policies instead, which lack rules p/default has: on
+# 2026-10-30 a Dependabot cooldown of 3 days passed it and then failed CI in
+# five repos (p/default's dependabot-missing-cooldown). A push cannot see
+# whether the secret is set, so it also runs the rulesets CI would use
+# without one.
+
+# The reusable workflow's `rulesets` default, at semgrep-scan-v1.
+SEMGREP_CI_DEFAULT_RULESETS="p/default p/javascript p/typescript p/python p/ruby"
+
+# Prints the rulesets CI would scan with, one per line, or nothing when no
+# workflow in <workflows_dir> calls semgrep-scan.yml. Returns 2 when a
+# caller's rulesets value cannot be read or names an invalid config.
+_ci_semgrep_rulesets() {
+  # The hash character by code, so no literal one sits in this body: the
+  # tests slice functions out of this file by brace count with comments cut.
+  local dir="$1" f line found=0 hash=$'\x23'
+  local -a value=() out=()
+  [[ -d "${dir}" ]] || return 0
+  for f in "${dir}"/*.yml "${dir}"/*.yaml; do
+    [[ -f "${f}" ]] || continue
+    grep -qE "^[^${hash}]*semgrep-scan\.yml@" "${f}" || continue
+    found=1
+    line="$(grep -E '^[[:space:]]*rulesets:' "${f}" | head -n1)" || line=""
+    if [[ -z "${line}" ]]; then
+      read -r -a value <<<"${SEMGREP_CI_DEFAULT_RULESETS}"
+    else
+      line="${line/*rulesets:/}"
+      line="${line%%"${hash}"*}"
+      read -r -a value <<<"${line//[\"\']/}"
+      # A block scalar (| or >) spans lines this parser does not read.
+      if [[ -z "${value[0]:-}" || "${value[0]}" == "|"* || "${value[0]}" == ">"* ]]; then
+        echo "cannot read the rulesets value in ${f}" >&2
+        return 2
+      fi
+    fi
+    out+=("${value[@]}")
+  done
+  ((found)) || return 0
+  local r
+  for r in "${out[@]}"; do
+    # Same check as github-workflows semgrep/run-semgrep.sh.
+    if [[ ! "${r}" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./:@-]*$ ]]; then
+      echo "invalid Semgrep config name: ${r}" >&2
+      return 2
+    fi
+  done
+  printf '%s\n' "${out[@]}" | sort -u
+}
+
+run_ci_ruleset_scan() {
+  if ! command -v semgrep &>/dev/null; then
+    return 0
+  fi
+  local list rc=0
+  list="$(_ci_semgrep_rulesets .github/workflows)" || rc=$?
+  if ((rc != 0)); then
+    log_warning "🛑 Could not work out the Semgrep rulesets CI uses. Fix the caller's rulesets input."
+    exit 1
+  fi
+  [[ -n "${list}" ]] || return 0
+
+  local -a args=(scan --error --quiet --metrics=off)
+  local r
+  while IFS= read -r r; do
+    args+=(--config "${r}")
+  done <<<"${list}"
+  if git rev-parse --verify --quiet origin/main >/dev/null; then
+    args+=(--baseline-commit origin/main)
+  fi
+
+  log "Running Semgrep with the rulesets CI uses without a token..."
+  local exit_code=0
+  run_bounded "${SEMGREP_TIMEOUT_SECS}" semgrep "${args[@]}" . || exit_code=$?
+  case ${exit_code} in
+    0)
+      log_success "Semgrep CI-ruleset scan clean"
+      ;;
+    1)
+      echo "" >&2
+      log_warning "🛑 Semgrep CI rulesets found blocking issues. Fix them before pushing."
+      log_warning "   Reproduce: semgrep ${args[*]} ."
+      echo "" >&2
+      exit 1
+      ;;
+    *)
+      log_warning "⚠️  Semgrep CI-ruleset scan did not complete (exit ${exit_code}), not findings."
+      if strict_noninteractive_block; then
+        log_warning "🛑 Non-interactive strict mode — blocking push due to scan infra error"
+        log_warning "   Escape hatches: STRICT_PREPUSH=0 (ask user first) or POSTPUSH_LOOP=1"
+        exit 1
+      fi
+      ;;
+  esac
+}
+run_ci_ruleset_scan
+
+# =========================================================
 # FULL-DIFF REVIEW
 # =========================================================
 # Runs one review on the complete <base ref>...HEAD diff (see _base_ref):
