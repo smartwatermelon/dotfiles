@@ -11,7 +11,7 @@ isolate_git_env
 
 fail=0
 
-WORKDIR="$(mktemp -d "/tmp/allup-pull-retry-test.XXXXXX")"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/allup-pull-retry-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 # Extract the functions under test through bash's own parser, as
@@ -302,7 +302,7 @@ echo "local" >"${SCRIPTS}/fixed"
 run_allup ""
 check "status" "1" "${rc}"
 check "nothing runs" "" "${calls}"
-# realpath: on macOS /tmp resolves to /private/tmp.
+# realpath: on macOS /tmp and /var resolve under /private.
 scripts_real="$(realpath "${SCRIPTS}")"
 check_contains "names the clone and the minimum" \
   "allup needs scripts ${MIN} or later at ${scripts_real}" "${out}"

@@ -10,7 +10,7 @@ ALIASES_FILE="${ALIASES_FILE:-${REPO_ROOT}/bash/aliases.sh}"
 
 fail=0
 
-WORKDIR="$(mktemp -d "/tmp/aliases-clauded-prompt-test.XXXXXX")"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/aliases-clauded-prompt-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 # Expands aliases like an interactive shell. FAKE_TTY=1 stubs the TTY

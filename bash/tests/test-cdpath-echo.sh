@@ -13,7 +13,7 @@ fail=0
 # uniquely-named subdirectory, and a separate, unrelated CWD to run from —
 # so any resolution of the target name can only happen via CDPATH search,
 # never via direct $PWD-relative lookup.
-WORKDIR="$(mktemp -d "/tmp/cdpath-echo-test.XXXXXX")"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/cdpath-echo-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 cdpath_base="${WORKDIR}/base"
