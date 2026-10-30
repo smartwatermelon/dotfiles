@@ -462,6 +462,16 @@ _updates_shim_cleanup() {
 }
 # Not exported - internal helper
 
+# bash/node-firewall-sync.sh via sudo -n (never prompts); skipped where not installed.
+# Tests stub the *_BIN vars.
+_NODE_FW_SYNC_BIN="${_NODE_FW_SYNC_BIN:-/usr/local/sbin/node-firewall-sync}"
+_NODE_FW_SUDO_BIN="${_NODE_FW_SUDO_BIN:-/usr/bin/sudo}"
+_node_firewall_sync() {
+  [[ -x "${_NODE_FW_SYNC_BIN}" ]] || return 0
+  "${_NODE_FW_SUDO_BIN}" -n "${_NODE_FW_SYNC_BIN}"
+}
+# Not exported - internal helper
+
 # Update Homebrew packages
 # Package managers provide their own network error diagnostics, so no pre-check needed
 _homebrew_update() {
@@ -586,6 +596,12 @@ _homebrew_update() {
   if [[ "${result}" -ne 0 ]]; then
     _notif "brew cleanup failed (exit ${result})"
     return "${result}"
+  fi
+
+  # After cleanup, so entries for removed node versions can go too
+  _node_firewall_sync 2>&1 | _update_log
+  if [[ "${PIPESTATUS[0]}" -ne 0 ]]; then
+    _notif "node firewall sync failed (check log; is the sudoers entry installed?)"
   fi
 
   # Check installed formulae against Homebrew's advisory database (OSV.dev).

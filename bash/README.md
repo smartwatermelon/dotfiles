@@ -193,6 +193,29 @@ Follow the conventions the existing tests share:
 - Open with a comment explaining the regression the test covers and, where
   there is one, the issue number.
 
+## Firewall entries for Homebrew node
+
+Each `brew upgrade node` puts node at a new Cellar path. The macOS firewall
+then asks again whether "node" may accept incoming connections (dev-env#235).
+`node-firewall-sync.sh` adds and unblocks every installed node and removes
+entries for versions no longer on disk. `_homebrew_update` runs it through
+`sudo -n` after `brew cleanup`; a Mac without the setup below skips it.
+
+One-time setup per Mac, in a terminal. The copy must be root-owned and never a
+symlink: a root script the user can edit is a privilege escalation. Rerun the
+`install` line when the script changes.
+
+```bash
+sudo install -d -o root -g wheel -m 755 /usr/local/sbin
+sudo install -o root -g wheel -m 755 ~/Developer/dotfiles/bash/node-firewall-sync.sh /usr/local/sbin/node-firewall-sync
+f="$(mktemp)"; printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/node-firewall-sync ""\n' "$(id -un)" >"$f"
+sudo visudo -cf "$f" && sudo install -o root -g wheel -m 440 "$f" /etc/sudoers.d/node-firewall-sync; rm -f "$f"
+sudo -n /usr/local/sbin/node-firewall-sync
+```
+
+The `""` in the sudoers line allows the script with no arguments only. The last
+line should run without a password prompt and print what it changed.
+
 ## Requirements
 
 - macOS
