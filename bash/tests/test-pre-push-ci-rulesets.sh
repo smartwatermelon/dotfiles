@@ -150,11 +150,16 @@ else
   _fail "unexpected scan arguments: '${args}'"
 fi
 # Must match github-workflows semgrep/run-semgrep.sh, or a push and CI disagree.
-if [[ " ${args} " == *" --exclude-rule package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown "* ]]; then
-  _pass "scan excludes dependabot-missing-cooldown, as CI does"
-else
-  _fail "scan does not exclude dependabot-missing-cooldown: '${args}'"
-fi
+for rule in dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown \
+  npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age \
+  pnpm.pnpm-missing-minimum-release-age.pnpm-minimum-release-age \
+  bun.bun-missing-minimum-release-age.bun-missing-minimum-release-age; do
+  if [[ " ${args} " == *" --exclude-rule package_managers.${rule} "* ]]; then
+    _pass "scan excludes ${rule%%.*} rule, as CI does"
+  else
+    _fail "scan does not exclude ${rule}: '${args}'"
+  fi
+done
 got="$(scan "${repo}" 2)"
 expect "infra failure is advisory outside strict mode" "exit0:returned" "${got}"
 got="$(scan "${WORK}/blk" 0)"
