@@ -149,6 +149,12 @@ if [[ "${args}" == "semgrep scan --error "*"--config p/default "*" ." ]]; then
 else
   _fail "unexpected scan arguments: '${args}'"
 fi
+# Must match github-workflows semgrep/run-semgrep.sh, or a push and CI disagree.
+if [[ " ${args} " == *" --exclude-rule package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown "* ]]; then
+  _pass "scan excludes dependabot-missing-cooldown, as CI does"
+else
+  _fail "scan does not exclude dependabot-missing-cooldown: '${args}'"
+fi
 got="$(scan "${repo}" 2)"
 expect "infra failure is advisory outside strict mode" "exit0:returned" "${got}"
 got="$(scan "${WORK}/blk" 0)"
