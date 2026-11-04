@@ -888,9 +888,15 @@ run_ci_ruleset_scan() {
   while IFS= read -r r; do
     args+=(--config "${r}")
   done <<<"${list}"
-  # Same exclusion as github-workflows semgrep/run-semgrep.sh: the fleet
-  # Dependabot cooldown is 3 days, and this p/default rule fails under 7.
-  args+=(--exclude-rule package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown)
+  # Same list as github-workflows semgrep/run-semgrep.sh: fleet cooldown and
+  # release age are 3 days; these p/default rules fail under 7.
+  local rule
+  for rule in dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown \
+    npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age \
+    pnpm.pnpm-missing-minimum-release-age.pnpm-minimum-release-age \
+    bun.bun-missing-minimum-release-age.bun-missing-minimum-release-age; do
+    args+=(--exclude-rule "package_managers.${rule}")
+  done
   if git rev-parse --verify --quiet origin/main >/dev/null; then
     args+=(--baseline-commit origin/main)
   fi
