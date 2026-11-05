@@ -1737,3 +1737,13 @@ EOF
 
 my_prs() { _gh_my_search prs "$@"; }
 my_issues() { _gh_my_search issues "$@"; }
+
+# mla <PR#>: merge-lock auth <PR#> ok. A function, not an alias: Claude
+# Code's `!` shell loads this file but expands no aliases.
+mla() {
+  if [[ $# -ne 1 || ! $1 =~ ^[0-9]+$ ]]; then
+    printf 'usage: mla <PR number>\n' >&2
+    return 2
+  fi
+  "${_MLA_MERGE_LOCK_BIN:-merge-lock}" auth "$1" ok
+}
