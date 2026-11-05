@@ -3,6 +3,8 @@
 
 # Prompt cases stand in for _gh_wrapper_label_interactive; its `-t 0 && -t 2` is untested.
 set -uo pipefail
+# Hermetic: the real gh-app-routes.conf sends every smartwatermelon repo to the App.
+export GH_APP_ROUTES_FILE=/dev/null
 unset CDPATH
 
 TESTS_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

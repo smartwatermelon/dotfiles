@@ -25,6 +25,8 @@
 # All tokens are stub strings. The real per-owner variables are unset first so
 # nothing from the caller's environment reaches the stub.
 set -uo pipefail
+# Hermetic: the real gh-app-routes.conf sends every smartwatermelon repo to the App.
+export GH_APP_ROUTES_FILE=/dev/null
 unset CDPATH
 
 TESTS_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

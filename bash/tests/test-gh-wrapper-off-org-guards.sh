@@ -7,6 +7,8 @@
 # #391 added GH_REPO, PR URL, GraphQL and resolver cases; 54 of them fail on the wrapper before that fix.
 # #444 added GraphQL mergePullRequest cases and a REST merge after -R (section 6); 22 of them fail on the wrapper before that fix.
 set -uo pipefail
+# Hermetic: the real gh-app-routes.conf sends every smartwatermelon repo to the App.
+export GH_APP_ROUTES_FILE=/dev/null
 unset CDPATH
 
 TESTS_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

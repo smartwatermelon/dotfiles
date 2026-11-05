@@ -6,6 +6,8 @@
 # fail-closed check reads hosts.yml (its own output) rather than the auth gh
 # will actually use. That inverted assertion is the bug this test pins.
 set -uo pipefail
+# Hermetic: the real gh-app-routes.conf sends every smartwatermelon repo to the App.
+export GH_APP_ROUTES_FILE=/dev/null
 unset CDPATH
 
 TESTS_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

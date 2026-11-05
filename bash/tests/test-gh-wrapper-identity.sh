@@ -10,6 +10,8 @@
 #      (checkout under the beacon dir, or forked from beacon-biosignals).
 #   3. The twistedmelonman default for everything else.
 set -euo pipefail
+# Hermetic: the real gh-app-routes.conf sends every smartwatermelon repo to the App.
+export GH_APP_ROUTES_FILE=/dev/null
 
 unset CDPATH
 

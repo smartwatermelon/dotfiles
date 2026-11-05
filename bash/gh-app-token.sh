@@ -29,7 +29,8 @@ gh-app-token.sh: mint GitHub App installation tokens for repos routed to an App.
 
 Route file: $GH_APP_ROUTES_FILE, else gh-app-routes.conf beside this script's real
 path. One route per line: owner/repo, a TAB, op://vault/item, then optionally
-TAB-separated app_id=N and installation_id=N. Unlisted repos are not routed. Any
+TAB-separated app_id=N and installation_id=N. A key of owner/* routes every repo of
+that owner; an owner/repo line beats it wherever each sits. Unlisted repos are not routed. Any
 other trailing field makes the route malformed (exit 2), so a typo fails closed.
 
 Sources: app_id and installation_id come from the route line's fields when present,
@@ -116,9 +117,18 @@ _gh_app_split() {
   return 0
 }
 
+# Key $1 vs $2: 0 exact or owner form, 3 owner-wide, 1 no. Only literal owner/* is a wildcard.
+_gh_app_key_hit() {
+  local key="$1" want="$2"
+  [[ "${key}" == "${want}" || "owner:${key%%/*}" == "${want}" ]] && return 0
+  [[ "${want}" != owner:* && "${want}" == */* && "${key}" == "${want%%/*}/*" ]] && return 3
+  return 1
+}
+
 # _gh_app_route <owner/repo | owner:NAME>: print the routed item. 0 routed, 1 not, 2 malformed (fail closed).
+# A repo line beats owner/* in any order. owner:NAME takes the owner's first line.
 _gh_app_route() {
-  local want="$1" file line key
+  local want="$1" file line key hit wide=""
   file="$(_gh_app_routes_file)"
   [[ -r "${file}" ]] || return 1
   while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -126,27 +136,33 @@ _gh_app_route() {
     [[ -z "${line//[[:space:]]/}" || "${line}" =~ ^[[:space:]]*# ]] && continue
     if [[ "${line}" != *$'\t'* ]]; then
       key="$(_gh_app_lower "${line%%[[:space:]]*}")"
-      if [[ "${key}" == "${want}" || "owner:${key%%/*}" == "${want}" ]]; then
+      if _gh_app_key_hit "${key}" "${want}" || [[ $? -eq 3 ]]; then
         _gh_app_err "route for ${key} in ${file} has no TAB before its item; refusing to guess"
         return 2
       fi
       continue
     fi
     key="$(_gh_app_lower "${line%%$'\t'*}")"
-    if [[ "${key}" == "${want}" || "owner:${key%%/*}" == "${want}" ]]; then
-      if ! _gh_app_split "${line#*$'\t'}"; then
-        _gh_app_err "route for ${key} in ${file} has a field that is not app_id=N or installation_id=N"
-        return 2
-      fi
-      if [[ "${_GH_APP_ITEM}" != op://* ]]; then
-        _gh_app_err "route for ${key} in ${file} does not name an op:// item"
-        return 2
-      fi
-      printf '%s\n' "${_GH_APP_ITEM}"
-      return 0
+    hit=0
+    _gh_app_key_hit "${key}" "${want}" || hit=$?
+    ((hit == 1)) && continue
+    if ! _gh_app_split "${line#*$'\t'}"; then
+      _gh_app_err "route for ${key} in ${file} has a field that is not app_id=N or installation_id=N"
+      return 2
     fi
+    if [[ "${_GH_APP_ITEM}" != op://* ]]; then
+      _gh_app_err "route for ${key} in ${file} does not name an op:// item"
+      return 2
+    fi
+    if ((hit == 3)); then
+      [[ -z "${wide}" ]] && wide="${_GH_APP_ITEM}"
+      continue
+    fi
+    printf '%s\n' "${_GH_APP_ITEM}"
+    return 0
   done <"${file}"
-  return 1
+  [[ -n "${wide}" ]] || return 1
+  printf '%s\n' "${wide}"
 }
 
 # <op-item> <name>: print the field from its route lines. 0 found, 1 none, 2 malformed or conflicting.
