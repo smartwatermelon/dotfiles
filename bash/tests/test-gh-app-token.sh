@@ -114,6 +114,39 @@ done
 GH_APP_ROUTES_FILE="${WORKDIR}/missing.conf" _run route smartwatermelon/claude-wrapper
 if [[ "${rc}" -eq 1 ]]; then _pass "missing route file routes nothing"; else _fail "missing route file: rc=${rc}"; fi
 
+echo "--- owner-wide route (owner/*)"
+WIDE_ROUTES="${WORKDIR}/routes-wide.conf"
+OTHER_ITEM='op://Automation/other app'
+# The owner/* line comes first, so the exact line below must win by kind, not by order.
+printf 'SmartWatermelon/*\t%s\nsmartwatermelon/special\t%s\ntwistedmelonman/*\tnot-an-item\nnightowlstudiollc/* %s\nsmartwatermelon/dot*\t%s\n' \
+  "${ITEM}" "${OTHER_ITEM}" "${ITEM}" "${OTHER_ITEM}" >"${WIDE_ROUTES}"
+for spec in smartwatermelon/dotfiles git@github.com:SmartWatermelon/claude-config.git \
+  https://github.com/smartwatermelon/github-workflows/pull/9 smartwatermelon/dotty; do
+  GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run route "${spec}"
+  if [[ "${rc}" -eq 0 && "${out}" == "${ITEM}" ]]; then _pass "owner-wide route ${spec}"; else _fail "owner-wide ${spec}: rc=${rc} out=${out}"; fi
+done
+GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run route smartwatermelon/special
+if [[ "${rc}" -eq 0 && "${out}" == "${OTHER_ITEM}" ]]; then _pass "a repo line beats an earlier owner/* line"; else _fail "exact vs wide: rc=${rc} out=${out}"; fi
+for spec in smartwatermelonx/dotfiles smartwatermelo/dotfiles someone/dotfiles smartwatermelon \
+  git@gitlab.com:smartwatermelon/dotfiles.git; do
+  GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run route "${spec}"
+  if [[ "${rc}" -eq 1 && -z "${out}" ]]; then _pass "owner-wide does not route ${spec}"; else _fail "owner-wide leak ${spec}: rc=${rc} out=${out}"; fi
+done
+for spec in twistedmelonman/anything nightowlstudiollc/anything; do
+  GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run route "${spec}"
+  if [[ "${rc}" -eq 2 && -z "${out}" ]]; then _pass "malformed owner/* line fails closed: ${spec}"; else _fail "malformed wide ${spec}: rc=${rc}"; fi
+done
+GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run check smartwatermelon/dotfiles
+if [[ "${rc}" -eq 0 && "${out}" == *"routed to ${ITEM}"* ]]; then _pass "check follows an owner/* route"; else _fail "check wide: rc=${rc} out=${out}"; fi
+GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run smartwatermelon
+if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" ]]; then _pass "owner form mints from an owner/* line"; else _fail "owner form wide: rc=${rc} err=${err}"; fi
+out="$(printf 'protocol=https\nhost=github.com\npath=smartwatermelon/dotfiles.git\n\n' \
+  | GH_APP_ROUTES_FILE="${WIDE_ROUTES}" bash "${SCRIPT}" git-credential "${ITEM}" get 2>/dev/null)"
+if [[ "${out}" == *"password=${STUB_TOK}"* ]]; then _pass "credential get answers a path under owner/*"; else _fail "credential wide: out=${out}"; fi
+out="$(printf 'protocol=https\nhost=github.com\npath=smartwatermelon/special.git\n\n' \
+  | GH_APP_ROUTES_FILE="${WIDE_ROUTES}" bash "${SCRIPT}" git-credential "${ITEM}" get 2>/dev/null)"
+if [[ -z "${out}" ]]; then _pass "credential get refuses a repo whose exact line names another item"; else _fail "credential exact override answered"; fi
+
 echo "--- mint and cache"
 _clear_cache
 _run --item "${ITEM}" smartwatermelon
