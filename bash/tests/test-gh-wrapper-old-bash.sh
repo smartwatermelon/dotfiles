@@ -2,6 +2,8 @@
 #shellcheck shell=bash
 # gh-wrapper.sh under macOS /bin/bash 3.2, executed and sourced. Mock gh, sandbox HOME. Skips without bash 3.x.
 set -uo pipefail
+# Hermetic: the real gh-app-routes.conf sends every smartwatermelon repo to the App.
+export GH_APP_ROUTES_FILE=/dev/null
 
 unset CDPATH
 
@@ -41,10 +43,10 @@ check() {
   shift 3
   local out rc
   if [[ "${mode}" == "exec" ]]; then
-    out="$(env -i HOME="${SANDBOX}/home" PATH="${OLD_PATH}" \
+    out="$(env -i HOME="${SANDBOX}/home" GH_APP_ROUTES_FILE="${GH_APP_ROUTES_FILE}" PATH="${OLD_PATH}" \
       /bin/bash "${WRAPPER}" "$@" 2>&1)"
   else
-    out="$(env -i HOME="${SANDBOX}/home" PATH="${OLD_PATH}" WRAP="${WRAPPER}" \
+    out="$(env -i HOME="${SANDBOX}/home" GH_APP_ROUTES_FILE="${GH_APP_ROUTES_FILE}" PATH="${OLD_PATH}" WRAP="${WRAPPER}" \
       /bin/bash -c "source \"\${WRAP}\"; gh \"\$@\"" _ "$@" 2>&1)"
   fi
   rc=$?

@@ -9,6 +9,8 @@
 # code through. A non-scope failure prints no hint. A success prints nothing.
 # Design: dev-env docs/superpowers/specs/2026-09-03-org-migration-design.md.
 set -uo pipefail
+# Hermetic: the real gh-app-routes.conf sends every smartwatermelon repo to the App.
+export GH_APP_ROUTES_FILE=/dev/null
 
 unset CDPATH
 
@@ -24,8 +26,7 @@ source "${_tests_dir}/lib/git-env-isolation.sh"
 isolate_git_env
 
 WRAPPER="${REPO_ROOT}/bash/gh-wrapper.sh"
-WORKDIR="/tmp/gh-wrapper-scope-hint-test-$$"
-mkdir -p "${WORKDIR}"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/gh-wrapper-scope-hint-test.XXXXXX")" || exit 1
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 export HOME="${WORKDIR}/home"
