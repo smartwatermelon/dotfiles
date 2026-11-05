@@ -14,6 +14,12 @@ if [[ -f "${BASH_CONFIG_DIR}/secrets.sh" ]]; then
   source "${BASH_CONFIG_DIR}/secrets.sh"
 fi
 
+# Interactive shells only: GH_TOKEN_NOS from the login Keychain (owner-tokens.sh).
+if [[ -f "${BASH_CONFIG_DIR}/owner-tokens.sh" ]]; then
+  #shellcheck source=owner-tokens.sh
+  source "${BASH_CONFIG_DIR}/owner-tokens.sh"
+fi
+
 # Canonical location of the work (Beacon) checkout root. Single source of
 # truth for every consumer that needs to know where work repos live:
 # gh-wrapper.sh's identity auto-switch (GH_WRAPPER_BEACON_DIR), install.sh's

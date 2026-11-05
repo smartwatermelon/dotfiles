@@ -38,6 +38,8 @@ mkdir -p "${TMPDIR}"
 ITEM='op://Automation/test app'
 ROUTES="${WORKDIR}/routes.conf"
 printf 'smartwatermelon/claude-wrapper\t%s\nsmartwatermelon/broken no-tab\n' "${ITEM}" >"${ROUTES}"
+WIDE_ROUTES="${WORKDIR}/routes-wide.conf"
+printf 'smartwatermelon/*\t%s\n' "${ITEM}" >"${WIDE_ROUTES}"
 CACHE_KEY="$(printf '%s' "${ITEM}" | openssl dgst -sha256 -r)"
 CACHE_FILE="${XDG_CACHE_HOME}/gh-app-tokens/${CACHE_KEY%% *}"
 _seed_cache() {
@@ -87,7 +89,8 @@ _run() {
   local mode="$1" cwd="$2"
   shift 3
   : >"${LOG}"
-  local -a common=(GH_APP_ROUTES_FILE="${ROUTES}" GH_TOKEN=launch-stub GH_TOKEN_SWM=swm-stub GH_TOKEN_TWM=twm-stub)
+  local -a common=(GH_APP_ROUTES_FILE="${RUN_ROUTES:-${ROUTES}}" GH_TOKEN=launch-stub GH_TOKEN_SWM=swm-stub
+    GH_TOKEN_TWM=twm-stub GH_TOKEN_NOS=nos-stub)
   if [[ "${mode}" == "standalone" ]]; then
     (cd "${cwd}" && env "${common[@]}" PATH="${STUB_DIR}:${PATH}" bash "${WRAPPER}" "$@") >/dev/null 2>"${WORKDIR}/err"
   else
@@ -136,6 +139,18 @@ for mode in standalone function; do
   _expect swm-stub "${mode}: owner-only repo list is not routed"
   _run "${mode}" "${NEUTRAL}" -- api orgs/smartwatermelon
   _expect swm-stub "${mode}: api orgs/OWNER is not routed"
+
+  # An owner/* line also routes calls that name only the owner; other owners keep their PATs.
+  RUN_ROUTES="${WIDE_ROUTES}" _run "${mode}" "${NEUTRAL}" -- repo list smartwatermelon
+  _expect ghs_app.tok-1 "${mode}: owner/* routes owner-only repo list"
+  RUN_ROUTES="${WIDE_ROUTES}" _run "${mode}" "${NEUTRAL}" -- api orgs/SmartWatermelon
+  _expect ghs_app.tok-1 "${mode}: owner/* routes api orgs/OWNER (any case)"
+  RUN_ROUTES="${WIDE_ROUTES}" _run "${mode}" "${NEUTRAL}" -- search prs --owner smartwatermelon --state open
+  _expect ghs_app.tok-1 "${mode}: owner/* routes search --owner"
+  RUN_ROUTES="${WIDE_ROUTES}" _run "${mode}" "${EX}" -- pr list
+  _expect ghs_app.tok-1 "${mode}: owner/* routes an unlisted repo"
+  RUN_ROUTES="${WIDE_ROUTES}" _run "${mode}" "${NEUTRAL}" -- repo list nightowlstudiollc
+  _expect nos-stub "${mode}: owner/* for one owner leaves another owner on its PAT"
 
   # No cache and op fails: gh must not run at all.
   rm -f "${CACHE_FILE}"

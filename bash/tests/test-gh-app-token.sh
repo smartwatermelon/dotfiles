@@ -136,6 +136,14 @@ for spec in twistedmelonman/anything nightowlstudiollc/anything; do
   GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run route "${spec}"
   if [[ "${rc}" -eq 2 && -z "${out}" ]]; then _pass "malformed owner/* line fails closed: ${spec}"; else _fail "malformed wide ${spec}: rc=${rc}"; fi
 done
+GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run owner-route SmartWatermelon
+if [[ "${rc}" -eq 0 && "${out}" == "${ITEM}" ]]; then _pass "owner-route answers from owner/*"; else _fail "owner-route: rc=${rc} out=${out}"; fi
+for spec in smartwatermelon "smartwatermelon/*" "bad owner"; do
+  _run owner-route "${spec}"
+  if [[ "${rc}" -eq 1 && -z "${out}" ]]; then _pass "owner-route ignores repo lines and bad input: ${spec}"; else _fail "owner-route ${spec}: rc=${rc} out=${out}"; fi
+done
+GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run owner-route twistedmelonman
+if [[ "${rc}" -eq 2 ]]; then _pass "owner-route fails closed on a malformed owner/* line"; else _fail "owner-route malformed: rc=${rc}"; fi
 GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run check smartwatermelon/dotfiles
 if [[ "${rc}" -eq 0 && "${out}" == *"routed to ${ITEM}"* ]]; then _pass "check follows an owner/* route"; else _fail "check wide: rc=${rc} out=${out}"; fi
 GH_APP_ROUTES_FILE="${WIDE_ROUTES}" _run smartwatermelon
