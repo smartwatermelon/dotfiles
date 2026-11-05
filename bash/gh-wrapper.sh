@@ -113,7 +113,7 @@ _gh_wrapper_resolve_owner() {
 
 # Prints the 1Password item if this call's repo is in gh-app-routes.conf (claude-config#659).
 
-# 0 routed, 1 not, 2 malformed route or no minter. Owner-only targets name no repo: never routed.
+# 0 routed, 1 not, 2 malformed route or no minter. An owner-only target is routed only by an owner/* line.
 _gh_wrapper_app_route() {
   local target
   target="$(_gh_wrapper_resolve_target "$@")" || target=""
@@ -121,6 +121,10 @@ _gh_wrapper_app_route() {
   if [[ ! -f "${_gh_wrapper_app_minter}" ]]; then
     echo "[gh] ERROR: App token minter missing: ${_gh_wrapper_app_minter}" >&2
     return 2
+  fi
+  if [[ "${target}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    "${BASH}" "${_gh_wrapper_app_minter}" owner-route "${target}"
+    return
   fi
   "${BASH}" "${_gh_wrapper_app_minter}" route "${target}"
 }

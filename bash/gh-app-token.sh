@@ -13,6 +13,8 @@ gh-app-token.sh: mint GitHub App installation tokens for repos routed to an App.
   gh-app-token.sh route <spec>
       Print the 1Password item routed for <spec> (owner/repo, a git remote URL or a
       github.com URL). Exit 0 routed, 1 not routed, 2 route file malformed for it.
+  gh-app-token.sh owner-route <owner>
+      As route, for a call that names only an owner: only an <owner>/* line matches.
   gh-app-token.sh [--item <op-item>] <owner>
       Print an installation token. The item defaults to the first route for <owner>.
       This prints a secret: do not run it at a terminal.
@@ -360,6 +362,13 @@ _gh_app_main() {
       repo="$(_gh_app_spec_repo "${2:-}")"
       [[ -n "${repo}" ]] || return 1
       _gh_app_route "${repo}"
+      return
+      ;;
+    owner-route)
+      # Only an owner/* line answers: a call that names an owner but no repo has no repo line to match.
+      spec="$(_gh_app_lower "${2:-}")"
+      [[ "${spec}" =~ ^[a-z0-9._-]+$ ]] || return 1
+      _gh_app_route "${spec}/*"
       return
       ;;
     repo)
