@@ -11,7 +11,11 @@ _owner_tokens_load() {
   [[ -n "${GH_TOKEN_NOS:-}" ]] && return 0
   command -v security >/dev/null 2>&1 || return 0
   me="$(id -un)" || return 0
-  tok="$(security find-generic-password -s gh-token-nightowlstudiollc -a "${me}" -w 2>/dev/null)" || return 0
+  # Bounded: a locked Keychain must not hang shell startup on a dialog.
+  # No arrays: an empty one trips set -u in macOS bash 3.2.
+  local t=""
+  command -v timeout >/dev/null 2>&1 && t="timeout 3"
+  tok="$(${t} security find-generic-password -s gh-token-nightowlstudiollc -a "${me}" -w 2>/dev/null)" || return 0
   [[ "${tok}" =~ ^[A-Za-z0-9_]+$ ]] || return 0
   export GH_TOKEN_NOS="${tok}"
 }

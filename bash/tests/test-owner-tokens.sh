@@ -27,6 +27,7 @@ case "\${SEC_MODE:-ok}" in
   ok) echo "github_pat_stub123" ;;
   missing) exit 44 ;;
   junk) echo 'not a token; rm -rf' ;;
+  hang) sleep 30 ;;
 esac
 STUB_EOF
 chmod +x "${STUB_DIR}/security"
@@ -57,6 +58,12 @@ out="$(_load i SEC_MODE=missing)"
 if [[ "${out}" == "<unset>" ]]; then _pass "missing Keychain item loads nothing"; else _fail "missing: out=${out}"; fi
 out="$(_load i SEC_MODE=junk)"
 if [[ "${out}" == "<unset>" ]]; then _pass "a value that is not token-shaped is refused"; else _fail "junk: out=${out}"; fi
+if command -v timeout >/dev/null 2>&1; then
+  start="$(date +%s)"
+  out="$(_load i SEC_MODE=hang)"
+  took=$(($(date +%s) - start))
+  if [[ "${out}" == "<unset>" && "${took}" -lt 10 ]]; then _pass "a hung Keychain read gives up (${took}s)"; else _fail "hang: out=${out} took=${took}s"; fi
+fi
 out="$(_load i)"
 if [[ "${out}" != *leaked-fn* ]]; then _pass "the loader function does not stay in the shell"; else _fail "function leaked"; fi
 if ! grep -q -E 'GH_TOKEN(_SWM|_TWM)?=|GITHUB_TOKEN=' "${LOADER}"; then
