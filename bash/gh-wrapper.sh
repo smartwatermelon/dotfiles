@@ -460,6 +460,9 @@ _gh_wrapper_identity_for_owner() {
 # Returns 0 = not applicable, 1 = fail closed, 2 = fallback applied.
 _gh_wrapper_scoped_fallback() {
   local why="$1"
+  # Agents only: Andrew's shell holds just GH_TOKEN_NOS and uses the keyring
+  # for other owners. Same CLAUDECODE test as sugh.
+  [[ -z "${CLAUDECODE:-}" ]] && return 0
   [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]] && return 0
   [[ -z "${GH_TOKEN_SWM:-}" && -z "${GH_TOKEN_NOS:-}" && -z "${GH_TOKEN_TWM:-}" ]] && return 0
   # Recovery Andrew named in dotfiles#374 for a GH_TOKEN_* that is not set.
