@@ -37,6 +37,8 @@ trap 'rm -rf "${WORKDIR}"' EXIT
 
 unset GH_TOKEN GITHUB_TOKEN GH_HOST CLAUDE_GH_TOKEN_LOGIN CLAUDE_GH_TOKEN_ROUTER
 unset GH_TOKEN_SWM GH_TOKEN_NOS GH_TOKEN_TWM _GH_REVIEW_DONE _gh_wrapper_review_script
+# The TWM fallback applies only under Claude Code; cases opt in with CLAUDECODE=1.
+unset CLAUDECODE
 
 GIT=/usr/bin/git
 fail=0
@@ -377,14 +379,14 @@ for mode in standalone function; do
 
   # claude-wrapper#124: GH_TOKEN unset, GH_TOKEN_* present, but no owner
   # resolved or an unmapped owner: GH_TOKEN_TWM plus a stderr warning.
-  _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-stub GH_TOKEN_TWM=twm-stub -- api user
+  _run "${mode}" "${NEUTRAL}" CLAUDECODE=1 GH_TOKEN_SWM=swm-stub GH_TOKEN_TWM=twm-stub -- api user
   if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" && "${err}" == *"no owner resolved"* &&
     "${err}" == *"GH_TOKEN_TWM"* && "${err}" == *"-R OWNER/REPO"* ]]; then
     _pass "${mode}: no owner + GH_TOKEN unset uses GH_TOKEN_TWM with a warning"
   else
     _fail "${mode}: no owner fallback: rc=${rc} token=${logged} err=${err}"
   fi
-  _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-stub GH_TOKEN_NOS=nos-stub GH_TOKEN_TWM=twm-stub -- \
+  _run "${mode}" "${NEUTRAL}" CLAUDECODE=1 GH_TOKEN_SWM=swm-stub GH_TOKEN_NOS=nos-stub GH_TOKEN_TWM=twm-stub -- \
     pr list -R beacon-biosignals/x
   if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" && "${err}" == *"owner 'beacon-biosignals' has no mapped token"* &&
     "${err}" == *"GH_TOKEN_TWM"* && "${err}" == *"-R OWNER/REPO"* ]]; then
@@ -392,7 +394,7 @@ for mode in standalone function; do
   else
     _fail "${mode}: unmapped owner fallback: rc=${rc} token=${logged} err=${err}"
   fi
-  _run "${mode}" "${NEUTRAL}" GH_TOKEN= GITHUB_TOKEN= GH_TOKEN_TWM=twm-stub -- api user
+  _run "${mode}" "${NEUTRAL}" CLAUDECODE=1 GH_TOKEN= GITHUB_TOKEN= GH_TOKEN_TWM=twm-stub -- api user
   if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" && "${err}" == *"no owner resolved"* ]]; then
     _pass "${mode}: empty GH_TOKEN/GITHUB_TOKEN also take the fallback"
   else
@@ -401,7 +403,7 @@ for mode in standalone function; do
   # GH_TOKEN_TWM unset: fail closed, stub never reached, no keyring.
   for owner_args in "api user" "pr list -R beacon-biosignals/x"; do
     read -ra case_args <<<"${owner_args}"
-    _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-stub -- "${case_args[@]}"
+    _run "${mode}" "${NEUTRAL}" CLAUDECODE=1 GH_TOKEN_SWM=swm-stub -- "${case_args[@]}"
     if [[ "${rc}" -ne 0 && "${err}" == *"GH_TOKEN_TWM is not set"* && ! -s "${LOG}" ]]; then
       _pass "${mode}: '${owner_args}' with GH_TOKEN_TWM unset fails closed"
     else
@@ -409,21 +411,21 @@ for mode in standalone function; do
     fi
   done
   # The warning names variables, never values.
-  _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-secret-value GH_TOKEN_NOS=nos-secret-value \
+  _run "${mode}" "${NEUTRAL}" CLAUDECODE=1 GH_TOKEN_SWM=swm-secret-value GH_TOKEN_NOS=nos-secret-value \
     GH_TOKEN_TWM=twm-secret-value -- api user
   if [[ "${err}" != *secret-value* ]]; then
     _pass "${mode}: fallback warning contains no token value"
   else
     _fail "${mode}: fallback warning leaked a token value"
   fi
-  _run "${mode}" "${NEUTRAL}" GH_TOKEN_SWM=swm-secret-value -- api user
+  _run "${mode}" "${NEUTRAL}" CLAUDECODE=1 GH_TOKEN_SWM=swm-secret-value -- api user
   if [[ "${err}" != *secret-value* ]]; then
     _pass "${mode}: fail-closed message contains no token value"
   else
     _fail "${mode}: fail-closed message leaked a token value"
   fi
   # Mapped owner whose own variable is unset or empty: TWM plus warning.
-  _run "${mode}" "${SWM}" GH_TOKEN_NOS=nos-stub GH_TOKEN_SWM= GH_TOKEN_TWM=twm-stub -- pr list
+  _run "${mode}" "${SWM}" CLAUDECODE=1 GH_TOKEN_NOS=nos-stub GH_TOKEN_SWM= GH_TOKEN_TWM=twm-stub -- pr list
   if [[ "${rc}" -eq 0 && "${logged}" == "twm-stub" &&
     "${err}" == *"owner 'smartwatermelon' maps to GH_TOKEN_SWM, which is not set"* &&
     "${err}" == *"-R OWNER/REPO"* && "${err}" == *"refresh it in 1Password"* &&
@@ -433,7 +435,7 @@ for mode in standalone function; do
     _fail "${mode}: mapped-unset fallback: rc=${rc} token=${logged} err=${err}"
   fi
   # ...and both unset: fail closed.
-  _run "${mode}" "${SWM}" GH_TOKEN_NOS=nos-secret-value -- pr list
+  _run "${mode}" "${SWM}" CLAUDECODE=1 GH_TOKEN_NOS=nos-secret-value -- pr list
   if [[ "${rc}" -ne 0 && "${err}" == *"maps to GH_TOKEN_SWM, which is not set, and GH_TOKEN_TWM is not set"* &&
     "${err}" == *"refresh it in 1Password"* && "${err}" != *secret-value* && ! -s "${LOG}" ]]; then
     _pass "${mode}: mapped owner, own var and TWM unset: fails closed"
@@ -441,11 +443,25 @@ for mode in standalone function; do
     _fail "${mode}: mapped-unset fail-closed: rc=${rc} err=${err}"
   fi
   # Owner is twistedmelonman and TWM is unset: fail closed.
-  _run "${mode}" "${TWM}" GH_TOKEN_SWM=swm-stub -- pr list
+  _run "${mode}" "${TWM}" CLAUDECODE=1 GH_TOKEN_SWM=swm-stub -- pr list
   if [[ "${rc}" -ne 0 && "${err}" == *"maps to GH_TOKEN_TWM, which is not set"* && ! -s "${LOG}" ]]; then
     _pass "${mode}: twistedmelonman owner with TWM unset fails closed"
   else
     _fail "${mode}: TWM-owner fail-closed: rc=${rc} err=${err}"
+  fi
+  # Andrew's shell (no CLAUDECODE) with only GH_TOKEN_NOS: keyring, no error.
+  _run "${mode}" "${TWM}" GH_TOKEN_NOS=nos-stub -- pr list
+  if [[ "${rc}" -eq 0 && "${logged}" == "kr-twistedmelonman" && "${err}" != *"is not set"* ]]; then
+    _pass "${mode}: human shell, twistedmelonman owner, NOS only: keyring login"
+  else
+    _fail "${mode}: human-shell keyring: rc=${rc} token=${logged} err=${err}"
+  fi
+  # Same shell, owner given by --owner as my-prs does, from a neutral dir.
+  _run "${mode}" "${NEUTRAL}" GH_TOKEN_NOS=nos-stub -- search prs --owner=twistedmelonman
+  if [[ "${rc}" -eq 0 && "${logged}" == "kr-twistedmelonman" && "${err}" != *"is not set"* ]]; then
+    _pass "${mode}: human shell, --owner=twistedmelonman, NOS only: keyring login"
+  else
+    _fail "${mode}: human-shell --owner keyring: rc=${rc} token=${logged} err=${err}"
   fi
   # A set GH_TOKEN is never replaced by the fallback.
   _run "${mode}" "${NEUTRAL}" GH_TOKEN=launch-stub GH_TOKEN_TWM=twm-stub -- api user
