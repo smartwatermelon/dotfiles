@@ -81,12 +81,46 @@ and repository linters, security scans, project tests, GitHub identity
 routing, and server-side required checks/reviews remain in force. Skipped
 CC gates are named in hook output; no `--no-verify` switch is needed.
 
-Codex does not invoke the Claude pre-merge authorizer. Until a separate
-Codex merge authorizer exists, the CLI refuses that merge path; use the
-existing human-approved GitHub workflow. Direct API merge bypasses remain
-blocked. Other sessions retain their existing behavior.
+Codex merges use `bash/gh-codex-merge.sh`, independently of Claude. The human
+key is the account selected by the existing owner-to-human routing
+(`twistedmelonman` for the personal repositories); it must currently have
+write access and an undismissed approval of the exact live PR head. The
+second key is the selected GitHub App installation identity. Personal-token
+merge fallback is refused.
+
+The authorizer requires an open, non-draft, approved, cleanly mergeable PR,
+active branch rules requiring approval of the last push, and a nonempty
+set of passing required checks. It paginates reviews/rules, rechecks PR
+state, then supplies `--match-head-commit` to the ordinary CLI merge. GitHub
+continues enforcing branch protections at merge time. Read errors, stale
+heads, unavailable protection data, and failed/pending/skipped required
+check buckets block. Classic-protection-only repositories need equivalent
+active rules before this route can authorize them.
+
+The head constraint is atomic at GitHub. Routed-human approval/permission
+reads are preflight checks rather than an atomic review-state lock; GitHub
+independently enforces the configured branch rules at merge time.
+
+Use an explicit PR number or canonical GitHub PR URL and one immediate
+method, for example `gh pr merge 7 -R smartwatermelon/example --squash`.
+`--merge`, `--rebase`, `--match-head-commit`, and `--delete-branch` are also
+supported. Admin overrides, auto-merge modes, implicit branch selection,
+and other flags are refused without echoing their values. Merge queues
+are refused because the CLI can implicitly enable deferred auto-merge.
+Failed merges are not retried automatically.
+Direct REST/GraphQL merge bypasses remain blocked; other sessions retain
+their existing behavior. No Claude hook, authorization receipt, or AI
+reviewer is involved in the Codex route.
 
 Regression coverage: `bash bash/tests/run-tests.sh codex-hook-isolation`.
+Merge coverage: `bash bash/tests/run-tests.sh gh-wrapper-codex-merge`.
+
+Existing shells retain exported functions. Reload them after updating with
+`source ~/.config/bash/gh-wrapper.sh`.
+
+API contracts: [CLI head constraint](https://cli.github.com/manual/gh_pr_merge),
+[review pagination](https://docs.github.com/en/rest/pulls/reviews#list-reviews-for-a-pull-request),
+and [active branch rules](https://docs.github.com/en/rest/repos/rules#get-rules-for-a-branch).
 
 ## Git Hooks
 
