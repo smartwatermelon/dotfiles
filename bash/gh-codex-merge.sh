@@ -78,7 +78,7 @@ _gh_codex_merge_authorize() {
         ;;
       --delete-branch | -d) delete_branch=1 ;;
       -*)
-        _gh_codex_merge_block "Unsupported merge option: ${arg}. Admin/auto modes are not authorized."
+        _gh_codex_merge_block 'Unsupported merge option. Admin/auto modes and unlisted flags are not authorized.'
         return 1
         ;;
       *)
@@ -186,8 +186,8 @@ _gh_codex_merge_authorize() {
     _gh_codex_merge_block 'Cannot read active branch rules.'
     return 1
   fi
-  # Server enforcement closes approval-withdrawal races between preflight and
-  # merge. Missing protection is not a reason to fall back to local checks.
+  # Retain server approval enforcement at merge time. The routed-human
+  # checks are preflight reads, not an atomic lock on review state.
   if ! jq -e '
     type == "array" and length > 0 and all(.[]; type == "array")
     and any(.[][]; .type == "pull_request"
@@ -195,6 +195,10 @@ _gh_codex_merge_authorize() {
       and .parameters.require_last_push_approval == true)
   ' <<<"${rules}" >/dev/null; then
     _gh_codex_merge_block 'Active rules must require approval and approval of the last push.'
+    return 1
+  fi
+  if jq -e 'any(.[][]; .type == "merge_queue")' <<<"${rules}" >/dev/null; then
+    _gh_codex_merge_block 'Merge queues are unsupported; the CLI can implicitly enable deferred auto-merge.'
     return 1
   fi
   if ! reviews="$(_gh_wrapper_real_gh_selected "${real_gh}" api --hostname github.com --method GET \

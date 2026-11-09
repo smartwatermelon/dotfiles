@@ -188,6 +188,12 @@ for mode in standalone function exported; do
     expect_block "${mode}" "reject ${flags}" pr merge 7 --squash "${flags}"
   done
   reset_case
+  expect_block "${mode}" 'unsupported sensitive flag is redacted' pr merge 7 --squash --token=fixture-do-not-log
+  if grep -q fixture-do-not-log "${work}/output"; then
+    echo 'FAIL: unsupported argument leaked into denial'
+    exit 1
+  fi
+  reset_case
   expect_block "${mode}" 'head mismatch' pr merge 7 --squash --match-head-commit "${other}"
   reset_case
   expect_block "${mode}" 'conflicting URL and repo' pr merge https://github.com/smartwatermelon/other/pull/7 --repo smartwatermelon/example --squash
@@ -237,6 +243,9 @@ for mode in standalone function exported; do
   reset_case
   mutate permission '.permission="read"'
   expect_block "${mode}" 'reviewer write access revoked' pr merge 7 --squash
+  reset_case
+  mutate rules '.[0] += [{"type":"merge_queue"}]'
+  expect_block "${mode}" 'queue cannot implicitly enable auto-merge' pr merge 7 --squash
   reset_case
   printf 'malformed\n' >"${work}/data/reviews.json"
   expect_block "${mode}" 'malformed review response' pr merge 7 --squash

@@ -97,17 +97,26 @@ heads, unavailable protection data, and failed/pending/skipped required
 check buckets block. Classic-protection-only repositories need equivalent
 active rules before this route can authorize them.
 
+The head constraint is atomic at GitHub. Routed-human approval/permission
+reads are preflight checks rather than an atomic review-state lock; GitHub
+independently enforces the configured branch rules at merge time.
+
 Use an explicit PR number or canonical GitHub PR URL and one immediate
 method, for example `gh pr merge 7 -R smartwatermelon/example --squash`.
 `--merge`, `--rebase`, `--match-head-commit`, and `--delete-branch` are also
 supported. Admin overrides, auto-merge modes, implicit branch selection,
-and other flags are refused. Failed merges are not retried automatically.
+and other flags are refused without echoing their values. Merge queues
+are refused because the CLI can implicitly enable deferred auto-merge.
+Failed merges are not retried automatically.
 Direct REST/GraphQL merge bypasses remain blocked; other sessions retain
 their existing behavior. No Claude hook, authorization receipt, or AI
 reviewer is involved in the Codex route.
 
 Regression coverage: `bash bash/tests/run-tests.sh codex-hook-isolation`.
 Merge coverage: `bash bash/tests/run-tests.sh gh-wrapper-codex-merge`.
+
+Existing shells retain exported functions. Reload them after updating with
+`source ~/.config/bash/gh-wrapper.sh`.
 
 API contracts: [CLI head constraint](https://cli.github.com/manual/gh_pr_merge),
 [review pagination](https://docs.github.com/en/rest/pulls/reviews#list-reviews-for-a-pull-request),
