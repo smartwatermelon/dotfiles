@@ -50,7 +50,6 @@ fi
 
 # Expand tilde in path
 TEMPLATE_DIR="${TEMPLATE_DIR/#\~/${HOME}}"
-CLAUDE_TEMPLATE="${TEMPLATE_DIR}/.claude-template"
 
 # Seed .editorconfig into a NEWLY INITIALIZED repo.
 #
@@ -108,6 +107,12 @@ seed_editorconfig() {
 }
 
 seed_editorconfig || true
+
+# Keep the shared editor settings; do not provision Claude configuration for Codex.
+if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
+  exit 0
+fi
+CLAUDE_TEMPLATE="${TEMPLATE_DIR}/.claude-template"
 
 # Scaffold only on a fresh clone or init -- never on a branch switch or a new
 # linked worktree.

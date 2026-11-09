@@ -45,6 +45,12 @@
 
 set -euo pipefail
 
+# The personify length gate is a CC compensation layer, not a Codex gate.
+if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
+  echo "length-caps: Codex session; CC-specific length gate skipped." >&2
+  exit 0
+fi
+
 GATE_REVIEW="${HOME}/.claude/scripts/gate-review.sh"
 
 # 0 if git matches the pattern to every probe path, 1 if not, 2 on error.

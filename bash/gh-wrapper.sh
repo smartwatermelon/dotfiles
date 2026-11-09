@@ -781,6 +781,10 @@ _gh_wrapper_maybe_review() {
   done
 
   if [[ "${sub}" == "pr" && "${subsub}" == "merge" ]]; then
+    if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
+      echo "[gh] Codex: CC pre-merge hook is isolated; use the human-approved GitHub merge workflow." >&2
+      return 1
+    fi
     local _review_script
     _review_script="$(_gh_wrapper_review_script_path)"
     if [[ -x "${_review_script}" ]]; then
@@ -1596,6 +1600,10 @@ _gh_wrapper_dest_exempt() {
 
 # gh pr ready (not --undo) on a review route is blocked: Andrew clicks Ready for review in the GitHub UI.
 _gh_wrapper_approval_gate() {
+  if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
+    echo "[gh] Codex: CC prose-approval gate skipped." >&2
+    return 0
+  fi
   local sub="" subsub="" skip_next=0 arg api_pos=0 prev="" last=""
   local body_file="" inline=0 want_path=0 want_repo=0 draft=0 undo=0
   local -a repo_args=() url_args=()
