@@ -46,7 +46,8 @@ printf 'argv=%s\n' "\$*" >>"${OP_LOG}"
 case "\$2" in
   *"/app_id") echo 5401431 ;;
   *"/installation_id") echo 173522549 ;;
-  *"/private_key") cat "${WORKDIR}/key.flat" ;;
+  *"/private_key") [[ -n "\${OP_PEM_ATTACHMENT:-}" ]] && exit 1; cat "${WORKDIR}/key.flat" ;;
+  *"/private_key.pem") [[ -n "\${OP_PEM_ATTACHMENT:-}" ]] || exit 1; cat "${WORKDIR}/key.pem" ;;
   *) exit 1 ;;
 esac
 STUB_EOF
@@ -319,6 +320,17 @@ if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${mints}" == 1 && "${asks}"
   _pass "Keychain has no item: op supplies the key, IDs come from the route fields"
 else
   _fail "Keychain missing: rc=${rc} err=${err} sec=$(<"${SEC_LOG}") op=$(<"${OP_LOG}")"
+fi
+
+# Key saved as attachment private_key.pem: <item>/private_key fails, so <item>/private_key.pem is next.
+_clear_cache
+: >"${OP_LOG}"
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_NO_IDS=1 OP_PEM_ATTACHMENT=1 _run --item "${ITEM}" smartwatermelon
+if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${mints}" == 1 ]] && grep -q '^jwt=ok' "${CURL_LOG}" \
+  && grep -qxF "argv=read ${ITEM}/private_key" "${OP_LOG}" && grep -qxF "argv=read ${ITEM}/private_key.pem" "${OP_LOG}"; then
+  _pass "a private_key.pem attachment supplies the key when private_key does not resolve"
+else
+  _fail "pem attachment: rc=${rc} err=${err} op=$(<"${OP_LOG}")"
 fi
 
 GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" _run route smartwatermelon/claude-wrapper

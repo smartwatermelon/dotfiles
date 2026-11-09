@@ -40,7 +40,8 @@ else from `op read <item>/<field>`. The private_key comes from the login Keychai
 first: a generic password with service = the item minus op://<vault>/
 (op://Automation/my app -> "my app") and account = the current user (id -un).
 security -w prints a multi-line PEM as hex; that is decoded. If the Keychain has no
-such item, the key comes from `op read <item>/private_key`.
+such item, the key comes from `op read <item>/private_key`, then <item>/private_key.pem
+(an attachment named private_key; the 1Password app adds the extension).
 
 Cache: ${XDG_CACHE_HOME:-~/.cache}/gh-app-tokens (dir 0700, files 0600), one file per
 item. A token is reused until 5 minutes before mint time + 1 hour.
@@ -300,7 +301,9 @@ _gh_app_mint() {
   fi
   # The login Keychain first (dotfiles#450); where it has no item, 1Password. A missing item fails at once, no dialog.
   if ! raw="$(_gh_app_keychain_key "${item}")" || [[ "${raw}" != -----BEGIN* ]]; then
-    if ! raw="$(_gh_app_op_read "${item}/private_key")" || [[ "${raw}" != -----BEGIN* ]]; then
+    # The 1Password app appends ".pem" to an attachment renamed private_key, so try that name second.
+    if { ! raw="$(_gh_app_op_read "${item}/private_key")" || [[ "${raw}" != -----BEGIN* ]]; } \
+      && { ! raw="$(_gh_app_op_read "${item}/private_key.pem")" || [[ "${raw}" != -----BEGIN* ]]; }; then
       raw=""
       svc="$(_gh_app_keychain_service "${item}")" || svc="?"
       acct="$(id -un)" || acct="?"
