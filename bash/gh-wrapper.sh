@@ -782,8 +782,16 @@ _gh_wrapper_maybe_review() {
 
   if [[ "${sub}" == "pr" && "${subsub}" == "merge" ]]; then
     if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
-      echo "[gh] Codex: CC pre-merge hook is isolated; use the human-approved GitHub merge workflow." >&2
-      return 1
+      local authorizer="${_gh_wrapper_app_minter%/*}/gh-codex-merge.sh"
+      if [[ ! -r "${authorizer}" ]]; then
+        echo "[gh] Codex merge authorizer is missing; refusing to merge." >&2
+        return 1
+      fi
+      # The helper is linted separately; its location follows this file's symlink.
+      # shellcheck source=/dev/null
+      source "${authorizer}" || return 1
+      _gh_codex_merge_authorize "$@"
+      return $?
     fi
     local _review_script
     _review_script="$(_gh_wrapper_review_script_path)"
@@ -2086,7 +2094,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 
     _gh_wrapper_approval_gate "$@" || exit 1
     if [[ "${_gh_wrapper_help}" != "1" ]]; then
+      _gh_wrapper_codex_merge_args=()
       _gh_wrapper_maybe_review strict "$@" || exit 1
+      if ((${#_gh_wrapper_codex_merge_args[@]})); then
+        set -- "${_gh_wrapper_codex_merge_args[@]}"
+      fi
       # Attached labels must exist (#323); a near match chosen at the prompt rewrites argv.
       _gh_wrapper_label_args=()
       _gh_wrapper_label_rewritten=0
@@ -2206,7 +2218,11 @@ else
     # an interactive terminal keeps warn-and-proceed.
     local _gh_wrapper_missing_review_mode=warn
     [[ -n "${CLAUDECODE:-}" ]] && _gh_wrapper_missing_review_mode=strict
+    local -a _gh_wrapper_codex_merge_args=()
     _gh_wrapper_maybe_review "${_gh_wrapper_missing_review_mode}" "$@" || return 1
+    if ((${#_gh_wrapper_codex_merge_args[@]})); then
+      set -- "${_gh_wrapper_codex_merge_args[@]}"
+    fi
 
     # Attached labels must exist (#323); a near match chosen at the prompt rewrites argv.
     local -a _gh_wrapper_label_args=()
@@ -2253,9 +2269,8 @@ else
   # Resolved via _gh_wrapper_find_real_gh (a PATH scan skipping this file)
   # rather than a hardcoded path, since ~/.local/bin/gh (unlike claude) IS
   # the wrapper itself, not a separate layer over a fixed real binary.
-  # Humans only: absent where Claude Code sets CLAUDECODE, as no hook checks
-  # the name. Clearing CLAUDECODE restores it.
-  if [[ -z "${CLAUDECODE:-}" ]]; then
+  # Humans only: agent sessions use the guarded merge route.
+  if [[ -z "${CLAUDECODE:-}${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
     sugh() {
       local real_gh
       real_gh="$(_gh_wrapper_find_real_gh)" || return 1
