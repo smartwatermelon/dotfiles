@@ -113,6 +113,12 @@ fi
 # Forwards the in-progress commit message file to the reviewer via
 # --message-file=PATH so the AI sees both the diff and the author's
 # stated intent. Pre-commit cannot do this — see header.
+# Andrew excludes CC compensation layers from Codex sessions.
+if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
+  echo "[commit-msg] Codex: CC review skipped; conventional commit checks passed." >&2
+  exit 0
+fi
+
 REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
 
 if [[ -x "${REVIEW_SCRIPT}" ]]; then

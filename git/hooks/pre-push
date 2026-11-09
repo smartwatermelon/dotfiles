@@ -596,6 +596,10 @@ for b in lc.comment_blocks(diff, read):
 }
 
 run_beacon_text_gate() {
+  if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
+    log "Codex: CC prose-approval gate skipped."
+    return 0
+  fi
   ((${#PUSH_LOCAL_SHAS[@]} > 0)) || return 0
   local scripts="${HOME}/.claude/scripts"
   local gate="${scripts}/gate-review.sh" lint="${scripts}/gate-lint.sh"
@@ -941,6 +945,10 @@ run_ci_ruleset_scan
 # on the identical diff and a non-converging stream of auto-filed issues. The
 # mode still exists in run-review.sh for weekly and on-demand use.
 run_reviews() {
+  if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
+    log "Codex: CC full-diff reviewer skipped."
+    return 0
+  fi
   local current_branch
   current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
 
@@ -1047,6 +1055,10 @@ run_reviews
 # ITERATIVE PR REVIEW CHECKPOINT (Protocol 4)
 # =========================================================
 check_pr_review_iteration() {
+  if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
+    log "Codex: CC local-review checkpoint skipped; GitHub review rules remain in force."
+    return 0
+  fi
   # Only check if gh CLI is available
   if ! command -v gh &>/dev/null; then
     return 0

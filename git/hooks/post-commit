@@ -24,6 +24,11 @@ _portable_sed_inplace() {
   fi
 }
 
+# Codex creates no Claude review receipt and must not update Claude state.
+if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
+  exit 0
+fi
+
 _real_hash=$(git rev-parse --short HEAD 2>/dev/null) || exit 0
 
 # Per-repo log

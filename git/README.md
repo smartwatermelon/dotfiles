@@ -69,6 +69,25 @@ git/
 
 - **rerere** (reuse recorded resolution): Remembers how you resolved conflicts and auto-applies them if they recur
 
+## Codex sessions
+
+`CODEX_THREAD_ID` or `CODEX_SESSION_ID` selects the isolated Codex path.
+These sessions skip CC-specific AI review, personify length/prose approval,
+local-review coaching, Claude receipt updates, and Claude scaffolding.
+They also leave unrelated application symlink repair to the installer.
+
+Protected branches, Conventional Commits validation, deterministic global
+and repository linters, security scans, project tests, GitHub identity
+routing, and server-side required checks/reviews remain in force. Skipped
+CC gates are named in hook output; no `--no-verify` switch is needed.
+
+Codex does not invoke the Claude pre-merge authorizer. Until a separate
+Codex merge authorizer exists, the CLI refuses that merge path; use the
+existing human-approved GitHub workflow. Direct API merge bypasses remain
+blocked. Other sessions retain their existing behavior.
+
+Regression coverage: `bash bash/tests/run-tests.sh codex-hook-isolation`.
+
 ## Git Hooks
 
 All hooks are configured via `core.hooksPath` to use this directory instead of per-repo `.git/hooks/`.

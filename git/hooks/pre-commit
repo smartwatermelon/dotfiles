@@ -42,7 +42,9 @@ protected_branch_check
 # Editors and tools that do atomic writes (write temp, rename over target)
 # replace symlinks with regular files. Detect and repair before linting.
 _REPAIR_LIB="${HOME}/.config/git/hooks/lib-symlink-repair.sh"
-if [[ -f "${_REPAIR_LIB}" ]]; then
+if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
+  echo "[pre-commit] Codex: leaving unrelated application configuration untouched."
+elif [[ -f "${_REPAIR_LIB}" ]]; then
   export REPO_DIR="${HOME}/Developer/dotfiles"
   # shellcheck source=lib-symlink-repair.sh
   source "${_REPAIR_LIB}"
