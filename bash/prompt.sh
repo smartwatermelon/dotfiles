@@ -33,3 +33,18 @@ else
   # Simple fallback prompt: exit code in red, prompt symbol
   export PS1="${COLOR_RED}\${PROMPT_EXIT_CODE:+[\${PROMPT_EXIT_CODE}] }${COLOR_RESET}\$ "
 fi
+
+# ~/Developer check: once now, then at each prompt. Appended after both
+# branches above, so their $? readers run first. Added only once.
+if [[ $- == *i* ]] && declare -F _developer_link_check >/dev/null; then
+  _developer_link_check
+  if [[ "${PROMPT_COMMAND[*]-}" != *_developer_link_check* ]]; then
+    if ((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 501)); then
+      # bash 5.1+ runs every element of a PROMPT_COMMAND array.
+      PROMPT_COMMAND+=(_developer_link_check)
+    else
+      # Older bash runs only element 0, which is also the plain string.
+      PROMPT_COMMAND[0]="${PROMPT_COMMAND[0]:+${PROMPT_COMMAND[0]}; }_developer_link_check"
+    fi
+  fi
+fi
