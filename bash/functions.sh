@@ -1319,6 +1319,31 @@ dotclaude() {
 }
 # Not exported
 
+# Warn when ~/Developer is a dangling symlink (volume not mounted), and
+# again when it is back. Prints on a change of state only; keeps $?.
+_developer_link_check() {
+  local rc=$? missing=0 msg color=""
+  [[ -L "${HOME}/Developer" && ! -e "${HOME}/Developer" ]] && missing=1
+  if [[ "${missing}" == "${_DEVELOPER_LINK_MISSING:-0}" ]]; then
+    return "${rc}"
+  fi
+  _DEVELOPER_LINK_MISSING="${missing}"
+  if ((missing)); then
+    msg="⚠ ~/Developer is unavailable: $(readlink "${HOME}/Developer") is missing (not mounted?)"
+    color=$'\033[31m'
+  else
+    msg="✓ ~/Developer is available again"
+    color=$'\033[32m'
+  fi
+  # _DEVELOPER_LINK_TTY=1 is a test seam: it stands in for [[ -t 2 ]].
+  if [[ -n "${NO_COLOR:-}" ]] || ! [[ "${_DEVELOPER_LINK_TTY:-}" == 1 || -t 2 ]]; then
+    color=""
+  fi
+  printf '%s%s%s\n' "${color}" "${msg}" "${color:+$'\033[0m'}" >&2
+  return "${rc}"
+}
+# Not exported - internal helper (prompt.sh runs it)
+
 # Extract compressed files (handles multiple formats)
 extract() {
   if [[ -f "$1" ]]; then
