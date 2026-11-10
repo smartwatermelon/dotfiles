@@ -14,6 +14,8 @@ This directory contains centralized git configuration that applies to all reposi
 ```
 git/
 ├── config              # Main git configuration
+├── agent-identity      # Agent sessions only: App bot identity in App-routed repos
+├── agent-identity-*    # One bot [user] block per App-routed owner
 ├── gitignore_global    # Global gitignore patterns
 ├── ignore              # Additional ignore patterns
 ├── hooks/              # Custom git hooks

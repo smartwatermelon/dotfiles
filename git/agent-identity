@@ -1,0 +1,27 @@
+# Commit identity for agent sessions (Claude Code), so agent commits in an
+# App-routed repo are attributed to that repo's GitHub App, not to Andrew.
+#
+# Not read by git on its own. Agent sessions add it as command-scope config:
+#   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path
+#   GIT_CONFIG_VALUE_0=~/.config/git/agent-identity
+# (claude-config machine-settings/base.json "env"). Command scope outranks
+# ~/.gitconfig and ~/.gitconfig-beacon, and a missing file is skipped, so a
+# host without this file falls back to the normal identity.
+#
+# Scope follows bash/gh-app-routes.conf: one block per owner/* route there,
+# for each remote URL form in use. A repo of any other owner (twistedmelonman,
+# beacon-biosignals, andrewmrich) matches nothing and keeps its identity.
+# bash/tests/test-agent-git-identity.sh checks the two files agree.
+#
+# An env identity (GIT_AUTHOR_* / GIT_COMMITTER_*, as claude-wrapper sets)
+# still outranks this file.
+
+[includeIf "hasconfig:remote.*.url:git@github*:smartwatermelon/**"]
+	path = agent-identity-smartwatermelon
+[includeIf "hasconfig:remote.*.url:https://github.com/smartwatermelon/**"]
+	path = agent-identity-smartwatermelon
+
+[includeIf "hasconfig:remote.*.url:git@github*:nightowlstudiollc/**"]
+	path = agent-identity-nightowlstudiollc
+[includeIf "hasconfig:remote.*.url:https://github.com/nightowlstudiollc/**"]
+	path = agent-identity-nightowlstudiollc
