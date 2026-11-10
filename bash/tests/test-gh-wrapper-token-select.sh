@@ -38,7 +38,7 @@ trap 'rm -rf "${WORKDIR}"' EXIT
 unset GH_TOKEN GITHUB_TOKEN GH_HOST CLAUDE_GH_TOKEN_LOGIN CLAUDE_GH_TOKEN_ROUTER
 unset GH_TOKEN_SWM GH_TOKEN_NOS GH_TOKEN_TWM _GH_REVIEW_DONE _gh_wrapper_review_script
 # The TWM fallback applies only under Claude Code; cases opt in with CLAUDECODE=1.
-unset CLAUDECODE
+unset CLAUDECODE CODEX_THREAD_ID CODEX_SESSION_ID
 
 GIT=/usr/bin/git
 fail=0
@@ -76,7 +76,9 @@ cat >"${STUB_DIR}/gh" <<STUB_EOF
 printf 'token=%s|%s\n' "\${GH_TOKEN:-<unset>}" "\$*" >>"${LOG}"
 exit "\${STUB_RC:-0}"
 STUB_EOF
-chmod +x "${STUB_DIR}/gh"
+# CLAUDECODE=1 cases pin the PAT fallback, kept only on arich-mac; test-gh-wrapper-app-only.sh covers other hosts.
+printf '#!/usr/bin/env bash\necho ARICH-MAC\n' >"${STUB_DIR}/hostname"
+chmod +x "${STUB_DIR}/gh" "${STUB_DIR}/hostname"
 
 # A PATH entry holding the wrapper as `gh`, ahead of the stub, as
 # ~/.local/bin/gh is in production.

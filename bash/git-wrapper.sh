@@ -51,6 +51,31 @@ _git_wrapper_slug() {
 _git_wrapper_app_minter="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null)" || _git_wrapper_app_minter="${BASH_SOURCE[0]}"
 _git_wrapper_app_minter="${_git_wrapper_app_minter%/*}/gh-app-token.sh"
 
+# Agents push to GitHub only as a GitHub App (2026-11-09): 0 when this push must be App-routed.
+
+# Same agent test as gh-wrapper.sh; arich-mac is exempt. hostname is found on PATH so tests stub it.
+
+# bash 3.2 has no ${x,,}, so tr lowercases.
+_git_wrapper_app_only() {
+  [[ -n "${CLAUDECODE:-}${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]] || return 1
+  local host
+  host="$(command hostname -s 2>/dev/null)" || host=""
+  host="$(printf '%s' "${host}" | tr '[:upper:]' '[:lower:]')"
+  [[ "${host}" != "arich-mac" ]]
+}
+
+# 0 when a push URL names a github.com host (an SSH alias github.com-x too). Local paths and file:// do not.
+_git_wrapper_is_github_url() {
+  local host=""
+  if [[ "$1" =~ ^[A-Za-z][A-Za-z0-9+.-]*://([^/@]+@)?([^/:]+) ]]; then
+    host="${BASH_REMATCH[2]}"
+  elif [[ "$1" =~ ^([^/@:]+@)?([^/:]+): ]]; then
+    host="${BASH_REMATCH[2]}"
+  fi
+  host="$(printf '%s' "${host}" | tr '[:upper:]' '[:lower:]')"
+  [[ "${host}" == "github.com" || "${host}" == "www.github.com" || "${host}" == github.com-* ]]
+}
+
 # A push to a repo in gh-app-routes.conf goes over HTTPS as the GitHub App (claude-config#659).
 
 # Sets the caller's _git_wrapper_push_cfg to the -c options for that; leaves it empty if unrouted.
@@ -60,7 +85,7 @@ _git_wrapper_app_minter="${_git_wrapper_app_minter%/*}/gh-app-token.sh"
 # Returns 1 to block: a routed push that cannot be made as the App never falls back to SSH as Andrew.
 _git_wrapper_app_push() {
   local -a args=("$@") globals=() items=()
-  local n=$# i=0 sub="" remote="" repo_opt="" branch="" urls="" url item repo rc is_name=0 routed=0 unrouted=0
+  local n=$# i=0 sub="" remote="" repo_opt="" branch="" urls="" url item repo rc is_name=0 routed=0 unrouted=0 unrouted_gh=""
   local minter="${_git_wrapper_app_minter:-}" rewrites="" got="" alias_val=""
   local -a alias_words=()
   _git_wrapper_push_cfg=()
@@ -167,6 +192,7 @@ _git_wrapper_app_push() {
     item="$("${BASH}" "${minter}" route "${url}")" || rc=$?
     if ((rc == 1)); then
       unrouted=1
+      _git_wrapper_is_github_url "${url}" && unrouted_gh="${url}"
       continue
     elif ((rc != 0)); then
       echo "[git] ERROR: gh-app-routes.conf is malformed for ${url}; refusing to push." >&2
@@ -188,6 +214,11 @@ _git_wrapper_app_push() {
       *) rewrites="${rewrites}url.https://github.com/${repo}.git.insteadOf=${url}"$'\n' ;;
     esac
   done <<<"${urls}"
+  if [[ -n "${unrouted_gh}" ]] && _git_wrapper_app_only; then
+    echo "[git] ERROR: agents act on GitHub only as a GitHub App; this push has no App route (${unrouted_gh} is not in gh-app-routes.conf)." >&2
+    echo "[git] Failing closed: an agent push to GitHub never falls back to SSH or HTTPS as Andrew." >&2
+    return 1
+  fi
   ((routed == 1)) || return 0
   if ((unrouted == 1 || ${#items[@]} != 1)); then
     echo "[git] ERROR: remote '${remote}' mixes GitHub App routes with other URLs; refusing to push." >&2
@@ -422,5 +453,5 @@ git() {
 # HOME-relative path, so any child with a rewritten HOME (the test suite's
 # fixtures, for one) resolves it to nothing and the helper vanishes while the
 # inherited git remains. Same reasoning, and the same fix, as gh-wrapper.sh.
-export -f git _git_wrapper_restore_dir _git_wrapper_slug _git_wrapper_app_push # Exported - overrides system git command globally
+export -f git _git_wrapper_restore_dir _git_wrapper_slug _git_wrapper_app_push _git_wrapper_app_only _git_wrapper_is_github_url # Exported - overrides system git command globally
 export _git_wrapper_app_minter

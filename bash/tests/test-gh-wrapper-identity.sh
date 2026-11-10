@@ -14,6 +14,8 @@ set -euo pipefail
 export GH_APP_ROUTES_FILE=/dev/null
 
 unset CDPATH
+# Andrew's-shell behavior: an agent signal leaking in from the runner would make unrouted calls refuse (app-only rule).
+unset CLAUDECODE CODEX_THREAD_ID CODEX_SESSION_ID
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export BASH_CONFIG_DIR="${REPO_ROOT}/bash"

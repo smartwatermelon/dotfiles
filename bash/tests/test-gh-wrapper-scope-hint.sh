@@ -13,6 +13,8 @@ set -uo pipefail
 export GH_APP_ROUTES_FILE=/dev/null
 
 unset CDPATH
+# Andrew's-shell behavior: an agent signal leaking in from the runner would make unrouted calls refuse (app-only rule).
+unset CLAUDECODE CODEX_THREAD_ID CODEX_SESSION_ID
 
 # ~/.config/bash/functions.sh defines a `gh` shell function that wins over any
 # PATH lookup. Claude Code sets BASH_ENV to that file, so a child bash would

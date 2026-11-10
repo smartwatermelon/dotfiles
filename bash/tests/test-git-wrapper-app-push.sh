@@ -6,6 +6,8 @@
 # KNOWN-BAD on origin/main: every routed case fails (plain SSH push, no App credential).
 set -uo pipefail
 unset CDPATH
+# Andrew's-shell behavior: an agent signal leaking in from the runner would make unrouted calls refuse (app-only rule).
+unset CLAUDECODE CODEX_THREAD_ID CODEX_SESSION_ID
 
 TESTS_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER="${TESTS_DIR}/../git-wrapper.sh"
