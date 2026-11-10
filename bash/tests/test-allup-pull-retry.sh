@@ -19,11 +19,11 @@ trap 'rm -rf "${WORKDIR}"' EXIT
 _fn_src="$(bash --norc --noprofile -c '
   source "$1" >/dev/null 2>&1 || exit 1
   declare -f allup _allup_pull_step _updates_noninteractive \
-    _allup_scripts_dir _allup_scripts_current _allup_check_scripts _allup_versions
+    _allup_scripts_dir _allup_scripts_current _allup_check_scripts _allup_versions _dotfiles_dir
   declare -p _ALLUP_MIN_SCRIPTS
 ' _ "${REPO_ROOT}/bash/functions.sh")"
 for fn in allup _allup_pull_step _updates_noninteractive \
-  _allup_scripts_dir _allup_scripts_current _allup_check_scripts _allup_versions; do
+  _allup_scripts_dir _allup_scripts_current _allup_check_scripts _allup_versions _dotfiles_dir; do
   if [[ "${_fn_src}" != *"${fn} ()"* ]]; then
     echo "FAIL: could not extract ${fn} from functions.sh" >&2
     exit 1

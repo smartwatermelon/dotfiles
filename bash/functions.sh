@@ -1213,6 +1213,20 @@ _allup_versions() {
 }
 # Not exported - internal helper
 
+# The dotfiles clone, via the real path of the deployed .bash_profile link.
+# Falls back to ~/Developer/dotfiles.
+_dotfiles_dir() {
+  local dir
+  dir="$(realpath "${HOME}/.config/bash/.bash_profile" 2>/dev/null)" || dir=""
+  dir="${dir%/bash/.bash_profile}"
+  if [[ -f "${dir}/install.sh" && -f "${dir}/git/config" ]]; then
+    echo "${dir}"
+  else
+    echo "${HOME}/Developer/dotfiles"
+  fi
+}
+# Not exported - internal helper
+
 # Update all local repos, repair local config symlinks, run software updates
 # my-repos and beacon-repos are from ~/Developer/scripts, symlinked into ~/.local/bin
 # `allup --continue` resumes after a failed step without re-running the
@@ -1261,7 +1275,7 @@ allup() {
     _allup_pull_step beacon-repos || return $?
   fi
 
-  "${HOME}/Developer/dotfiles/install.sh" --sync || return $?
+  "$(_dotfiles_dir)/install.sh" --sync || return $?
   "${HOME}/Developer/claude-config/install.sh" --sync || return $?
   _allup_versions
   # Refresh the calling shell's environment with whatever the two --sync
@@ -1291,7 +1305,7 @@ wf() {
 
 # Reinstall dotfiles and source profile in one step
 dotfiles() {
-  "${HOME}/Developer/dotfiles/install.sh" --sync || return $?
+  "$(_dotfiles_dir)/install.sh" --sync || return $?
   #shellcheck source=/dev/null
   source "${HOME}/.bash_profile"
 }
