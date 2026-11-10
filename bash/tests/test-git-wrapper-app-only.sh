@@ -70,6 +70,15 @@ printf '#!/usr/bin/env bash\nexit 6\n' >"${STUB_DIR}/curl"
 # The minter falls back to the macOS Keychain when op fails; keep it off the real one.
 printf '#!/usr/bin/env bash\nexit 44\n' >"${STUB_DIR}/security"
 chmod +x "${STUB_DIR}/git" "${STUB_DIR}/hostname" "${STUB_DIR}/op" "${STUB_DIR}/curl" "${STUB_DIR}/security"
+# ssh stub (ssh -G only): a github-* alias has HostName github.com; any other host is itself. Never the real ~/.ssh/config.
+cat >"${STUB_DIR}/ssh" <<'STUB_EOF'
+#!/usr/bin/env bash
+[[ "$1" == -G ]] || exit 255
+h="$2"
+[[ "${h}" == -- ]] && h="$3"
+case "${h}" in github-*) echo "hostname github.com" ;; *) echo "hostname ${h}" ;; esac
+STUB_EOF
+chmod +x "${STUB_DIR}/ssh"
 
 DRIVER="${WORKDIR}/driver.sh"
 {
@@ -87,6 +96,7 @@ _mkrepo routed git@github.com:smartwatermelon/claude-wrapper.git
 _mkrepo plain git@github.com:smartwatermelon/example.git
 _mkrepo https https://github.com/twistedmelonman/example.git
 _mkrepo alias git@github.com-twm:twistedmelonman/example.git
+_mkrepo sshalias git@github-alias:twistedmelonman/example.git
 _mkrepo gitlab git@gitlab.com:someone/example.git
 "${REAL_GIT}" init -q --bare "${WORKDIR}/bare.git"
 _mkrepo local "${WORKDIR}/bare.git"
@@ -159,6 +169,8 @@ for sh in "${BASHES[@]}"; do
   _expect_refused "${ver}: agent: unrouted HTTPS push to GitHub is refused"
   _run "${sh}" "${WORKDIR}/alias" CLAUDECODE=1 -- push origin feat
   _expect_refused "${ver}: agent: unrouted push via an ssh alias host is refused"
+  _run "${sh}" "${WORKDIR}/sshalias" CLAUDECODE=1 -- push origin feat
+  _expect_refused "${ver}: agent: unrouted push via a ~/.ssh/config alias of github.com is refused"
   _run "${sh}" "${WORKDIR}/gitlab" CLAUDECODE=1 -- push git@github.com:smartwatermelon/example.git feat
   _expect_refused "${ver}: agent: push to a literal unrouted GitHub URL is refused"
   _run "${sh}" "${WORKDIR}/plain" CODEX_SESSION_ID=s1 -- push origin feat

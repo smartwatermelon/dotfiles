@@ -64,16 +64,22 @@ _git_wrapper_app_only() {
   [[ "${host}" != "arich-mac" ]]
 }
 
-# 0 when a push URL names a github.com host (an SSH alias github.com-x too). Local paths and file:// do not.
+# 0 when a push URL names github.com, or an SSH alias of it (as in gh-app-token.sh). Tests stub ssh on PATH.
 _git_wrapper_is_github_url() {
-  local host=""
-  if [[ "$1" =~ ^[A-Za-z][A-Za-z0-9+.-]*://([^/@]+@)?([^/:]+) ]]; then
-    host="${BASH_REMATCH[2]}"
+  local host="" scheme="" ssh_form=0
+  if [[ "$1" =~ ^([A-Za-z][A-Za-z0-9+.-]*)://([^/@]+@)?([^/:]+) ]]; then
+    scheme="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
+    host="${BASH_REMATCH[3]}"
+    [[ "${scheme}" == ssh || "${scheme}" == git+ssh || "${scheme}" == ssh+git ]] && ssh_form=1
   elif [[ "$1" =~ ^([^/@:]+@)?([^/:]+): ]]; then
     host="${BASH_REMATCH[2]}"
+    ssh_form=1
   fi
   host="$(printf '%s' "${host}" | tr '[:upper:]' '[:lower:]')"
-  [[ "${host}" == "github.com" || "${host}" == "www.github.com" || "${host}" == github.com-* ]]
+  [[ "${host}" == "github.com" || "${host}" == "www.github.com" || "${host}" == github.com-* ]] && return 0
+  ((ssh_form == 1)) && [[ "${host}" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || return 1
+  host="$(ssh -G -- "${host}" </dev/null 2>/dev/null | awk '$1 == "hostname" { print tolower($2); exit }' || true)"
+  [[ "${host}" == "github.com" || "${host}" == "www.github.com" ]]
 }
 
 # A push to a repo in gh-app-routes.conf goes over HTTPS as the GitHub App (claude-config#659).

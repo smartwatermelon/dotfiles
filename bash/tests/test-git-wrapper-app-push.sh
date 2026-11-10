@@ -74,6 +74,15 @@ printf '#!/usr/bin/env bash\nexit 6\n' >"${STUB_DIR}/curl"
 # The minter falls back to the macOS Keychain when op fails; keep it off the real one.
 printf '#!/usr/bin/env bash\nexit 44\n' >"${STUB_DIR}/security"
 chmod +x "${STUB_DIR}/git" "${STUB_DIR}/op" "${STUB_DIR}/curl" "${STUB_DIR}/security"
+# ssh stub (ssh -G only): a github-* alias has HostName github.com; any other host is itself. Never the real ~/.ssh/config.
+cat >"${STUB_DIR}/ssh" <<'STUB_EOF'
+#!/usr/bin/env bash
+[[ "$1" == -G ]] || exit 255
+h="$2"
+[[ "${h}" == -- ]] && h="$3"
+case "${h}" in github-*) echo "hostname github.com" ;; *) echo "hostname ${h}" ;; esac
+STUB_EOF
+chmod +x "${STUB_DIR}/ssh"
 
 DRIVER="${WORKDIR}/driver.sh"
 {
@@ -89,6 +98,7 @@ _mkrepo() {
 }
 _mkrepo routed git@github.com:smartwatermelon/claude-wrapper.git
 _mkrepo alias git@github.com-claude:SmartWatermelon/claude-wrapper.git
+_mkrepo sshalias git@github-alias:smartwatermelon/claude-wrapper.git
 _mkrepo plain git@github.com:smartwatermelon/example.git
 _mkrepo pushurl https://github.com/smartwatermelon/claude-wrapper.git
 "${REAL_GIT}" -C "${WORKDIR}/pushurl" config remote.origin.pushurl git@github.com:smartwatermelon/claude-wrapper.git
@@ -145,6 +155,8 @@ for sh in "${BASHES[@]}"; do
   _expect_app "${ver}: git -C routed push is routed"
   _run "${sh}" "${WORKDIR}/alias" push origin feat
   _expect_app "${ver}: ssh alias host remote is routed"
+  _run "${sh}" "${WORKDIR}/sshalias" push origin feat
+  _expect_app "${ver}: ~/.ssh/config alias whose HostName is github.com is routed"
   _run "${sh}" "${WORKDIR}/pushurl" push origin feat
   _expect_app "${ver}: explicit SSH pushurl is rewritten too"
 
