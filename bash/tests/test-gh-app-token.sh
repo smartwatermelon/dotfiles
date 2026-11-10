@@ -83,6 +83,15 @@ case "\${SEC_MODE:-}" in
 esac
 STUB_EOF
 chmod +x "${STUB_DIR}/op" "${STUB_DIR}/curl" "${STUB_DIR}/security"
+# ssh stub (ssh -G only): a github-* alias has HostName github.com; any other host is itself. Never the real ~/.ssh/config.
+cat >"${STUB_DIR}/ssh" <<'STUB_EOF'
+#!/usr/bin/env bash
+[[ "$1" == -G ]] || exit 255
+h="$2"
+[[ "${h}" == -- ]] && h="$3"
+case "${h}" in github-*) echo "hostname github.com" ;; *) echo "hostname ${h}" ;; esac
+STUB_EOF
+chmod +x "${STUB_DIR}/ssh"
 export PATH="${STUB_DIR}:${PATH}"
 
 _run() {
@@ -99,11 +108,14 @@ _clear_cache() { rm -f "${CACHE_FILE}"; }
 echo "--- route"
 for spec in git@github.com:smartwatermelon/claude-wrapper.git ssh://git@github.com/smartwatermelon/claude-wrapper \
   git@github.com-claude:smartwatermelon/claude-wrapper.git https://github.com/smartwatermelon/claude-wrapper/pull/5 \
+  git@github-alias:smartwatermelon/claude-wrapper.git ssh://git@github-alias/smartwatermelon/claude-wrapper \
   https://x-access-token@github.com/SmartWatermelon/claude-wrapper.git smartwatermelon/claude-wrapper; do
   _run route "${spec}"
   if [[ "${rc}" -eq 0 && "${out}" == "${ITEM}" ]]; then _pass "route ${spec}"; else _fail "route ${spec}: rc=${rc} out=${out}"; fi
 done
 for spec in smartwatermelon/dotfiles git@gitlab.com:smartwatermelon/claude-wrapper.git smartwatermelon \
+  git@gitlab-alias:smartwatermelon/claude-wrapper.git https://github-alias/smartwatermelon/claude-wrapper \
+  git@-oProxyCommand=x:smartwatermelon/claude-wrapper.git \
   smartwatermelon/claude-wrapper-extra; do
   _run route "${spec}"
   if [[ "${rc}" -eq 1 && -z "${out}" ]]; then _pass "not routed: ${spec}"; else _fail "not routed ${spec}: rc=${rc} out=${out}"; fi

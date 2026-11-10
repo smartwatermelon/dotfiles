@@ -75,20 +75,33 @@ _gh_app_routes_file() {
   fi
 }
 
-# Lowercase owner/repo of owner/repo, a github.com URL or remote (alias github.com-x too); else nothing.
+# HostName that ssh would use for SSH host $1 (an ~/.ssh/config alias resolves); else nothing. ssh is found on PATH so tests stub it.
+_gh_app_ssh_hostname() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 0
+  ssh -G -- "$1" </dev/null 2>/dev/null | awk '$1 == "hostname" { print tolower($2); exit }'
+}
+
+# Lowercase owner/repo of owner/repo, a github.com URL or remote (any SSH alias whose HostName is github.com too); else nothing.
 _gh_app_spec_repo() {
-  local v="$1" host owner repo
-  if [[ "${v}" =~ ^[A-Za-z][A-Za-z0-9+.-]*://([^/@]+@)?([^/:]+)(:[0-9]+)?/(.*)$ ]]; then
-    host="${BASH_REMATCH[2]}"
-    v="${BASH_REMATCH[4]}"
+  local v="$1" host owner repo scheme="" ssh_form=0
+  if [[ "${v}" =~ ^([A-Za-z][A-Za-z0-9+.-]*)://([^/@]+@)?([^/:]+)(:[0-9]+)?/(.*)$ ]]; then
+    scheme="$(_gh_app_lower "${BASH_REMATCH[1]}")"
+    host="${BASH_REMATCH[3]}"
+    v="${BASH_REMATCH[5]}"
+    [[ "${scheme}" == ssh || "${scheme}" == git+ssh || "${scheme}" == ssh+git ]] && ssh_form=1
   elif [[ "${v}" =~ ^([^/@]+@)?([^/:]+):(.*)$ ]]; then
     host="${BASH_REMATCH[2]}"
     v="${BASH_REMATCH[3]}"
+    ssh_form=1
   else
     host="github.com"
     v="${v#[Gg]ithub.com/}"
   fi
   host="$(_gh_app_lower "${host}")"
+  # A routed push or call through an alias such as github-smartwatermelon must not slip past as non-GitHub.
+  if [[ "${host}" != "github.com" && "${host}" != "www.github.com" && "${host}" != github.com-* ]] && ((ssh_form == 1)); then
+    host="$(_gh_app_ssh_hostname "${host}")"
+  fi
   [[ "${host}" == "github.com" || "${host}" == "www.github.com" || "${host}" == github.com-* ]] || return 0
   v="${v#/}"
   [[ "${v}" == */* ]] || return 0
