@@ -1,6 +1,6 @@
 # dotfiles
 
-Unified configuration files. The repo lives at `~/Developer/dotfiles` and `install.sh` creates per-file symlinks into `~/.config/`.
+Unified configuration files. The repo usually lives at `~/Developer/dotfiles`, but the clone may live anywhere. `install.sh` creates per-file symlinks into `~/.config/` that point at the clone's real path.
 
 ## Structure
 
@@ -172,5 +172,7 @@ source ~/.bash_profile
 ```
 
 `install.sh` is idempotent — safe to re-run at any time. It creates per-file symlinks from `~/.config/` into the repo using `git ls-files` for discovery. It also handles Homebrew, directories, pipx packages, and a post-install smoke test. Use `--dry-run` to preview changes.
+
+The clone doesn't have to live at `~/Developer/dotfiles`. Link targets use the clone's real path, with symlinks resolved. So if `~/Developer/dotfiles` is a link to `~/.dotfiles`, the links still work when `~/Developer` is missing. The hooks, `allup` and `dotfiles` find the clone through those links. If that fails, they fall back to `~/Developer/dotfiles`.
 
 Tools that use XDG conventions (`git`, `vim`, `btop`, `yamllint`, `gh`, `yt-dlp`) will find their config automatically.

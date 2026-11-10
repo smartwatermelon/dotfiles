@@ -45,7 +45,16 @@ _REPAIR_LIB="${HOME}/.config/git/hooks/lib-symlink-repair.sh"
 if [[ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]]; then
   echo "[pre-commit] Codex: leaving unrelated application configuration untouched."
 elif [[ -f "${_REPAIR_LIB}" ]]; then
-  export REPO_DIR="${HOME}/Developer/dotfiles"
+  # This file is deployed as a symlink to <repo>/git/hooks/pre-commit, so the
+  # repo is wherever that link really resolves; the clone may live anywhere.
+  # If the resolved path does not look like the dotfiles repo, use the
+  # default clone location.
+  REPO_DIR="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  REPO_DIR="${REPO_DIR%/git/hooks/*}"
+  if [[ ! -f "${REPO_DIR}/install.sh" || ! -f "${REPO_DIR}/git/config" ]]; then
+    REPO_DIR="${HOME}/Developer/dotfiles"
+  fi
+  export REPO_DIR
   # shellcheck source=lib-symlink-repair.sh
   source "${_REPAIR_LIB}"
   repair_config_symlinks true

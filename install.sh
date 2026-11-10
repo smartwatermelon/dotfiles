@@ -62,7 +62,10 @@ fi
 # would otherwise corrupt this command substitution if the caller's shell
 # has CDPATH exported and dirname's output happens to match a CDPATH
 # entry by bare name (see smartwatermelon/dotfiles#176).
-REPO_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+#
+# `pwd -P`: links need the real path, or they break when a symlinked
+# parent (e.g. ~/Developer on an external volume) is missing.
+REPO_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 # `git rev-parse --git-dir`, not `[[ -d .git ]]`. A linked worktree's .git is a
 # FILE holding a `gitdir:` pointer, not a directory, so the -d test rejected a

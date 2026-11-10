@@ -7,5 +7,13 @@
 # bypassing hook resolution entirely.
 set -euo pipefail
 
-REPO_DIR="${HOME}/Developer/dotfiles"
+# This file is deployed as a symlink to <repo>/git/hooks/post-checkout, so the
+# repo is wherever that link really resolves; the clone may live anywhere.
+# If the resolved path does not look like the dotfiles repo, use the default
+# clone location.
+REPO_DIR="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+REPO_DIR="${REPO_DIR%/git/hooks/*}"
+if [[ ! -f "${REPO_DIR}/install.sh" || ! -f "${REPO_DIR}/git/config" ]]; then
+  REPO_DIR="${HOME}/Developer/dotfiles"
+fi
 exec "${REPO_DIR}/git/template/hooks/post-checkout" "$@"

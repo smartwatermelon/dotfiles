@@ -21,8 +21,7 @@ set -euo pipefail
 REPO_ROOT="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DELEGATE="${REPO_ROOT}/git/hooks/post-checkout"
 
-WORKDIR="/tmp/post-checkout-hookspath-test-$$"
-mkdir -p "${WORKDIR}"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/post-checkout-hookspath-test.XXXXXX")"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 # Clear inherited git repository-selection state before touching any fixture.
@@ -34,25 +33,31 @@ _tests_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_tests_dir}/lib/git-env-isolation.sh"
 isolate_git_env "${WORKDIR}"
 
+# Temp HOME, so the delegate's fallback can never reach the real clone.
+export HOME="${WORKDIR}/home"
+mkdir -p "${HOME}"
+
 fail=0
 
 # --- Case 1: delegate execs the canonical hook with args intact -----------
-# Point the delegate at a stub canonical target (via a symlink swap) so this
-# case doesn't depend on ~/Developer/dotfiles existing or create a real
-# .claude/ directory.
+# The delegate finds the repo from its real path, so it runs from a fake
+# repo copy whose canonical hook is a stub.
 STUB_DIR="${WORKDIR}/stub-repo"
 mkdir -p "${STUB_DIR}"
 STUB_LOG="${WORKDIR}/stub.log"
-STUB_CANONICAL="${WORKDIR}/stub-canonical-post-checkout"
+FAKE_REPO="${WORKDIR}/fake-dotfiles"
+mkdir -p "${FAKE_REPO}/git/hooks" "${FAKE_REPO}/git/template/hooks"
+: >"${FAKE_REPO}/install.sh"
+: >"${FAKE_REPO}/git/config"
+STUB_CANONICAL="${FAKE_REPO}/git/template/hooks/post-checkout"
 cat >"${STUB_CANONICAL}" <<EOF
 #!/usr/bin/env bash
 echo "\$1 \$2 \$3" > "${STUB_LOG}"
 EOF
 chmod +x "${STUB_CANONICAL}"
 
-STUB_DELEGATE="${WORKDIR}/stub-delegate-post-checkout"
-sed "s|REPO_DIR=\"\${HOME}/Developer/dotfiles\"|REPO_DIR=\"${WORKDIR}\"|; s|git/template/hooks/post-checkout|stub-canonical-post-checkout|" \
-  "${DELEGATE}" >"${STUB_DELEGATE}"
+STUB_DELEGATE="${FAKE_REPO}/git/hooks/post-checkout"
+cp "${DELEGATE}" "${STUB_DELEGATE}"
 chmod +x "${STUB_DELEGATE}"
 
 (cd "${STUB_DIR}" && "${STUB_DELEGATE}" \
@@ -73,12 +78,8 @@ fi
 HOOKS_DIR="${WORKDIR}/hookspath"
 mkdir -p "${HOOKS_DIR}"
 
-# Both REPO_DIR and the canonical hook path get sed-redirected to WORKDIR
-# stubs below (DELEGATE_FOR_CLONE) so this case only proves the *delegate
-# fires* on a real `git clone` through core.hooksPath — it doesn't exercise
-# git/template/hooks/post-checkout's actual .claude scaffolding logic
-# (already covered by test-git-wrapper-init-hook.sh), and it doesn't touch
-# the real ~/.config/git/template or ~/Developer/dotfiles.
+# The hooks-dir entry links to the fake delegate. This proves only that
+# the delegate fires on a real `git clone` via core.hooksPath.
 SRC="${WORKDIR}/src"
 mkdir -p "${SRC}"
 git -c init.templateDir="" -C "${SRC}" init -q -b main
@@ -87,21 +88,12 @@ git -C "${SRC}" add file.txt
 git -C "${SRC}" -c user.email=t@t.com -c user.name=t -c core.hooksPath="" commit -q -m "chore: test fixture"
 
 DST="${WORKDIR}/dst"
-# TEMPLATE_DIR resolution inside the canonical hook falls back to
-# init.templateDir or ~/.config/git/template; neither exists in this
-# sandboxed HOME, so the canonical hook exits 0 without creating .claude —
-# that's fine, this case only proves the *delegate fires*, not the full
-# .claude scaffold (already covered by test-git-wrapper-init-hook.sh).
 MARKER_LOG="${WORKDIR}/clone-fired.log"
-DELEGATE_FOR_CLONE="${WORKDIR}/delegate-for-clone"
-sed "s|git/template/hooks/post-checkout|stub-canonical-post-checkout|; s|REPO_DIR=\"\${HOME}/Developer/dotfiles\"|REPO_DIR=\"${WORKDIR}\"|" \
-  "${DELEGATE}" >"${DELEGATE_FOR_CLONE}"
-chmod +x "${DELEGATE_FOR_CLONE}"
 cat >"${STUB_CANONICAL}" <<EOF
 #!/usr/bin/env bash
 echo "clone fired: \$3" >> "${MARKER_LOG}"
 EOF
-ln -sf "${DELEGATE_FOR_CLONE}" "${HOOKS_DIR}/post-checkout"
+ln -sf "${STUB_DELEGATE}" "${HOOKS_DIR}/post-checkout"
 
 git -c core.hooksPath="${HOOKS_DIR}" clone -q "${SRC}" "${DST}" >/dev/null 2>&1
 
