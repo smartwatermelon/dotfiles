@@ -9,6 +9,8 @@ set -uo pipefail
 # Hermetic: the real gh-app-routes.conf sends every smartwatermelon repo to the App.
 export GH_APP_ROUTES_FILE=/dev/null
 unset CDPATH
+# Andrew's-shell behavior: an agent signal leaking in from the runner would make unrouted calls refuse (app-only rule).
+unset CLAUDECODE CODEX_THREAD_ID CODEX_SESSION_ID
 
 TESTS_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER="${TESTS_DIR}/../gh-wrapper.sh"

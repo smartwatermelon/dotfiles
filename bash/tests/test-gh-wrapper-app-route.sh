@@ -6,6 +6,8 @@
 # Real minter, seeded cache, failing op stub. KNOWN-BAD on origin/main: 14 fail (PAT used, gh runs).
 set -uo pipefail
 unset CDPATH
+# Andrew's-shell behavior: an agent signal leaking in from the runner would make unrouted calls refuse (app-only rule).
+unset CLAUDECODE CODEX_THREAD_ID CODEX_SESSION_ID
 
 TESTS_DIR="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER="${TESTS_DIR}/../gh-wrapper.sh"

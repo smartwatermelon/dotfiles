@@ -485,6 +485,23 @@ _gh_wrapper_scoped_fallback() {
   return 2
 }
 
+# Agents act on GitHub only as a GitHub App (2026-11-09): 0 when this call must be App-routed.
+
+# Agent = the sugh test below. arich-mac (company Mac) is exempt. hostname is found on PATH so tests stub it.
+_gh_wrapper_app_only() {
+  [[ -n "${CLAUDECODE:-}${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]] || return 1
+  local host
+  host="$(command hostname -s 2>/dev/null)" || host=""
+  [[ "${host,,}" != "arich-mac" ]]
+}
+
+# Refusal for an agent call with no usable App route. $1 says why.
+_gh_wrapper_app_only_refuse() {
+  echo "[gh] ERROR: agents act on GitHub only as a GitHub App; this call has no App route (${1})." >&2
+  echo "[gh] Refusing: no fallback to GH_TOKEN, GH_TOKEN_NOS/SWM/TWM, GITHUB_TOKEN or the gh keyring." >&2
+  echo "[gh] Fix: target a repo routed in gh-app-routes.conf with -R OWNER/REPO, or ask Andrew to run it." >&2
+}
+
 # gh has one active account per host (not per repo), unlike git+SSH which
 # already resolves the right identity per remote via ~/.ssh/config host
 # aliases. This keeps gh in sync with that same per-repo intent.
@@ -519,6 +536,10 @@ _gh_wrapper_sync_identity() {
   _gh_wrapper_app_token=""
   owner="$(_gh_wrapper_resolve_owner "$@")"
   if [[ -z "${owner}" ]]; then
+    if _gh_wrapper_app_only; then
+      _gh_wrapper_app_only_refuse "no owner resolved"
+      return 1
+    fi
     local fb_rc=0
     _gh_wrapper_scoped_fallback "no owner resolved" || fb_rc=$?
     [[ "${fb_rc}" -eq 1 ]] && return 1
@@ -536,12 +557,17 @@ _gh_wrapper_sync_identity() {
       _gh_wrapper_app_token=""
       echo "[gh] ERROR: this repo is routed to a GitHub App (gh-app-routes.conf), but no App token could be minted." >&2
       echo "[gh] Failing closed: a routed repo never falls back to a personal token. Check: gh-app-token.sh check <repo>" >&2
+      _gh_wrapper_app_only && _gh_wrapper_app_only_refuse "App token mint failed"
       return 1
     fi
     _gh_wrapper_token_var="_gh_wrapper_app_token"
     return 0
   elif [[ "${route_rc}" -ne 1 ]]; then
     echo "[gh] ERROR: cannot tell whether this repo is routed to a GitHub App; failing closed." >&2
+    _gh_wrapper_app_only && _gh_wrapper_app_only_refuse "route for '${owner}' is malformed"
+    return 1
+  elif _gh_wrapper_app_only; then
+    _gh_wrapper_app_only_refuse "no gh-app-routes.conf line matches this ${owner} target"
     return 1
   fi
 
@@ -2285,7 +2311,7 @@ else
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file, as functions.sh arranges on purpose.
   # Variables set at source time must stay exported for the same reason.
-  export -f gh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_resolve_target _gh_wrapper_app_route _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback _gh_wrapper_check_labels _gh_wrapper_label_repo _gh_wrapper_within_one_edit _gh_wrapper_label_near _gh_wrapper_label_interactive _gh_wrapper_real_gh_selected _gh_wrapper_label_choose
+  export -f gh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_resolve_target _gh_wrapper_app_route _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback _gh_wrapper_app_only _gh_wrapper_app_only_refuse _gh_wrapper_check_labels _gh_wrapper_label_repo _gh_wrapper_within_one_edit _gh_wrapper_label_near _gh_wrapper_label_interactive _gh_wrapper_real_gh_selected _gh_wrapper_label_choose
   # The exported path helper reads _gh_wrapper_review_script with no default; CLAUDECODE ignores it.
   export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _gh_wrapper_app_minter
 fi
