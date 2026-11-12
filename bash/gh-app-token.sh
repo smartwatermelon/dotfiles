@@ -3,7 +3,7 @@
 # shellcheck shell=bash
 
 # GitHub App tokens for routed repos (claude-config#659). Design: dev-env specs/2026-10-01-agent-github-app-design.md
-# The key comes from the macOS login Keychain, or from 1Password where the Keychain has none (see --help).
+# The key comes from the macOS login Keychain, a key file, or 1Password, in that order (see --help).
 
 # Usage text, printed by --help. Kept out of comments so it can say enough.
 _gh_app_usage() {
@@ -40,8 +40,12 @@ else from `op read <item>/<field>`. The private_key comes from the login Keychai
 first: a generic password with service = the item minus op://<vault>/
 (op://Automation/my app -> "my app") and account = the current user (id -un).
 security -w prints a multi-line PEM as hex; that is decoded. If the Keychain has no
-such item, the key comes from `op read <item>/private_key`, then <item>/private_key.pem
-(an attachment named private_key; the 1Password app adds the extension).
+such item, the key comes from the key file $GH_APP_KEY_DIR/<service>.pem (default
+~/.config/gh-app-keys), for a host whose job has no unlocked login Keychain (cron
+with no GUI login). The file must be a regular file owned by this user, mode 600 or
+400, holding a PEM; any other file there stops the mint. With no file, the key comes
+from `op read <item>/private_key`, then <item>/private_key.pem (an attachment named
+private_key; the 1Password app adds the extension).
 
 Cache: ${XDG_CACHE_HOME:-~/.cache}/gh-app-tokens (dir 0700, files 0600), one file per
 item. A token is reused until 5 minutes before mint time + 1 hour.
@@ -247,6 +251,42 @@ _gh_app_keychain_key() {
   out=""
 }
 
+# Key file for an item: <dir>/<Keychain service>.pem. For a host whose job has no unlocked login Keychain.
+_gh_app_key_file() {
+  local svc
+  svc="$(_gh_app_keychain_service "$1")" || return 1
+  printf '%s/%s.pem\n' "${GH_APP_KEY_DIR:-${HOME}/.config/gh-app-keys}" "${svc}"
+}
+
+# Print the key from the key file. Exit 1 no file; 2 a file that is unsafe or holds no PEM (the caller stops).
+_gh_app_file_key() {
+  local file mode out me
+  file="$(_gh_app_key_file "$1")" || return 1
+  [[ -e "${file}" || -L "${file}" ]] || return 1
+  if [[ -L "${file}" || ! -f "${file}" || ! -O "${file}" ]]; then
+    me="$(id -un)" || me="this user"
+    _gh_app_err "refusing key file ${file}: not a regular file owned by ${me}"
+    return 2
+  fi
+  mode="$(stat -c %a "${file}" 2>/dev/null || stat -f %Lp "${file}" 2>/dev/null)" || mode="?"
+  if [[ "${mode}" != 600 && "${mode}" != 400 ]]; then
+    _gh_app_err "refusing key file ${file}: mode ${mode}; it must be 600 or 400"
+    return 2
+  fi
+  # Unreadable (a sandbox read-deny on this folder): treat as no file, so an agent session keeps the op path.
+  if ! out="$(cat -- "${file}" 2>/dev/null)"; then
+    _gh_app_err "key file ${file} is not readable here; trying 1Password"
+    return 1
+  fi
+  if [[ "${out}" != -----BEGIN* ]]; then
+    out=""
+    _gh_app_err "refusing key file ${file}: it does not hold a PEM key"
+    return 2
+  fi
+  printf '%s\n' "${out}"
+  out=""
+}
+
 # Keyed on a hash of the whole item, so two items can never share a cache file.
 _gh_app_cache_file() {
   local key
@@ -301,7 +341,7 @@ _gh_app_write_pem() {
 
 # Mint a token for an item and cache it. Prints the token.
 _gh_app_mint() {
-  local item="$1" app_id inst_id raw keyfile now header payload sig jwt resp tok status msg rc=0 svc acct
+  local item="$1" app_id inst_id raw keyfile now header payload sig jwt resp tok status msg rc=0 svc acct frc kf
   app_id="$(_gh_app_id "${item}" app_id)" || rc=$?
   if ((rc != 0)); then
     _gh_app_err "cannot read app_id from ${item} (route line or 1Password)"
@@ -312,16 +352,25 @@ _gh_app_mint() {
     _gh_app_err "cannot read installation_id from ${item} (route line or 1Password)"
     return "${rc}"
   fi
-  # The login Keychain first (dotfiles#450); where it has no item, 1Password. A missing item fails at once, no dialog.
+  # The login Keychain first (dotfiles#450), then the key file, then 1Password. A missing item fails at once, no dialog.
   if ! raw="$(_gh_app_keychain_key "${item}")" || [[ "${raw}" != -----BEGIN* ]]; then
+    frc=0
+    raw="$(_gh_app_file_key "${item}")" || frc=$?
+    # A key file that is there but unsafe stops here: falling through to op could prompt where no one is.
+    if ((frc == 2)); then
+      raw=""
+      return 1
+    fi
     # The 1Password app appends ".pem" to an attachment renamed private_key, so try that name second.
-    if { ! raw="$(_gh_app_op_read "${item}/private_key")" || [[ "${raw}" != -----BEGIN* ]]; } \
+    if ((frc != 0)) \
+      && { ! raw="$(_gh_app_op_read "${item}/private_key")" || [[ "${raw}" != -----BEGIN* ]]; } \
       && { ! raw="$(_gh_app_op_read "${item}/private_key.pem")" || [[ "${raw}" != -----BEGIN* ]]; }; then
       raw=""
       svc="$(_gh_app_keychain_service "${item}")" || svc="?"
       acct="$(id -un)" || acct="?"
-      _gh_app_err "cannot read a PEM private_key from the macOS Keychain (service '${svc}', account '${acct}')" \
-        "or from ${item} (1Password)"
+      kf="$(_gh_app_key_file "${item}")" || kf="the key file"
+      _gh_app_err "cannot read a PEM private_key from the macOS Keychain (service '${svc}', account '${acct}')," \
+        "from ${kf}, or from ${item} (1Password)"
       return 1
     fi
   fi
