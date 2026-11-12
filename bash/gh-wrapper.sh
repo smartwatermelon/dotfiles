@@ -60,6 +60,9 @@ fi
 _gh_wrapper_app_minter="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null)" || _gh_wrapper_app_minter="${BASH_SOURCE[0]}"
 _gh_wrapper_app_minter="${_gh_wrapper_app_minter%/*}/gh-app-token.sh"
 
+# Exported: an imported function's BASH_SOURCE[0] is "environment".
+_gh_wrapper_real_self="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null)" || _gh_wrapper_real_self=""
+
 # Deliberately NOT defaulted from ${HOME} here. This file is sourced once, but
 # ${HOME} at source time is not necessarily ${HOME} at call time: anything that
 # reassigns HOME afterwards -- test harnesses above all -- would still get the
@@ -714,11 +717,14 @@ _gh_wrapper_sync_identity() {
   _gh_wrapper_token_var="_gh_wrapper_keyring_token"
 }
 
-# Find the real `gh` binary, skipping ourselves. Only meaningful in
-# standalone-wrapper mode.
+# Find the real `gh` on PATH, skipping this file. With no path to skip, ~/.local/bin/gh (this file) would win.
 _gh_wrapper_find_real_gh() {
-  local self
-  self="$(realpath "${BASH_SOURCE[0]}")"
+  local self="${_gh_wrapper_real_self:-}" here
+  here="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  if [[ -z "${self}" && -z "${here}" ]]; then
+    printf '[gh-wrapper] Error: cannot resolve the wrapper path to skip it on PATH\n' >&2
+    return 1
+  fi
 
   local IFS=':'
   local dir candidate candidate_real
@@ -726,7 +732,7 @@ _gh_wrapper_find_real_gh() {
     candidate="${dir}/gh"
     if [[ -x "${candidate}" ]]; then
       candidate_real="$(realpath "${candidate}" 2>/dev/null || true)"
-      if [[ -n "${candidate_real}" ]] && [[ "${candidate_real}" != "${self}" ]]; then
+      if [[ -n "${candidate_real}" && "${candidate_real}" != "${self}" && "${candidate_real}" != "${here}" ]]; then
         printf '%s\n' "${candidate}"
         return 0
       fi
@@ -2313,5 +2319,5 @@ else
   # Variables set at source time must stay exported for the same reason.
   export -f gh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_resolve_target _gh_wrapper_app_route _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback _gh_wrapper_app_only _gh_wrapper_app_only_refuse _gh_wrapper_check_labels _gh_wrapper_label_repo _gh_wrapper_within_one_edit _gh_wrapper_label_near _gh_wrapper_label_interactive _gh_wrapper_real_gh_selected _gh_wrapper_label_choose
   # The exported path helper reads _gh_wrapper_review_script with no default; CLAUDECODE ignores it.
-  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _gh_wrapper_app_minter
+  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _gh_wrapper_app_minter _gh_wrapper_real_self
 fi

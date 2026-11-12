@@ -1546,12 +1546,13 @@ fi
 # ~/.local/bin/gh wrapper when symlinked and executed directly. See that
 # file for how the two modes interoperate.
 #
-# The skip also needs sugh and the Beacon default to match this shell.
+# The skip also needs sugh, the Beacon default and _gh_wrapper_real_self.
 
 if _bash_wrapper_inherited "${HOME}/.config/bash/gh-wrapper.sh" _gh_wrapper_app_minter \
   gh _gh_wrapper_find_real_gh _gh_wrapper_maybe_review _gh_wrapper_block_bypass \
   _gh_wrapper_force_draft_for_off_org _gh_wrapper_sync_identity \
   && { [[ -n "${CLAUDECODE:-}" ]] || declare -F sugh >/dev/null; } \
+  && [[ -n "${_gh_wrapper_real_self:-}" ]] \
   && [[ "${_GH_WRAPPER_BEACON_DIR_DEFAULT:-}" == "${BEACON_WORKDIR:-${HOME}/Developer/beacon-biosignals}" ]]; then
   # As gh-wrapper.sh does: no sugh where CLAUDECODE is set.
   if [[ -n "${CLAUDECODE:-}" ]]; then
