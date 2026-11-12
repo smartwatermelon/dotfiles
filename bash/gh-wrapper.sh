@@ -2111,7 +2111,18 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     fi
   done
 
-  # Safe to skip all four checks when _GH_REVIEW_DONE is set: that only
+  # `gh --version` / `gh version`: real gh's output, then one line saying the
+  # wrapper ran. sugh skips this file, so its output has no such line.
+  if [[ "$#" == "1" && ("$1" == "--version" || "$1" == "version") ]]; then
+    _gh_wrapper_version_rc=0
+    REAL_GH="$(_gh_wrapper_find_real_gh)"
+    "${REAL_GH}" "$@" || _gh_wrapper_version_rc=$?
+    _gh_wrapper_version_mode=standalone
+    [[ -n "${_GH_REVIEW_DONE:-}" ]] && _gh_wrapper_version_mode=function
+    printf 'gh-wrapper: active (%s mode), real gh: %s\n' "${_gh_wrapper_version_mode}" "${REAL_GH}"
+    exit "${_gh_wrapper_version_rc}"
+  fi
+
   # happens when function mode already ran them before calling `command gh`
   # (which lands here). If a future change ever sets _GH_REVIEW_DONE before
   # running those checks in function mode, this skip becomes unsafe — keep
@@ -2220,6 +2231,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 else
   # --- Function-definition mode (sourced from functions.sh) ---
   gh() {
+    # A bare version request needs no identity routing; standalone mode adds the wrapper line.
+    if [[ "$#" == "1" && ("$1" == "--version" || "$1" == "version") ]]; then
+      _GH_REVIEW_DONE=1 command gh "$@"
+      return $?
+    fi
     # Note whether this is a help request, but the REST/GraphQL bypass block
     # below must run regardless — `gh api pulls/123/merge --help` must not
     # escape it by appending --help.
