@@ -1795,8 +1795,10 @@ hostname() {
     "${hostname_bin}" "$@"
     return
   fi
-  if [[ $# -ne 1 ]]; then
-    printf 'usage: hostname [<name>]\n' >&2
+  # LocalHostName allows only letters, digits and hyphens. Check first, so
+  # no name changes unless all four can.
+  if [[ $# -ne 1 || ! $1 =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then
+    printf 'usage: hostname [<name>] (letters, digits, hyphens)\n' >&2
     return 2
   fi
   local name="$1" sudo_bin="${_HOSTNAME_SUDO_BIN:-sudo}" key

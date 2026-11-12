@@ -95,13 +95,25 @@ check "exit status 5" "5" "${rc}"
 check "stops after failure" "scutil --set HostName newbox
 scutil --set LocalHostName newbox" "$(<"${SUDO_LOG}")"
 
-echo "Test 5: two names print usage, return 2, run nothing"
+echo "Test 5: bad input prints usage, returns 2, runs nothing"
+for args in "a b" "my.box" "my_box" "box-" "box;id"; do
+  reset_logs
+  rc=0
+  # Split on spaces so "a b" arrives as two arguments.
+  read -r -a argv <<<"${args}"
+  err="$(hostname "${argv[@]}" 2>&1 >/dev/null)" || rc=$?
+  check "[${args}] returns 2" "2" "${rc}"
+  check "[${args}] usage on stderr" "usage: hostname [<name>] (letters, digits, hyphens)" "${err}"
+  check "[${args}] sudo not run" "" "$(<"${SUDO_LOG}")"
+done
+
+echo "Test 6: a name with inner hyphens is accepted"
 reset_logs
 rc=0
-err="$(hostname a b 2>&1 >/dev/null)" || rc=$?
-check "returns 2" "2" "${rc}"
-check "usage on stderr" "usage: hostname [<name>]" "${err}"
-check "sudo not run" "" "$(<"${SUDO_LOG}")"
+hostname my-box-2 || rc=$?
+check "exit 0" "0" "${rc}"
+read -r first_call <"${SUDO_LOG}"
+check "first call" "scutil --set HostName my-box-2" "${first_call}"
 
 if [[ "${fail}" -ne 0 ]]; then
   echo "FAILED"
