@@ -1786,3 +1786,23 @@ mla() {
   fi
   "${_MLA_MERGE_LOCK_BIN:-merge-lock}" auth "$1" ok
 }
+
+# hostname <name>: set all four macOS host names, via sudo. No name or a
+# flag: the real hostname. `sudo hostname` skips functions.
+hostname() {
+  local hostname_bin="${_HOSTNAME_BIN:-/bin/hostname}"
+  if [[ $# -eq 0 || $1 == -* ]]; then
+    "${hostname_bin}" "$@"
+    return
+  fi
+  if [[ $# -ne 1 ]]; then
+    printf 'usage: hostname [<name>]\n' >&2
+    return 2
+  fi
+  local name="$1" sudo_bin="${_HOSTNAME_SUDO_BIN:-sudo}" key
+  for key in HostName LocalHostName ComputerName; do
+    "${sudo_bin}" scutil --set "${key}" "${name}" || return
+  done
+  "${sudo_bin}" "${hostname_bin}" "${name}" || return
+  "${sudo_bin}" dscacheutil -flushcache
+}
