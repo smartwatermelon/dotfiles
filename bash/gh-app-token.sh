@@ -274,7 +274,10 @@ _gh_app_file_key() {
     return 2
   fi
   # Unreadable (a sandbox read-deny on this folder): treat as no file, so an agent session keeps the op path.
-  out="$(<"${file}")" 2>/dev/null || return 1
+  if ! out="$(cat -- "${file}" 2>/dev/null)"; then
+    _gh_app_err "key file ${file} is not readable here; trying 1Password"
+    return 1
+  fi
   if [[ "${out}" != -----BEGIN* ]]; then
     out=""
     _gh_app_err "refusing key file ${file}: it does not hold a PEM key"

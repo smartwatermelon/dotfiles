@@ -403,6 +403,29 @@ mkdir "${KEY_FILE}"
 _unsafe_case "as a directory" "not a regular file"
 rmdir "${KEY_FILE}"
 
+# An unreadable key file (a sandbox read-deny) counts as no file; a cat stub plays the sandbox.
+_key_file 600
+mkdir -p "${WORKDIR}/deny-bin"
+# Denies only the key file; every other cat (the op and curl stubs use it) is the real one.
+cat >"${WORKDIR}/deny-bin/cat" <<STUB_EOF
+#!/usr/bin/env bash
+for a in "\$@"; do
+  [[ "\${a}" == "${KEY_FILE}" ]] && { echo "cat: \${a}: Operation not permitted" >&2; exit 1; }
+done
+exec /bin/cat "\$@"
+STUB_EOF
+chmod +x "${WORKDIR}/deny-bin/cat"
+_clear_cache
+: >"${OP_LOG}"
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_NO_IDS=1 PATH="${WORKDIR}/deny-bin:${PATH}" _run --item "${ITEM}" smartwatermelon
+if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${err}" == *"not readable here"* && "${err}" != *"Operation not permitted"* ]] \
+  && grep -qxF "argv=read ${ITEM}/private_key" "${OP_LOG}"; then
+  _pass "an unreadable key file falls back to op with one notice and no raw read error"
+else
+  _fail "unreadable key file: rc=${rc} err=${err} op=$(<"${OP_LOG}")"
+fi
+rm -f "${KEY_FILE}"
+
 # GH_APP_KEY_DIR moves the file; the error for no source names the file path.
 _clear_cache
 ALT_DIR="${WORKDIR}/alt-keys"
