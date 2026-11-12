@@ -719,8 +719,11 @@ _gh_wrapper_sync_identity() {
 
 # Find the real `gh` on PATH, skipping this file. With no path to skip, ~/.local/bin/gh (this file) would win.
 _gh_wrapper_find_real_gh() {
-  local self="${_gh_wrapper_real_self:-}" here
-  here="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  local self="${_gh_wrapper_real_self:-}" here=""
+  # Not for an imported function: "environment" could name a file in the cwd.
+  if [[ "${BASH_SOURCE[0]}" != "environment" ]]; then
+    here="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  fi
   if [[ -z "${self}" && -z "${here}" ]]; then
     printf '[gh-wrapper] Error: cannot resolve the wrapper path to skip it on PATH\n' >&2
     return 1

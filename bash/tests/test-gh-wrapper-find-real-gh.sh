@@ -65,6 +65,10 @@ echo "Case: child shell with no wrapper path refuses instead of returning the wr
 got=$(in_child_shell "unset _gh_wrapper_real_self; _gh_wrapper_find_real_gh; echo rc=\$?") || true
 check "no path to skip" "rc=1" "${got}"
 
+echo "Case: a file named environment in the cwd does not count as the wrapper path"
+got=$(in_child_shell "cd '${TMP}' && touch environment && unset _gh_wrapper_real_self; _gh_wrapper_find_real_gh; echo rc=\$?") || true
+check "environment file in cwd" "rc=1" "${got}"
+
 if [[ "${fail}" == "0" ]]; then
   echo "test-gh-wrapper-find-real-gh: all cases passed"
 else
