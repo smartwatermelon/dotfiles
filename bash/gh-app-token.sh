@@ -273,7 +273,8 @@ _gh_app_file_key() {
     _gh_app_err "refusing key file ${file}: mode ${mode}; it must be 600 or 400"
     return 2
   fi
-  out="$(<"${file}")" || return 2
+  # Unreadable (a sandbox read-deny on this folder): treat as no file, so an agent session keeps the op path.
+  out="$(<"${file}")" 2>/dev/null || return 1
   if [[ "${out}" != -----BEGIN* ]]; then
     out=""
     _gh_app_err "refusing key file ${file}: it does not hold a PEM key"
