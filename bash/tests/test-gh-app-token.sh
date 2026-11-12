@@ -345,6 +345,81 @@ else
   _fail "pem attachment: rc=${rc} err=${err} op=$(<"${OP_LOG}")"
 fi
 
+echo "--- key file (between the Keychain and op)"
+KEY_DIR="${HOME}/.config/gh-app-keys"
+KEY_FILE="${KEY_DIR}/test app.pem"
+mkdir -p "${KEY_DIR}"
+_key_file() { (umask 077 && cp "${WORKDIR}/key.pem" "${KEY_FILE}") && chmod "$1" "${KEY_FILE}"; }
+
+# No Keychain item, a mode-600 key file: the file supplies the key and op is never called.
+for m in 600 400; do
+  _clear_cache
+  : >"${OP_LOG}"
+  rm -f "${KEY_FILE}"
+  _key_file "${m}"
+  GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" _run --item "${ITEM}" smartwatermelon
+  if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${mints}" == 1 && ! -s "${OP_LOG}" ]] \
+    && grep -q '^jwt=ok' "${CURL_LOG}"; then
+    _pass "a mode-${m} key file mints a token and op is never called"
+  else
+    _fail "key file ${m}: rc=${rc} err=${err} op=$(<"${OP_LOG}")"
+  fi
+done
+
+# The Keychain still wins over the file: the file is not read when the Keychain answers.
+_clear_cache
+: >"${OP_LOG}"
+printf 'not a key\n' >"${KEY_FILE}"
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" SEC_MODE=plain _run --item "${ITEM}" smartwatermelon
+if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" && "${mints}" == 1 && ! -s "${OP_LOG}" ]]; then
+  _pass "a Keychain item is used before the key file"
+else
+  _fail "Keychain before file: rc=${rc} err=${err}"
+fi
+
+# An unsafe or bad key file stops the mint: no op fallback (it could prompt), no network call.
+_unsafe_case() {
+  local label="$1" want="$2"
+  _clear_cache
+  : >"${OP_LOG}"
+  GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" _run --item "${ITEM}" smartwatermelon
+  if [[ "${rc}" -eq 1 && -z "${out}" && "${mints}" == 0 && ! -s "${OP_LOG}" && "${err}" == *"${want}"* ]]; then
+    _pass "key file ${label} stops the mint without op"
+  else
+    _fail "key file ${label}: rc=${rc} mints=${mints} err=${err} op=$(<"${OP_LOG}")"
+  fi
+}
+rm -f "${KEY_FILE}"
+_key_file 644
+_unsafe_case "mode 644" "mode 644"
+chmod 600 "${KEY_FILE}"
+printf 'not a key\n' >"${KEY_FILE}"
+_unsafe_case "with no PEM" "does not hold a PEM"
+rm -f "${KEY_FILE}"
+ln -s "${WORKDIR}/key.pem" "${KEY_FILE}"
+_unsafe_case "as a symlink" "not a regular file"
+rm -f "${KEY_FILE}"
+mkdir "${KEY_FILE}"
+_unsafe_case "as a directory" "not a regular file"
+rmdir "${KEY_FILE}"
+
+# GH_APP_KEY_DIR moves the file; the error for no source names the file path.
+_clear_cache
+ALT_DIR="${WORKDIR}/alt-keys"
+mkdir -p "${ALT_DIR}"
+(umask 077 && cp "${WORKDIR}/key.pem" "${ALT_DIR}/test app.pem")
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" GH_APP_KEY_DIR="${ALT_DIR}" OP_FAIL=1 _run --item "${ITEM}" smartwatermelon
+if [[ "${rc}" -eq 0 && "${out}" == "${STUB_TOK}" ]]; then _pass "GH_APP_KEY_DIR names the key folder"; else _fail "GH_APP_KEY_DIR: rc=${rc} err=${err}"; fi
+_clear_cache
+GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" OP_FAIL=1 _run --item "${ITEM}" smartwatermelon
+if [[ "${rc}" -eq 1 && "${err}" == *"${KEY_FILE}"* ]]; then
+  _pass "with no source, the error names the key file path"
+else
+  _fail "no source names file: rc=${rc} err=${err}"
+fi
+left="$(ls "${TMPDIR}")" || left="?"
+if [[ -z "${left}" ]]; then _pass "no key file left in TMPDIR after key-file mints"; else _fail "TMPDIR not empty: ${left}"; fi
+
 GH_APP_ROUTES_FILE="${FIELDS_ROUTES}" _run route smartwatermelon/claude-wrapper
 if [[ "${rc}" -eq 0 && "${out}" == "${ITEM}" ]]; then _pass "route with fields prints only the item"; else _fail "route fields: rc=${rc} out=${out}"; fi
 _run route smartwatermelon/claude-wrapper
