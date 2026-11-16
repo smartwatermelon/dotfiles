@@ -68,6 +68,84 @@ if [[ ${#permission_errors[@]} -gt 0 ]]; then
   exit 1
 fi
 
+# True if editorconfig glob $1 matches relative path $2. No "/" in $1: match
+# the basename. Uses a regex, not a shell pattern.
+_editorconfig_glob_matches() {
+  local glob="$1" target="$2" re="" c i depth=0
+  if [[ "${glob}" == */* ]]; then
+    glob="${glob#/}"
+  else
+    target="${target##*/}"
+  fi
+  for ((i = 0; i < ${#glob}; i += 1)); do
+    c="${glob:i:1}"
+    case "${c}" in
+      '*')
+        if [[ "${glob:i+1:1}" == '*' ]]; then
+          re+='.*'
+          i=$((i + 1))
+        else
+          re+='[^/]*'
+        fi
+        ;;
+      '?') re+='[^/]' ;;
+      '{')
+        re+='('
+        depth=$((depth + 1))
+        ;;
+      '}')
+        re+=')'
+        depth=$((depth - 1))
+        ;;
+      ',') if ((depth > 0)); then re+='|'; else re+=','; fi ;;
+      '[' | ']' | '-') re+="${c}" ;;
+      '!') if [[ "${re}" == *'[' ]]; then re+='^'; else re+='!'; fi ;;
+      [[:alnum:]_/]) re+="${c}" ;;
+      *) re+="\\${c}" ;;
+    esac
+  done
+  [[ "${target}" =~ ^${re}$ ]]
+}
+
+# True if an .editorconfig section matching $1 sets a shfmt key. Else shfmt
+# uses its tab default, whatever the scripts use.
+_editorconfig_states_shell_style() {
+  local dir abs header line key in_section is_root
+  local -r shfmt_key_re='^(indent_style|indent_size|shell_variant|binary_next_line|switch_case_indent|space_redirects|keep_padding|function_next_line|never_split|simplify|minify)$'
+  # CDPATH='' stops cd echoing a CDPATH match into the result (dotfiles#176).
+  dir="$(CDPATH='' cd "$(dirname "$1")" && pwd)"
+  abs="${dir}/$(basename "$1")"
+  while true; do
+    if [[ -f "${dir}/.editorconfig" ]]; then
+      header=""
+      in_section=false
+      is_root=false
+      while IFS= read -r line || [[ -n "${line}" ]]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -z "${line}" || "${line}" == [\#\;]* ]] && continue
+        if [[ "${line}" == \[*\] ]]; then
+          header="${line:1:${#line}-2}"
+          in_section=false
+          _editorconfig_glob_matches "${header}" "${abs#"${dir%/}/"}" && in_section=true
+          continue
+        fi
+        key="${line%%=*}"
+        key="${key%"${key##*[![:space:]]}"}"
+        key="${key,,}"
+        if [[ -z "${header}" && "${key}" == "root" ]]; then
+          [[ "${line,,}" =~ =[[:space:]]*true$ ]] && is_root=true
+        elif ${in_section} && [[ "${key}" =~ ${shfmt_key_re} ]]; then
+          return 0
+        fi
+      done <"${dir}/.editorconfig"
+      ${is_root} && return 1
+    fi
+    [[ "${dir}" == "/" ]] && return 1
+    dir="$(dirname "${dir}")"
+  done
+}
+
 # =========================================================
 # SHELLCHECK AND SHFMT PROCESSING
 # =========================================================
@@ -123,24 +201,12 @@ for f in "$@"; do
   # --- shfmt ---
   if command -v shfmt >/dev/null; then
     # shfmt only consults .editorconfig when given no formatting flags; passing
-    # -i/-ci/-bn suppresses that lookup. Search upward from the file for a
-    # .editorconfig and defer to it when present; otherwise fall back to our
-    # own defaults so repos without one keep prior behavior.
+    # -i/-ci/-bn suppresses that lookup. Defer to .editorconfig only if it
+    # states a shell style.
     shfmt_flags=()
-    # CDPATH='' scopes out CDPATH for this cd so it can't resolve via CDPATH
-    # search and echo the resolved path into this command substitution
-    # (see smartwatermelon/dotfiles#176).
-    editorconfig_dir="$(CDPATH='' cd "$(dirname "${f}")" && pwd)"
     has_editorconfig=false
-    while true; do
-      if [[ -f "${editorconfig_dir}/.editorconfig" ]]; then
-        has_editorconfig=true
-        break
-      fi
-      [[ "${editorconfig_dir}" == "/" ]] && break
-      editorconfig_dir="$(dirname "${editorconfig_dir}")"
-    done
-    # No .editorconfig anywhere up to / means the repo has stated no
+    _editorconfig_states_shell_style "${f}" && has_editorconfig=true
+    # No .editorconfig with a shell style up to / means the repo has stated no
     # formatting preference. We have no authority to pick one for it: any
     # fallback style we impose can disagree with what the repo's own CI
     # enforces, and rewriting the file mid-commit turns that disagreement
@@ -206,7 +272,7 @@ if [[ ${#all_fixed[@]} -gt 0 ]]; then
   printf "  %s\n" "${all_fixed[@]}" | sort
 fi
 
-# Show formatting advisories (repos with no .editorconfig).
+# Show formatting advisories (repos with no shell style in .editorconfig).
 # Informational only - these never set has_failures and never block a commit.
 # The repo has stated no formatting preference, so this is a note for the
 # author and reviewer to reason over, not a standard to enforce.
@@ -215,9 +281,9 @@ if [[ ${#format_advisories[@]} -gt 0 ]]; then
   for f in "${!format_advisories[@]}"; do
     printf "  %s\n" "${f}"
   done | sort
-  echo "     No .editorconfig found, so this repo's format is its own to set."
+  echo "     No .editorconfig states a shell style, so this repo's format is its own to set."
   echo "     Diff vs shfmt defaults: shfmt -d <file>"
-  echo "     To adopt a style here: add an .editorconfig (then shfmt auto-fixes)."
+  echo "     To adopt a style here: add a [*.sh] section to .editorconfig (then shfmt auto-fixes)."
 fi
 
 # Check for failed files

@@ -177,6 +177,79 @@ else
   _fail "the .editorconfig was found but its style was not applied"
 fi
 
+# Cases 3b-3e: a web-only .editorconfig gave shfmt no shell keys, so it
+# re-indented 4-space scripts to tabs.
+_write_four_space() {
+  printf '%s\n' '#!/usr/bin/env bash' 'f() {' '    echo hi' '}' 'f' >"$1"
+  chmod +x "$1"
+}
+_write_web_only_editorconfig() {
+  printf '%s\n' 'root = true' '[*]' 'charset = utf-8' 'insert_final_newline = true' \
+    '[*.{yml,yaml}]' 'indent_style = space' 'indent_size = 2' \
+    '[package.json]' 'indent_size = 2' '[Makefile]' 'indent_style = tab' >"$1"
+}
+
+echo "Case: an .editorconfig with no shell section leaves scripts alone"
+d3b="${TMPROOT}/web-only-editorconfig"
+mkdir -p "${d3b}"
+_write_web_only_editorconfig "${d3b}/.editorconfig"
+_write_four_space "${d3b}/script.sh"
+before="$(cksum <"${d3b}/script.sh")"
+out3b="$(bash "${HOOK}" "${d3b}/script.sh" 2>&1)"
+rc3b=$?
+after="$(cksum <"${d3b}/script.sh")"
+if [[ "${after}" == "${before}" ]]; then
+  _pass "the 4-space script was not re-indented to tabs"
+else
+  _fail "the hook applied shfmt's tab default under a web-only .editorconfig"
+fi
+if [[ ${rc3b} -eq 0 ]] && grep -qi 'advisory' <<<"${out3b}"; then
+  _pass "the drift is an advisory and does not block"
+else
+  _fail "expected a non-blocking advisory (exit ${rc3b})"
+fi
+
+echo "Case: an extension-less section still states a shell style"
+d3c="${TMPROOT}/hook-name-section"
+mkdir -p "${d3c}"
+printf '%s\n' 'root = true' '[{pre-commit,commit-msg}]' 'indent_style = space' 'indent_size = 2' \
+  >"${d3c}/.editorconfig"
+_write_four_space "${d3c}/pre-commit"
+out3c="$(bash "${HOOK}" "${d3c}/pre-commit" 2>&1)"
+if grep -q 'Auto-fixed' <<<"${out3c}" && grep -qE '^  echo hi$' "${d3c}/pre-commit"; then
+  _pass "the hook-name section was honored (2-space indent)"
+else
+  _fail "an extension-less section was not treated as a shell style"
+fi
+
+echo "Case: a root = true file with no shell style ends the search"
+d3d="${TMPROOT}/root-stops"
+mkdir -p "${d3d}/sub"
+printf '%s\n' 'root = true' '[*.sh]' 'indent_style = space' 'indent_size = 2' >"${d3d}/.editorconfig"
+_write_web_only_editorconfig "${d3d}/sub/.editorconfig"
+_write_four_space "${d3d}/sub/script.sh"
+before="$(cksum <"${d3d}/sub/script.sh")"
+bash "${HOOK}" "${d3d}/sub/script.sh" >/dev/null 2>&1
+after="$(cksum <"${d3d}/sub/script.sh")"
+if [[ "${after}" == "${before}" ]]; then
+  _pass "the parent's [*.sh] did not apply past root = true"
+else
+  _fail "the search continued past a root = true .editorconfig"
+fi
+
+echo "Case: a non-root file with no shell style defers to its parent"
+d3e="${TMPROOT}/parent-applies"
+mkdir -p "${d3e}/sub"
+printf '%s\n' 'root = true' '[*.sh]' 'indent_style = space' 'indent_size = 2' >"${d3e}/.editorconfig"
+printf '%s\n' '[*.md]' 'indent_size = 4' >"${d3e}/sub/.editorconfig"
+_write_four_space "${d3e}/sub/script.sh"
+bash "${HOOK}" "${d3e}/sub/script.sh" >/dev/null 2>&1
+if grep -qE '^  echo hi$' "${d3e}/sub/script.sh"; then
+  _pass "the parent's [*.sh] style was applied"
+else
+  _fail "a non-root .editorconfig hid the parent's shell style"
+fi
+
 # ---------------------------------------------------------------
 # Case 4: dotfiles states its own preference
 # ---------------------------------------------------------------
