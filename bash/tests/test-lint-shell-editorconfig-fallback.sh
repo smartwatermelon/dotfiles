@@ -186,7 +186,8 @@ _write_four_space() {
 _write_web_only_editorconfig() {
   printf '%s\n' 'root = true' '[*]' 'charset = utf-8' 'insert_final_newline = true' \
     '[*.{yml,yaml}]' 'indent_style = space' 'indent_size = 2' \
-    '[package.json]' 'indent_size = 2' '[Makefile]' 'indent_style = tab' >"$1"
+    '[package.json]' 'indent_size = 2' '[Makefile]' 'indent_style = tab' \
+    '[src/**.ts]' 'indent_size = 4' >"$1"
 }
 
 echo "Case: an .editorconfig with no shell section leaves scripts alone"
