@@ -316,6 +316,84 @@ stage "${R}" vendor/lib.py "# ${C150}"$'\nx = 2\n'
 run_hook "${R}"
 expect "per-path exemption passes and prints the skipped line" 0 "length-caps: skipped vendor/lib.py (length-caps=off in .gitattributes)"
 
+# --- generated files: linguist-generated in a tracked .gitattributes ----------
+for spec in 'linguist-generated' 'linguist-generated=true'; do
+  R="$(new_repo "gen-${#spec}")"
+  printf 'gen/** %s\n' "${spec}" >"${R}/.gitattributes"
+  git -C "${R}" add .gitattributes
+  mkdir "${R}/gen"
+  stage "${R}" gen/types.py "# ${C150}"$'\nx = 2\n'
+  run_hook "${R}"
+  expect "'${spec}' file passes and prints the skip" 0 "length-caps: skipped gen/types.py (linguist-generated in .gitattributes)"
+  stage "${R}" other.py "# ${C150}"$'\nx = 2\n'
+  run_hook "${R}"
+  expect "'${spec}': an unmarked file beside it still fails" 1 "other.py:1:"
+done
+for spec in 'linguist-generated=false' '-linguist-generated' '!linguist-generated'; do
+  norm_n=$((norm_n + 1))
+  R="$(new_repo "gen-not-${norm_n}")"
+  printf 'gen.py %s\n' "${spec}" >"${R}/.gitattributes"
+  git -C "${R}" add .gitattributes
+  stage "${R}" gen.py "# ${C150}"$'\nx = 2\n'
+  run_hook "${R}"
+  expect "'${spec}' does not exempt" 1 "gen.py:1:"
+done
+R="$(new_repo gen-unstaged)"
+printf 'gen.py linguist-generated\n' >"${R}/.gitattributes"
+stage "${R}" gen.py "# ${C150}"$'\nx = 2\n'
+run_hook "${R}"
+expect "linguist-generated in an untracked .gitattributes is not honored" 1 "gen.py:1:"
+R="$(new_repo gen-attrfile)"
+printf 'gen.py linguist-generated\n' >"${SANDBOX}/gen-global-attrs"
+git -C "${R}" config core.attributesFile "${SANDBOX}/gen-global-attrs"
+stage "${R}" gen.py "# ${C150}"$'\nx = 2\n'
+run_hook "${R}"
+expect "linguist-generated in core.attributesFile is not honored" 1 "gen.py:1:"
+R="$(new_repo gen-info)"
+printf 'gen.py linguist-generated\n' >"${R}/.git/info/attributes"
+stage "${R}" gen.py "# ${C150}"$'\nx = 2\n'
+run_hook "${R}"
+expect "linguist-generated in info/attributes is not honored" 1 "generated files are checked this run"
+# A repo-wide marker is the repo's setting, not ours: ignored, not fatal.
+for pat in '*' '**' '/**'; do
+  norm_n=$((norm_n + 1))
+  R="$(new_repo "gen-every-${norm_n}")"
+  printf '%s linguist-generated\n' "${pat}" >"${R}/.gitattributes"
+  git -C "${R}" add .gitattributes
+  stage "${R}" a.py "# ${C150}"$'\nx = 2\n'
+  run_hook "${R}"
+  expect "'${pat} linguist-generated' is ignored: the file is still checked" 1 "a.py:1:"
+  stage "${R}" a.py "# ${C100}"$'\nx = 2\n'
+  run_hook "${R}"
+  expect "'${pat} linguist-generated' does not fail a clean commit" 0 "generated files are checked this run"
+done
+R="$(new_repo gen-macro)"
+printf '[attr]gen linguist-generated\n* gen\n' >"${R}/.gitattributes"
+git -C "${R}" add .gitattributes
+stage "${R}" a.py "# ${C150}"$'\nx = 2\n'
+run_hook "${R}"
+expect "a macro that sets linguist-generated is ignored" 1 "a.py:1:"
+R="$(new_repo gen-comment)"
+printf '# gen/** linguist-generated is how to mark one\ngen/** linguist-generated\n' >"${R}/.gitattributes"
+git -C "${R}" add .gitattributes
+mkdir "${R}/gen"
+stage "${R}" gen/types.py "# ${C150}"$'\nx = 2\n'
+run_hook "${R}"
+expect "a .gitattributes comment naming linguist-generated is not a marker" 0 "skipped gen/types.py"
+R="$(new_repo gen-and-off)"
+printf 'both.py linguist-generated length-caps=off\n' >"${R}/.gitattributes"
+git -C "${R}" add .gitattributes
+stage "${R}" both.py "# ${C150}"$'\nx = 2\n'
+run_hook "${R}"
+expect "a file with both markers passes" 0 "skipped both.py"
+n_skip="$(grep -c 'skipped both.py' <<<"${OUT}" || true)"
+if [[ "${n_skip}" == "1" ]]; then
+  echo "PASS: a file with both markers is reported once"
+else
+  echo "FAIL: a file with both markers is reported once — got ${n_skip}: ${OUT}"
+  fail=1
+fi
+
 # --- failure messages: human bypass only ---------------------------------------
 R="$(new_repo msg)"
 stage "${R}" a.py "# ${C150}"$'\nx = 2\n'

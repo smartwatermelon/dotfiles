@@ -149,7 +149,8 @@ repos:
   # one commit, or `<glob> length-caps=off` in a tracked .gitattributes (read from
   # the index; info/attributes and core.attributesFile do not count; a line on
   # an all-files pattern is refused; exempted paths are printed on every run)
-  # for a file whose comments are not yours. See lint-length.sh.
+  # for a file whose comments are not yours. Files a tracked .gitattributes
+  # marks linguist-generated are skipped too. See lint-length.sh.
 
   # Fails closed, naming the fix, until install.sh --sync links the script.
   - repo: local

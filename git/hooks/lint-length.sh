@@ -35,6 +35,9 @@
 #                  would exempt a whole repo). Every exempted path is printed
 #                  to stderr on every run.
 #
+# GENERATED FILES: a tracked `linguist-generated` (set or true) skips a file.
+# A repo-wide, macro or info/attributes one is ignored, not fatal.
+#
 # A merge, cherry-pick or revert in progress is not checked: its diff is other
 # people's commits, resolved, not text written for this commit.
 #
@@ -103,11 +106,15 @@ main() {
   fi
 
   # info/attributes never appears in a diff, so it cannot carry an exemption.
-  local info
+  local info gen_ok=1
   for info in "$(git rev-parse --path-format=absolute --git-path info/attributes)" "${git_dir}/info/attributes"; do
     if [[ -f "${info}" ]] && grep -q 'length-caps' "${info}"; then
       echo "length-caps: ${info} sets length-caps. An exemption must live in a tracked .gitattributes, where a diff shows it." >&2
       exit 1
+    fi
+    if [[ "${gen_ok}" == "1" && -f "${info}" ]] && grep -q 'linguist-generated' "${info}"; then
+      gen_ok=0
+      echo "length-caps: ${info} sets linguist-generated, so generated files are checked this run." >&2
     fi
   done
 
@@ -121,6 +128,15 @@ main() {
       read -r pat rest <<<"${line}"
       read -r -a toks <<<"${rest}"
       for tok in "${toks[@]}"; do
+        if [[ "${gen_ok}" == "1" && "${pat}" != '#'* && ("${tok}" == "linguist-generated" || "${tok}" == "linguist-generated=true") ]]; then
+          every=0
+          [[ "${pat}" == '[attr]'* ]] || _every_file "${pat}" || every=$?
+          if [[ "${every}" != "1" ]]; then
+            gen_ok=0
+            echo "length-caps: ${ga} sets linguist-generated on '${pat}', which may cover every file, so generated files are checked this run." >&2
+          fi
+          continue
+        fi
         [[ "${tok}" == "length-caps=off" ]] || continue
         every=0
         _every_file "${pat}" || every=$?
@@ -135,22 +151,28 @@ main() {
     done < <(git show ":${ga}")
   done < <(git ls-files -z -- '*.gitattributes')
 
-  # Files opted out with `length-caps=off` become exclude pathspecs. Only the
-  # index's .gitattributes files are consulted.
+  # Files with `length-caps=off` or `linguist-generated` become exclude
+  # pathspecs. Only the index's .gitattributes files count.
   local -a excludes=()
-  local path val
+  local path attr val last=""
   local -a staged=()
   while IFS= read -r -d '' path; do
     staged+=("${path}")
   done < <(git diff --cached --name-only -M -z)
   if [[ "${#staged[@]}" -gt 0 ]]; then
-    # Output is <path> NUL <attr> NUL <value> NUL per input path.
-    while IFS= read -r -d '' path && IFS= read -r -d '' _ && IFS= read -r -d '' val; do
-      if [[ "${val}" == "off" ]]; then
-        excludes+=(":(top,exclude,literal)${path}")
+    # Output is <path> NUL <attr> NUL <value> NUL per path and attribute.
+    while IFS= read -r -d '' path && IFS= read -r -d '' attr && IFS= read -r -d '' val; do
+      [[ "${path}" == "${last}" ]] && continue
+      if [[ "${attr}" == "length-caps" && "${val}" == "off" ]]; then
         echo "length-caps: skipped ${path} (length-caps=off in .gitattributes)" >&2
+      elif [[ "${gen_ok}" == "1" && "${attr}" == "linguist-generated" && ("${val}" == "set" || "${val}" == "true") ]]; then
+        echo "length-caps: skipped ${path} (linguist-generated in .gitattributes)" >&2
+      else
+        continue
       fi
-    done < <(printf '%s\0' "${staged[@]}" | GIT_ATTR_NOSYSTEM=1 git -c core.attributesFile=/dev/null check-attr -z --cached --stdin length-caps)
+      excludes+=(":(top,exclude,literal)${path}")
+      last="${path}"
+    done < <(printf '%s\0' "${staged[@]}" | GIT_ATTR_NOSYSTEM=1 git -c core.attributesFile=/dev/null check-attr -z --cached --stdin length-caps linguist-generated)
   fi
 
   git diff --cached -U0 --no-color --no-ext-diff -M \
