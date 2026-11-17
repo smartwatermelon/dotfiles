@@ -88,6 +88,11 @@ repo's own call: declare `black`, `ruff format`, or nothing in that repo's
     exempted path is printed to stderr on every run. `-diff` also silences the
     check, but hides the file from `git diff` and `git log -p`; use this
     attribute instead.
+- **Generated files**: a file a tracked `.gitattributes` marks
+  `linguist-generated` (set or `=true`) is skipped too, under the same
+  index-only rules, and printed to stderr. A marker on an all-files pattern, in
+  a macro, or in `.git/info/attributes` does not fail the commit; it turns the
+  skip off for that run, so every file is checked.
 
 ### YAML
 
