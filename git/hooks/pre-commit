@@ -84,6 +84,43 @@ fi
 # hook and the global config are deployed together by install.sh, so a
 # missing global config means a broken install — and quietly running only
 # the local config is exactly the skip this layout exists to prevent.
+#
+# Beacon exception: in a repo whose origin owner is beacon-biosignals, the
+# global pass runs only BEACON_KEEP_HOOKS. Our own linters (zizmor, flake8,
+# yamllint, ...) flagged old findings in Beacon files and pushed fixes into
+# PRs that Beacon's own config and CI never asked for. That repo's
+# .pre-commit-config.yaml and CI decide its lint. Any hook id not kept here is
+# skipped, so a linter added to the global config later is skipped too.
+BEACON_KEEP_HOOKS=(semgrep-secrets length-caps)
+
+# True when origin is github.com/beacon-biosignals/<repo>, owner in any case.
+_is_beacon_repo() {
+  local url re rc=1
+  url="$(git remote get-url origin 2>/dev/null)" || return 1
+  re='^(git@github\.com:|(ssh|https?|git)://([^@/]+@)?github\.com(:[0-9]+)?/)([^/]+)/[^/]+$'
+  [[ "${url}" =~ ${re} ]] || return 1
+  shopt -s nocasematch
+  [[ "${BASH_REMATCH[5]}" == "beacon-biosignals" ]] && rc=0
+  shopt -u nocasematch
+  return "${rc}"
+}
+
+# Prints, comma-joined, every "- id:" in config $1 not in BEACON_KEEP_HOOKS.
+# Bash only: no grep or sed, so it works with any PATH.
+_beacon_skip_ids() {
+  local line id keep out=""
+  local re='^[[:space:]]*-[[:space:]]+id:[[:space:]]*["'\'']?([A-Za-z0-9_.-]+)'
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    [[ "${line}" =~ ${re} ]] || continue
+    id="${BASH_REMATCH[1]}"
+    for keep in "${BEACON_KEEP_HOOKS[@]}"; do
+      [[ "${id}" == "${keep}" ]] && continue 2
+    done
+    out="${out:+${out},}${id}"
+  done <"$1"
+  printf '%s' "${out}"
+}
+
 run_pre_commit_configs() {
   local local_config=".pre-commit-config.yaml"
   local global_config="${HOME}/.config/pre-commit/config.yaml"
@@ -107,8 +144,16 @@ run_pre_commit_configs() {
 
   local failed=()
 
+  # SKIP is set for the global pass only; the local pass sees the caller's.
+  local global_skip="${SKIP:-}" beacon_ids=""
+  if _is_beacon_repo; then
+    beacon_ids="$(_beacon_skip_ids "${global_config}")"
+    global_skip="${global_skip:+${global_skip},}${beacon_ids}"
+    echo "[pre-commit] beacon-biosignals repo: global pass runs only ${BEACON_KEEP_HOOKS[*]}"
+  fi
+
   echo "[pre-commit] Running with global config: ${global_config}"
-  pre-commit run --config "${global_config}" "$@" || failed+=("global-config")
+  SKIP="${global_skip}" pre-commit run --config "${global_config}" "$@" || failed+=("global-config")
 
   if [[ -f "${local_config}" ]]; then
     echo "[pre-commit] Running with repo-local config: ${local_config}"
