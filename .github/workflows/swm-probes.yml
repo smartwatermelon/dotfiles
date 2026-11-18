@@ -36,11 +36,13 @@ jobs:
           fail=0
           probe() {
             local fam="$1" host="$2" port="$3" out
-            out="$(/usr/bin/nc "${fam}" -v -z -G 3 -w 3 "${host}" "${port}" 2>&1)"
+            out="$(/usr/bin/nc "${fam}" -v -z -G 3 -w 3 "${host}" "${port}" 2>&1)" || true
             if grep -qiE 'succeeded|refused|open' <<<"${out}"; then
               echo "REACHABLE ${fam} ${host}:${port}: ${out}"; fail=1
-            else
+            elif grep -qiE 'timed out|timeout|no route|unreachable' <<<"${out}"; then
               echo "blocked ${fam} ${host}:${port}: ${out}"
+            else
+              echo "PROBE ERROR ${fam} ${host}:${port}: ${out}"; fail=1
             fi
           }
           probe -4 10.0.15.1 80
@@ -58,7 +60,6 @@ jobs:
 
   hook-env:
     runs-on: mimolette-macos
-    # Hook-env probe, job level too.
     env:
       JQ_BIN: /nonexistent
       ALLOWED_OWNERS: nobody
