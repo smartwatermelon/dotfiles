@@ -216,7 +216,11 @@ with open(sys.argv[2], "wb") as sink:
         if not data:
             break
         sink.write(data)
-os.waitpid(pid, 0)
+while os.waitpid(pid, os.WNOHANG)[0] == 0:
+    if time.monotonic() > deadline:
+        os.kill(pid, 9)
+        sys.exit("pty child did not exit")
+    time.sleep(0.1)
 ' "${RUNNER}" "${STUB_DIR}/pty.out" >/dev/null 2>&1 && cat "${STUB_DIR}/pty.out")"
 
   # Guard against a silently empty pty run: if spawning failed, every
