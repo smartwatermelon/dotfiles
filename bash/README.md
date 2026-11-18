@@ -1,5 +1,19 @@
 # Bash Configuration
 
+## Authorization reconstruction (2026-10-30)
+
+Shell aliases, function interception, TTY checks and `CLAUDECODE` are not
+human authentication or containment. In particular, the existing `clauded`
+timeout/non-TTY behavior and `suclauded` direct-binary path remain unchanged
+and must not be described as human-only enforcement. Ordinary agents must
+never use them to circumvent a denial.
+
+The replacement and retirement plan is in `smartwatermelon/dev-env` at
+`docs/plans/2026-10-30-authorization-rebuild.md`. Keep shell ergonomics and
+quality hooks here; centralize security policy and external capability
+authorization in `claude-config`. Privileged alias behavior changes only after
+the native authenticated launcher is proven and Andrew approves deployment.
+
 A modular, organized bash configuration setup for macOS development environments.
 
 ## Overview
