@@ -1,3 +1,5 @@
+HAZXOREDDD
+
 # dotfiles
 
 Unified configuration files. The repo usually lives at `~/Developer/dotfiles`, but the clone may live anywhere. `install.sh` creates per-file symlinks into `~/.config/` that point at the clone's real path.
