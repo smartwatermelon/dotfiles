@@ -192,16 +192,31 @@ echo "Case: streaming branch (stdout is a terminal)"
 if ! command -v python3 >/dev/null 2>&1; then
   echo "  SKIP: python3 not available to allocate a pty"
 else
+  # Not pty.spawn: on macOS it never returns before Python 3.10. A hang
+  # becomes the empty-run FAIL.
   streamed_out="$(python3 -c '
-import os, pty, sys
+import os, pty, select, sys, time
 
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp("bash", ["bash", sys.argv[1]])
+deadline = time.monotonic() + 60
 with open(sys.argv[2], "wb") as sink:
-    def read(fd):
-        data = os.read(fd, 1024)
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            os.kill(pid, 9)
+            sys.exit("pty run timed out")
+        if not select.select([fd], [], [], left)[0]:
+            continue
+        try:
+            data = os.read(fd, 1024)
+        except OSError:
+            break
+        if not data:
+            break
         sink.write(data)
-        return data
-
-    pty.spawn(["bash", sys.argv[1]], read)
+os.waitpid(pid, 0)
 ' "${RUNNER}" "${STUB_DIR}/pty.out" >/dev/null 2>&1 && cat "${STUB_DIR}/pty.out")"
 
   # Guard against a silently empty pty run: if spawning failed, every
