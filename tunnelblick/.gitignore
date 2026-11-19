@@ -1,0 +1,11 @@
+# The real VPNConfig.ovpn holds the TLS auth key, the CA, the server
+# hostname, and the port. This repo is public - DO NOT COMMIT IT.
+# Built .tblk bundles contain that same file. Whitelist only.
+*
+!.gitignore
+!README.md
+!romano/
+!romano/connected.sh
+!romano/disconnected.sh
+!romano/build-tblk.sh
+!romano/VPNConfig.ovpn.example

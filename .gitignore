@@ -15,6 +15,7 @@
 !yt-dlp/
 !s/
 !gh/
+!tunnelblick/
 !docs/
 # CI workflows. Previously tracked without an allow entry (added before the
 # default-ignore rule), which meant a NEW workflow file was silently ignored.
