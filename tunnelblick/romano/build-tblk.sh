@@ -40,7 +40,17 @@ fi
 # Build beside the target, then swap, so a failed build leaves the old
 # bundle in place.
 staging="$(mktemp -d "${src_dir}/.VPNConfig.tblk.XXXXXX")"
-trap '"${RM_BIN}" -rf "${staging}"' EXIT
+old="${staging}.old"
+# On any exit before the swap finishes: put a moved-aside old bundle back,
+# then drop the staging dir.
+cleanup() {
+  if [[ -e "${old}" && ! -e "${bundle}" ]]; then
+    "${MV_BIN}" "${old}" "${bundle}" \
+      || echo "build-tblk: could not restore the old bundle; it is at ${old}" >&2
+  fi
+  "${RM_BIN}" -rf "${staging}"
+}
+trap cleanup EXIT
 resources="${staging}/Contents/Resources"
 mkdir -p "${resources}"
 cp "${ovpn}" "${resources}/VPNConfig.ovpn"
@@ -51,16 +61,10 @@ chmod 755 "${resources}/connected.sh" "${resources}/disconnected.sh"
 chmod 755 "${staging}"
 
 # Move the old bundle aside first, so a failed swap can put it back.
-old="${staging}.old"
 if [[ -e "${bundle}" ]]; then
-  "${MV_BIN}" "${bundle}" "${old}"
+  "${MV_BIN}" "${bundle}" "${old}" || die "could not move the old bundle aside."
 fi
-if ! "${MV_BIN}" "${staging}" "${bundle}"; then
-  if [[ -e "${old}" ]]; then
-    "${MV_BIN}" "${old}" "${bundle}"
-  fi
-  die "could not move the new bundle into place; the old bundle is unchanged."
-fi
+"${MV_BIN}" "${staging}" "${bundle}" || die "could not move the new bundle into place."
 trap - EXIT
 if [[ -e "${old}" ]]; then
   "${RM_BIN}" -rf "${old}"
