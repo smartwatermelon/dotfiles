@@ -50,9 +50,21 @@ chmod 644 "${resources}/VPNConfig.ovpn"
 chmod 755 "${resources}/connected.sh" "${resources}/disconnected.sh"
 chmod 755 "${staging}"
 
-"${RM_BIN}" -rf "${bundle}"
-"${MV_BIN}" "${staging}" "${bundle}"
+# Move the old bundle aside first, so a failed swap can put it back.
+old="${staging}.old"
+if [[ -e "${bundle}" ]]; then
+  "${MV_BIN}" "${bundle}" "${old}"
+fi
+if ! "${MV_BIN}" "${staging}" "${bundle}"; then
+  if [[ -e "${old}" ]]; then
+    "${MV_BIN}" "${old}" "${bundle}"
+  fi
+  die "could not move the new bundle into place; the old bundle is unchanged."
+fi
 trap - EXIT
+if [[ -e "${old}" ]]; then
+  "${RM_BIN}" -rf "${old}"
+fi
 
 echo "Built ${bundle}"
 echo "Install: open \"${bundle}\"  (choose Replace if Tunnelblick asks)"

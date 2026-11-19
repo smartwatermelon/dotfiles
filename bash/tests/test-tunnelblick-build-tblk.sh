@@ -138,4 +138,26 @@ else
   check "expired CA: old bundle kept, with the valid CA" "${got}" "valid"
 fi
 
+# 6. A failed swap puts the old bundle back. This mv fails only on the swap.
+cat >"${WORKDIR}/bin/mv-fail-swap" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  *.old) ;;
+  */.VPNConfig.tblk.*) echo "mv-fail-swap: simulated failure" >&2; exit 1 ;;
+esac
+exec "${WORKDIR}/bin/mv" "\$@"
+EOF
+chmod +x "${WORKDIR}/bin/mv-fail-swap"
+src="${WORKDIR}/swap"
+make_src "${src}" "remote vpn.example 1194" "${valid_ca}"
+rc="$(run_build "${src}")"
+check "swap: first build succeeds" "${rc}" "0"
+echo marker >"${src}/VPNConfig.tblk/Contents/Resources/marker"
+rc="$(MV_BIN="${WORKDIR}/bin/mv-fail-swap" run_build "${src}")"
+check "swap failure is reported" "${rc}" "1"
+got="$(exists "${src}/VPNConfig.tblk/Contents/Resources/marker")"
+check "swap failure: old bundle restored" "${got}" "built"
+leftovers=("${src}"/.VPNConfig.tblk.*)
+check "swap failure: no staging dir left behind" "${leftovers[*]}" "${src}/.VPNConfig.tblk.*"
+
 exit "${fail}"
