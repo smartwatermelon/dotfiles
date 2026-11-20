@@ -160,6 +160,11 @@ for rule in dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown \
     _fail "scan does not exclude ${rule}: '${args}'"
   fi
 done
+if [[ " ${args} " == *" --exclude-rule javascript.vulnerable-components.node-version-brotli.node-version-brotli "* ]]; then
+  _pass "scan excludes the node-version-brotli rule, as CI does"
+else
+  _fail "scan does not exclude node-version-brotli: '${args}'"
+fi
 got="$(scan "${repo}" 2)"
 expect "infra failure is advisory outside strict mode" "exit0:returned" "${got}"
 got="$(scan "${WORK}/blk" 0)"
