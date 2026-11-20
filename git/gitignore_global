@@ -4,3 +4,6 @@ claude-secrets.md
 .claude/scheduled_tasks.lock
 
 **/.claude/settings.local.json
+
+# LLVM coverage profile, written to the cwd by instrumented binaries
+default.profraw
