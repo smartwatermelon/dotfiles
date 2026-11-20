@@ -95,3 +95,29 @@ if _eas_bin="$(command -v eas)"; then
   unset _eas_ac_cache
 fi
 unset _eas_bin
+
+# asana-cli completion
+# Cached like eas. Its documented setup fails in 1.0.1, so build into a
+# temp ASANA_CLI_CACHE_DIR.
+if _asana_bin="$(command -v asana-cli)"; then
+  _asana_ac_cache="${XDG_CACHE_HOME:-${HOME}/.cache}/asana-cli/autocomplete.bash"
+  if [[ ! -s "${_asana_ac_cache}" || "${_asana_bin}" -nt "${_asana_ac_cache}" ]]; then
+    mkdir -p "${_asana_ac_cache%/*}"
+    # Per-process temp dir: shells opening together must not share one.
+    _asana_ac_tmp="${_asana_ac_cache}.tmp.$$"
+    if ASANA_CLI_CACHE_DIR="${_asana_ac_tmp}" asana-cli autocomplete --refresh-cache &>/dev/null \
+      && [[ -s "${_asana_ac_tmp}/autocomplete/functions/bash/asana-cli.bash" ]]; then
+      mv -f "${_asana_ac_tmp}/autocomplete/functions/bash/asana-cli.bash" "${_asana_ac_cache}"
+    fi
+    # Delete only this shell's own temp dir, by its exact name pattern.
+    case "${_asana_ac_tmp}" in
+      */asana-cli/autocomplete.bash.tmp.[0-9]*) rm -rf "${_asana_ac_tmp}" ;;
+      *) echo "completion.sh: refusing to delete unexpected path ${_asana_ac_tmp}" >&2 ;;
+    esac
+    unset _asana_ac_tmp
+  fi
+  #shellcheck source=/dev/null
+  [[ -s "${_asana_ac_cache}" ]] && source "${_asana_ac_cache}"
+  unset _asana_ac_cache
+fi
+unset _asana_bin
