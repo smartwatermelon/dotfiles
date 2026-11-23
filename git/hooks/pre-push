@@ -213,14 +213,7 @@ protected_branch_check() {
 
     # Block direct pushes to main/master branches
     if [[ "${remote_ref}" == "refs/heads/main" || "${remote_ref}" == "refs/heads/master" ]]; then
-      echo "" >&2
-      echo "🛑 STOP: Direct pushes to '${remote_ref##*/}' are not allowed." >&2
-      echo "" >&2
-      echo "   Use the PR workflow: branch → push → PR → merge" >&2
-      echo "" >&2
-      echo "   If you REALLY need to bypass this (you probably don't):" >&2
-      echo "   OBTAIN EXPLICIT PERMISSION and then git push --no-verify" >&2
-      echo "" >&2
+      echo "🛑 Direct pushes to '${remote_ref##*/}' are not allowed. Push a branch and open a PR." >&2
       exit 1
     fi
   done
@@ -708,22 +701,14 @@ run_beacon_text_gate() {
     log_success "Beacon text gate: text approved"
     return 0
   fi
+  local b undo=""
+  for b in ${checked}; do
+    undo+="${undo:+; }gh pr ready --undo ${b}"
+  done
   {
-    echo ""
-    echo "🛑 Beacon text gate: this push adds text to a ready-for-review PR, and nobody has approved it."
-    echo ""
-    echo "   Text: ${text_file}"
-    echo ""
-    echo "   To approve it:"
-    echo "     1. ${gate} stage --kind copy <label> ${text_file}"
-    echo "     2. ${gate} open   (or Andrew replies: approve <code>)"
-    echo "     3. Push again. Approve without edits: the check matches these exact bytes."
-    echo ""
-    echo "   Or convert the PR to a draft first:"
-    local b
-    for b in ${checked}; do
-      echo "     gh pr ready --undo ${b}"
-    done
+    echo "🛑 Beacon text gate: this push adds text to a ready PR, and nobody has approved it: ${text_file}"
+    echo "   Approve: ${gate} stage --kind copy <label> ${text_file}, then ${gate} open (or approve <code>)."
+    echo "   Push again with the text unedited. Or make the PR a draft: ${undo}"
   } >&2
   exit 1
 }

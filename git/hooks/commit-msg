@@ -90,9 +90,6 @@ if ! echo "${FIRST_LINE}" | grep -qE "${PATTERN}"; then
   echo "  feat!: drop support for Node 10 (breaking change)" >&2
   echo "  feat(api)!: rename authenticate() (scoped breaking change)" >&2
   echo "" >&2
-  echo "To bypass (emergency only):" >&2
-  echo "  OBTAIN EXPLICIT PERMISSION and then git commit --no-verify" >&2
-  echo "" >&2
   exit 1
 fi
 
@@ -123,12 +120,7 @@ REVIEW_SCRIPT="${HOME}/.claude/hooks/run-review.sh"
 
 if [[ -x "${REVIEW_SCRIPT}" ]]; then
   if ! git diff --cached -U10 | "${REVIEW_SCRIPT}" --message-file="${COMMIT_MSG_FILE}"; then
-    echo "" >&2
-    echo "🛑 Commit blocked by code review." >&2
-    echo "   Address the issues above and try again." >&2
-    echo "" >&2
-    echo "   To bypass (emergency only): git commit --no-verify" >&2
-    echo "" >&2
+    echo "🛑 Commit blocked by code review. Fix the issues above, or split the change, and commit again." >&2
     exit 1
   fi
 else
