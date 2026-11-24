@@ -1104,6 +1104,58 @@ _gh_wrapper_force_draft_for_off_org() {
   return 0
 }
 
+# Atlantis repos (lowercase): a module edit there autoplans every caller.
+_GH_WRAPPER_NO_AUTOPLAN_REPOS="beacon-biosignals/infra"
+
+# Appends --label no-autoplan to `pr create` there. NUL output, as force_draft.
+_gh_wrapper_add_no_autoplan_label() {
+  local sub="" subsub="" target repo arg want="" value item
+  local -a items=()
+
+  _gh_wrapper_find_subcommand "$@"
+  if [[ "${sub}" == "pr" && ("${subsub}" == "create" || "${subsub}" == "new") ]]; then
+    target="$(_gh_wrapper_resolve_target "$@")" || target=""
+    repo="$(_gh_wrapper_label_repo "${target}")"
+    repo="${repo,,}"
+    if [[ -z "${repo}" ]]; then
+      # No -R, GH_REPO, or origin: gh itself cannot pick a repo to open the PR in either.
+      echo "[gh] WARNING: cannot tell which repository this PR targets; no-autoplan not checked." >&2
+    elif [[ " ${_GH_WRAPPER_NO_AUTOPLAN_REPOS} " == *" ${repo} "* ]]; then
+      # Already attached (repeated flag or comma list)? Then pass through as is.
+      for arg in "$@"; do
+        [[ "${arg}" == "--" ]] && break
+        value=""
+        if [[ "${want}" == "label" ]]; then
+          value="${arg}"
+          want=""
+        elif [[ "${arg}" == "--label" || "${arg}" == "-l" ]]; then
+          want="label"
+          continue
+        elif [[ "${arg}" == --label=* ]]; then
+          value="${arg#--label=}"
+        elif [[ "${arg}" == -l?* ]]; then
+          value="${arg#-l}"
+          value="${value#=}"
+        fi
+        [[ -z "${value}" ]] && continue
+        IFS=',' read -r -a items <<<"${value}"
+        for item in "${items[@]}"; do
+          if [[ "${item,,}" == "no-autoplan" ]]; then
+            printf '%s\0' "$@"
+            return 0
+          fi
+        done
+      done
+      printf '%s\0' "$@"
+      printf -- '--label\0no-autoplan\0'
+      return 0
+    fi
+  fi
+
+  [[ "$#" -gt 0 ]] && printf '%s\0' "$@"
+  return 0
+}
+
 # --- label check (#323): attached labels must exist; list --label is a filter --
 
 # owner/repo from a resolve_target value (URL, git@, HOST/o/r, o/r/pull/N). Nothing for a bare owner.
@@ -2145,6 +2197,15 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
       if ((${#_gh_wrapper_codex_merge_args[@]})); then
         set -- "${_gh_wrapper_codex_merge_args[@]}"
       fi
+      # Atlantis repos: `pr create` always carries no-autoplan. Same NUL rebuild as the draft step below.
+      if [[ "$#" -gt 0 ]]; then
+        mapfile -t -d '' _gh_wrapper_new_args < <(_gh_wrapper_add_no_autoplan_label "$@" || true)
+        if [[ "${#_gh_wrapper_new_args[@]}" -lt "$#" ]]; then
+          echo "[gh] ERROR: internal arg rebuild truncated; refusing to proceed" >&2
+          exit 1
+        fi
+        set -- "${_gh_wrapper_new_args[@]}"
+      fi
       # Attached labels must exist (#323); a near match chosen at the prompt rewrites argv.
       _gh_wrapper_label_args=()
       _gh_wrapper_label_rewritten=0
@@ -2275,6 +2336,17 @@ else
       set -- "${_gh_wrapper_codex_merge_args[@]}"
     fi
 
+    # Atlantis repos: `pr create` always carries no-autoplan. Same NUL rebuild as the draft step below.
+    if [[ "$#" -gt 0 ]]; then
+      local -a _gh_wrapper_autoplan_args=()
+      mapfile -t -d '' _gh_wrapper_autoplan_args < <(_gh_wrapper_add_no_autoplan_label "$@" || true)
+      if [[ "${#_gh_wrapper_autoplan_args[@]}" -lt "$#" ]]; then
+        echo "[gh] ERROR: internal arg rebuild truncated; refusing to proceed" >&2
+        return 1
+      fi
+      set -- "${_gh_wrapper_autoplan_args[@]}"
+    fi
+
     # Attached labels must exist (#323); a near match chosen at the prompt rewrites argv.
     local -a _gh_wrapper_label_args=()
     local _gh_wrapper_label_rewritten=0
@@ -2336,7 +2408,7 @@ else
   # these too, gh() would break in any subshell that inherits the exported
   # gh but didn't source this file, as functions.sh arranges on purpose.
   # Variables set at source time must stay exported for the same reason.
-  export -f gh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_resolve_target _gh_wrapper_app_route _gh_wrapper_force_draft_for_off_org _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback _gh_wrapper_app_only _gh_wrapper_app_only_refuse _gh_wrapper_check_labels _gh_wrapper_label_repo _gh_wrapper_within_one_edit _gh_wrapper_label_near _gh_wrapper_label_interactive _gh_wrapper_real_gh_selected _gh_wrapper_label_choose
+  export -f gh _gh_wrapper_block_bypass _gh_wrapper_block_off_org_promotion _gh_wrapper_block_graphql_pr_mutation _gh_wrapper_spec_owner _gh_wrapper_find_subcommand _gh_wrapper_owner_in_org _gh_wrapper_approval_gate _gh_wrapper_api_value_flag _gh_wrapper_api_body_fields _gh_wrapper_norm_repo _gh_wrapper_gate_destination _gh_wrapper_dest_exempt _gh_wrapper_cap_kind _gh_wrapper_maybe_review _gh_wrapper_review_script_path _gh_wrapper_sync_identity _gh_wrapper_identity_for_owner _gh_wrapper_owner_token_var _gh_wrapper_find_real_gh _gh_wrapper_resolve_owner _gh_wrapper_resolve_target _gh_wrapper_app_route _gh_wrapper_force_draft_for_off_org _gh_wrapper_add_no_autoplan_label _gh_wrapper_is_beacon_context _gh_wrapper_beacon_dir_is_explicit _gh_wrapper_keyring_login _gh_wrapper_keyring_users _gh_wrapper_resolve_switch_target _gh_wrapper_run_with_scope_hint _gh_wrapper_scope_from_file _gh_wrapper_print_scope_hint _gh_wrapper_redact_argv _gh_wrapper_redact_value _gh_wrapper_scoped_fallback _gh_wrapper_app_only _gh_wrapper_app_only_refuse _gh_wrapper_check_labels _gh_wrapper_label_repo _gh_wrapper_within_one_edit _gh_wrapper_label_near _gh_wrapper_label_interactive _gh_wrapper_real_gh_selected _gh_wrapper_label_choose
   # The exported path helper reads _gh_wrapper_review_script with no default; CLAUDECODE ignores it.
-  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _gh_wrapper_app_minter _gh_wrapper_real_self
+  export _gh_wrapper_review_script GH_WRAPPER_BEACON_DIR _GH_WRAPPER_BEACON_DIR_DEFAULT _gh_wrapper_app_minter _gh_wrapper_real_self _GH_WRAPPER_NO_AUTOPLAN_REPOS
 fi
