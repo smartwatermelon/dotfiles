@@ -1,0 +1,27 @@
+name: Watchdog drill
+
+# Watchdog drill, dev-env part 2 batch F and G. Never merged.
+# Only a reopen runs it: each reopen gives a fresh run_attempt 1.
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  # Step F: a runner restart during this sleep should be re-run once.
+  restart-drill:
+    runs-on: mimolette-macos
+    timeout-minutes: 40
+    steps:
+      - name: Sleep while the runner is restarted
+        run: sleep 1500
+
+  # Step G: shows where the routing expression sends a job.
+  route-probe:
+    runs-on: ${{ (((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) || github.actor == 'dependabot[bot]' || github.event.pull_request.user.login == 'dependabot[bot]') && 'macos-latest') || vars.SWM_MACOS_RUNNER || 'macos-latest' }}
+    timeout-minutes: 10
+    steps:
+      - name: Print the runner name
+        run: echo "runner_name=$RUNNER_NAME"
