@@ -9,10 +9,13 @@ repos:
     hooks:
       - id: semgrep-secrets
         name: "Semgrep Secrets Scan (p/secrets + p/gitleaks)"
+        # Reports only findings the commit adds, so a false positive already
+        # in HEAD does not block every later commit to that file.
         entry: >-
-          bash -c 'command -v semgrep &>/dev/null || exit 0;
+          bash -c 'command -v semgrep &>/dev/null || exit 0; base=();
+          git rev-parse --verify --quiet HEAD >/dev/null && base=(--baseline-commit HEAD);
           semgrep scan --config=p/secrets --config=p/gitleaks
-          --error --quiet --oss-only "$@"' --
+          --error --quiet --oss-only "${base[@]}" "$@"' --
         language: system
         pass_filenames: true
         exclude_types: [binary]
